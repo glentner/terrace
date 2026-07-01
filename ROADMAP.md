@@ -30,7 +30,7 @@ CI is green on Linux 3.15 and 3.15t.
       `moto[server]`; docs group: `sphinx`, `furo`; `[project.scripts] sosfs = "sosfs:main"`),
       `.python-version` (3.15 via uv), `.gitignore`, `LICENSE` (Apache-2.0), minimal
       `README.md`, `CHANGELOG.md` (Keep a Changelog, `0.1.0-dev` unreleased section)
-- [ ] `src/sosfs/core/`: `logging.py` (Logger with TRACE, `Logger.with_name`, rich console
+- [x] `src/sosfs/core/`: `logging.py` (Logger with TRACE, `Logger.with_name`, rich console
       formatting), `config.py` (cmdkit layered config: CLI > `SOSFS_*` env > `.sosfs.toml` >
       `~/.config/sosfs/config.toml` > `/etc/sosfs/config.toml` > defaults), `platform.py`
       (path conventions), `exceptions.py`
@@ -204,6 +204,8 @@ The operational surface (PLAN.md → Control channel, Audit, Deferred commit).
 - [ ] `status` command: live via socket (per-tier usage vs. quota, dirty counts, transfer
       activity; rich rendering); offline via direct DB read
 - [ ] `flush` command via socket (whole overlay or subtree)
+- [ ] `config` command: `get`/`set`/`which`/`edit` over the layered application config
+      (hypershell pattern, on the `core.config` primitives)
 - [ ] `audit` command — reconcile walk (fastest tier upstream): marker check with
       tier-evaporation attribution; residency reconcile (clean copies verified, dirty
       trusted, missing rolled back with loss report, orphans quarantined); intent
