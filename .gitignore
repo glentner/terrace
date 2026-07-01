@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+.env
+
+# Tooling caches
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Docs
+docs/_build/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Agent-local references (never committed)
+.agents/local/

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sosfs"
+version = "0.1.0.dev0"
+description = "Simple overlay service: managed data tiering for research computing over FUSE."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.15"
+authors = [
+    {name = "Geoffrey Lentner", email = "glentner@purdue.edu"},
+]
+keywords = ["fuse", "hpc", "storage", "tiering", "overlay", "filesystem", "s3"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: System :: Filesystems",
+]
+dependencies = [
+    "cmdkit[toml]>=2.7.7",
+    "mfusepy>=3.0",
+    "obstore>=0.6",
+    "rich>=13.7",
+]
+
+[project.scripts]
+sosfs = "sosfs:main"
+
+[project.urls]
+Repository = "https://github.com/glentner/simple-overlay-service"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "hypothesis>=6",
+    "moto[server]>=5",
+]
+docs = [
+    "sphinx>=8",
+    "furo",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sosfs"]

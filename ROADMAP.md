@@ -1,5 +1,5 @@
 ---
-status: not-started
+status: in-progress
 current_phase: 1
 phases_completed: []
 last_updated: 2026-07-01
@@ -25,7 +25,7 @@ Establish the package, tooling, and CI so every later phase lands in a working h
 After this phase `uv run sosfs --help` shows the full subcommand surface (all stubs) and
 CI is green on Linux 3.15 and 3.15t.
 
-- [ ] `pyproject.toml` (hatchling; `requires-python = ">=3.15"`; deps: `cmdkit[toml]`,
+- [x] `pyproject.toml` (hatchling; `requires-python = ">=3.15"`; deps: `cmdkit[toml]`,
       `mfusepy`, `obstore`, `rich`; dev group: `pytest`, `pytest-xdist`, `hypothesis`,
       `moto[server]`; docs group: `sphinx`, `furo`; `[project.scripts] sosfs = "sosfs:main"`),
       `.python-version` (3.15 via uv), `.gitignore`, `LICENSE` (Apache-2.0), minimal
