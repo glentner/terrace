@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 2
-phases_completed: ["1"]
+current_phase: 3
+phases_completed: ["1", "2"]
 last_updated: 2026-07-02
 plan_ref: "PLAN.md"
 ---
@@ -70,9 +70,9 @@ After this phase the database can represent an overlay's full state and survive 
       generation) — write, verify, mismatch detection (`state/lifecycle.py`)
 - [x] Invariant primitives: dirty-transition transaction helper (metadata-before-ack)
       and intent journal helpers (create/resolve/roll-back, temp-name conventions)
-- [ ] Unit tests: schema round-trips, WAL survival across simulated process death
+- [x] Unit tests: schema round-trips, WAL survival across simulated process death
       (subprocess `kill -9`), marker verification, intent resolution
-- [ ] **Commit (logical):** "Phase 2 — SQLite state store: schema, catalog,
+- [x] **Commit (logical):** "Phase 2 — SQLite state store: schema, catalog,
       shutdown-state flag, markers, metadata-before-ack and intent-journal primitives"
 
 
