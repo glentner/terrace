@@ -59,7 +59,7 @@ After this phase the database can represent an overlay's full state and survive 
       `archive_index`, `overlay` (UUID, generation, `shutdown_state`, mounting host)
       — plus a `tier` registry table (stack identity, marker generations, spec-drift
       detection) split from the hot `tier_usage` counters
-- [ ] `src/sosfs/state/db.py`: connection management (per-thread, WAL,
+- [x] `src/sosfs/state/db.py`: connection management (per-thread, WAL,
       `synchronous=NORMAL`, foreign keys), schema init, exclusive-lock acquisition for
       offline commands
 - [ ] `src/sosfs/state/catalog.py`: entry CRUD, path resolution, residency queries,
