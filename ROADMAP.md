@@ -40,7 +40,7 @@ CI is green on Linux 3.15 and 3.15t.
       subclasses for `mount`, `umount`, `status`, `flush`, `commit`, `audit`, `config`;
       version via `importlib.metadata`; FUSE-touching imports kept lazy so the engine
       imports cleanly on hosts without libfuse
-- [ ] `tests/` skeleton: `conftest.py` with isolated `temp_site` fixture (scrub `SOSFS_*`
+- [x] `tests/` skeleton: `conftest.py` with isolated `temp_site` fixture (scrub `SOSFS_*`
       env, tmp state dir), test helpers (`main(argv)` shell-out, `assert_output`) — strict
       `unit`/`integration` markers already wired in `pyproject.toml` (landed with units)
 - [ ] CI (GitHub Actions): uv-based; Linux matrix {3.15, 3.15t} running unit tests;

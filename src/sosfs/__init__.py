@@ -45,6 +45,7 @@ class StubApp(Application):
 
     command: str = ''
     phase: int = 0
+    ALLOW_NOARGS = True
     exceptions = get_shared_exception_mapping()
 
     def run(self) -> None:
