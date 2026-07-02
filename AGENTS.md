@@ -40,7 +40,8 @@ src/sosfs/
 ├── __init__.py        # SOSFSApp (cmdkit ApplicationGroup), main(), subcommand registry
 ├── core/              # config (layered TOML), logging (TRACE + rich), platform, units,
 │                      #   exceptions — no domain logic here
-├── state/             # schema.sql, db.py (WAL, per-thread conns), catalog.py
+├── state/             # schema.sql, db.py (WAL, per-thread conns), sql.py (t-string
+│                      #   rendering), catalog.py, lifecycle.py (dirty bit + markers)
 ├── tier/              # protocol.py (the Tier contract), posix.py, s3.py (obstore),
 │                      #   archive.py (zipfile/tarfile over an inner location)
 ├── engine/            # overlay.py (VFS-ops API — the product), writeback.py, evict.py,

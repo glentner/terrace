@@ -2,7 +2,7 @@
 status: in-progress
 current_phase: 2
 phases_completed: ["1"]
-last_updated: 2026-07-01
+last_updated: 2026-07-02
 plan_ref: "PLAN.md"
 ---
 
@@ -65,9 +65,9 @@ After this phase the database can represent an overlay's full state and survive 
 - [x] `src/sosfs/state/catalog.py`: entry CRUD, path resolution, residency queries,
       LRU atime updates — plus `state/sql.py`: PEP 750 t-string SQL rendering
       (parameter binding, `:id` identifier splicing, fragment composition)
-- [ ] `shutdown_state` transitions (`mounted` ↔ `clean`/`detached`) and mounting-host
+- [x] `shutdown_state` transitions (`mounted` ↔ `clean`/`detached`) and mounting-host
       recording; managed-location markers (`.sosfs/marker`: overlay UUID, tier name,
-      generation) — write, verify, mismatch detection
+      generation) — write, verify, mismatch detection (`state/lifecycle.py`)
 - [ ] Invariant primitives: dirty-transition transaction helper (metadata-before-ack)
       and intent journal helpers (create/resolve/roll-back, temp-name conventions)
 - [ ] Unit tests: schema round-trips, WAL survival across simulated process death
