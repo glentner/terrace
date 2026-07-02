@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, List, Optional, Protocol, Final
+from typing import Dict, Optional, Protocol, Final
 
 # Standard libs
 import os

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, wip]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+
+  unit:
+    name: Unit (Linux, ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.15', '3.15t']
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install ${{ matrix.python }}
+      - name: Install project
+        run: uv sync
+      - name: Assert free-threading is active
+        if: ${{ endsWith(matrix.python, 't') }}
+        # An extension that doesn't declare free-threaded support silently re-enables the GIL
+        run: uv run python -c "import sys, sosfs, obstore; assert not sys._is_gil_enabled(), 'GIL re-enabled'"
+      - name: Unit tests
+        run: uv run pytest -n auto -m unit
+
+  unit-macos:
+    name: Unit (macOS, engine-only)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install project
+        run: uv sync
+      - name: Unit tests
+        run: uv run pytest -n auto -m unit
+
+  checks:
+    name: Lint & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Lint (errors only)
+        run: uvx ruff check --select E9,F63,F7,F82 src tests
+      - name: Build distributions
+        run: uv build

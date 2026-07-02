@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 1
-phases_completed: []
+current_phase: 2
+phases_completed: ["1"]
 last_updated: 2026-07-01
 plan_ref: "PLAN.md"
 ---
@@ -43,9 +43,9 @@ CI is green on Linux 3.15 and 3.15t.
 - [x] `tests/` skeleton: `conftest.py` with isolated `temp_site` fixture (scrub `SOSFS_*`
       env, tmp state dir), test helpers (`main(argv)` shell-out, `assert_output`) — strict
       `unit`/`integration` markers already wired in `pyproject.toml` (landed with units)
-- [ ] CI (GitHub Actions): uv-based; Linux matrix {3.15, 3.15t} running unit tests;
+- [x] CI (GitHub Actions): uv-based; Linux matrix {3.15, 3.15t} running unit tests;
       macOS job running engine-only unit tests; lint/build check
-- [ ] **Commit (logical):** "Phase 1 — project scaffolding: package, core modules, CLI
+- [x] **Commit (logical):** "Phase 1 — project scaffolding: package, core modules, CLI
       skeleton, test harness, CI"
 
 
