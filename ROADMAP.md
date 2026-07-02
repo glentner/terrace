@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 3
-phases_completed: ["1", "2"]
+current_phase: 4
+phases_completed: ["1", "2", "3"]
 last_updated: 2026-07-02
 plan_ref: "PLAN.md"
 ---
@@ -91,9 +91,9 @@ The storage contract and its first implementation (PLAN.md → Tier protocol).
       state dir durability/scope checks)
 - [x] Quota accounting: `tier_usage` counters wired to put/delete; marker initialization
       on first tier attach
-- [ ] Unit tests: PosixTier semantics against tmpdirs, spec validation errors, counter
+- [x] Unit tests: PosixTier semantics against tmpdirs, spec validation errors, counter
       correctness under concurrent puts
-- [ ] **Commit (logical):** "Phase 3 — Tier protocol, PosixTier, overlay spec parsing,
+- [x] **Commit (logical):** "Phase 3 — Tier protocol, PosixTier, overlay spec parsing,
       quota accounting"
 
 
