@@ -89,7 +89,7 @@ The storage contract and its first implementation (PLAN.md → Tier protocol).
       (posix only for now; `role`, `scope`, `quota` incl. `bypass_size`, `writeback`
       policies via `core.units`); stack validation (exactly one source, source first,
       state dir durability/scope checks)
-- [ ] Quota accounting: `tier_usage` counters wired to put/delete; marker initialization
+- [x] Quota accounting: `tier_usage` counters wired to put/delete; marker initialization
       on first tier attach
 - [ ] Unit tests: PosixTier semantics against tmpdirs, spec validation errors, counter
       correctness under concurrent puts
