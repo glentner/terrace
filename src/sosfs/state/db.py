@@ -16,10 +16,12 @@ import threading
 from pathlib import Path
 from contextlib import contextmanager
 from importlib import resources
+from string.templatelib import Template
 
 # Internal libs
 from sosfs.core.exceptions import SOSFSError
 from sosfs.core.logging import Logger
+from sosfs.state.sql import render
 
 # Public interface
 __all__ = ['Database', 'ExclusiveLock', 'load_schema', 'SCHEMA_VERSION',
@@ -113,6 +115,11 @@ class Database:
             with self._lock:
                 self._connections[threading.get_ident()] = conn
         return conn
+
+    def execute(self, template: Template) -> sqlite3.Cursor:
+        """Execute a PEP 750 SQL template on the calling thread's connection."""
+        sql, params = render(template)
+        return self.connection.execute(sql, params)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

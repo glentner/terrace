@@ -119,6 +119,9 @@ log = Logger.with_name(__name__)
   utilities. Long-running concurrent components are FSM-driven `Thread` subclasses with
   `.stop()` and exception re-raising — no ad-hoc daemon loops.
 * Logging through `Logger.with_name(__name__)`; use TRACE for per-operation detail.
+* SQL is written as PEP 750 t-strings rendered by `sosfs.state.sql.render` (interpolations
+  bind as parameters; `{name:id}` splices whitelisted identifiers) — never hand-assemble
+  SQL strings or placeholders. Static DDL lives in `schema.sql`.
 * Comments only for constraints the code cannot express.
 
 

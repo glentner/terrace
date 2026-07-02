@@ -62,8 +62,9 @@ After this phase the database can represent an overlay's full state and survive 
 - [x] `src/sosfs/state/db.py`: connection management (per-thread, WAL,
       `synchronous=NORMAL`, foreign keys), schema init, exclusive-lock acquisition for
       offline commands
-- [ ] `src/sosfs/state/catalog.py`: entry CRUD, path resolution, residency queries,
-      LRU atime updates
+- [x] `src/sosfs/state/catalog.py`: entry CRUD, path resolution, residency queries,
+      LRU atime updates — plus `state/sql.py`: PEP 750 t-string SQL rendering
+      (parameter binding, `:id` identifier splicing, fragment composition)
 - [ ] `shutdown_state` transitions (`mounted` ↔ `clean`/`detached`) and mounting-host
       recording; managed-location markers (`.sosfs/marker`: overlay UUID, tier name,
       generation) — write, verify, mismatch detection
