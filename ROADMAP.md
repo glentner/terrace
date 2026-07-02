@@ -36,7 +36,7 @@ CI is green on Linux 3.15 and 3.15t.
       (path conventions), `exceptions.py`
 - [x] `src/sosfs/core/units.py`: size (`"10TB"`, `"512GiB"` — SI and binary suffixes),
       duration (`"60s"`, `"15m"`), and rate (`"4/day"`) parsing with unit tests
-- [ ] `src/sosfs/__init__.py`: `SOSFSApp(ApplicationGroup)` + `main()`; stub Application
+- [x] `src/sosfs/__init__.py`: `SOSFSApp(ApplicationGroup)` + `main()`; stub Application
       subclasses for `mount`, `umount`, `status`, `flush`, `commit`, `audit`, `config`;
       version via `importlib.metadata`; FUSE-touching imports kept lazy so the engine
       imports cleanly on hosts without libfuse
