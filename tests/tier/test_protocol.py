@@ -61,7 +61,7 @@ class MemoryTier:
     def delete(self, path: PurePosixPath) -> None:
         del self.files[str(path)]
 
-    def mkdir(self, path: PurePosixPath) -> None:
+    def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
         self.dirs.add(str(path))
 
     def rmdir(self, path: PurePosixPath) -> None:

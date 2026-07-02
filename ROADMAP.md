@@ -83,7 +83,7 @@ The storage contract and its first implementation (PLAN.md → Tier protocol).
 - [x] `src/sosfs/tier/protocol.py`: `Tier` protocol (`stat`, `list`, `read` with
       offset/size, `open_read`, `put`, `delete`, `mkdir`/`rmdir`/`rename`, `usage`) and
       types (`TierStat`, `TierEntry`, `TierUsage`, `FileMeta`)
-- [ ] `src/sosfs/tier/posix.py`: `PosixTier` + passthrough file handles for resident-copy
+- [x] `src/sosfs/tier/posix.py`: `PosixTier` + passthrough file handles for resident-copy
       hot I/O; atomic put via temp-name + fsync + rename
 - [ ] Overlay-spec model: parse `[overlay]` and `[[tier]]` TOML into typed configs
       (posix only for now; `role`, `scope`, `quota` incl. `bypass_size`, `writeback`
