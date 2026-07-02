@@ -102,7 +102,7 @@ The storage contract and its first implementation (PLAN.md → Tier protocol).
 The mount-free heart of the system (PLAN.md → Overlay engine). After this phase a
 multi-tier POSIX stack works end-to-end through the engine API, with no FUSE anywhere.
 
-- [ ] `src/sosfs/engine/locks.py`: per-file lock registry
+- [x] `src/sosfs/engine/locks.py`: per-file lock registry
 - [ ] `src/sosfs/engine/transfer.py`: `TransferPool` (thread executor) with
       intent-journaled copies (intent → temp+rename act → confirm)
 - [ ] `src/sosfs/engine/overlay.py` (part 1): namespace — lazy catalog population from
