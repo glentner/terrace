@@ -80,7 +80,7 @@ After this phase the database can represent an overlay's full state and survive 
 
 The storage contract and its first implementation (PLAN.md → Tier protocol).
 
-- [ ] `src/sosfs/tier/protocol.py`: `Tier` protocol (`stat`, `list`, `read` with
+- [x] `src/sosfs/tier/protocol.py`: `Tier` protocol (`stat`, `list`, `read` with
       offset/size, `open_read`, `put`, `delete`, `mkdir`/`rmdir`/`rename`, `usage`) and
       types (`TierStat`, `TierEntry`, `TierUsage`, `FileMeta`)
 - [ ] `src/sosfs/tier/posix.py`: `PosixTier` + passthrough file handles for resident-copy
