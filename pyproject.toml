@@ -52,5 +52,13 @@ docs = [
 [tool.uv]
 default-groups = ["dev"]
 
+[tool.pytest.ini_options]
+addopts = ["--strict-markers"]
+testpaths = ["tests"]
+markers = [
+    "unit: short, interface-driven tests on discrete components",
+    "integration: longer tests involving mounts or external services",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/sosfs"]

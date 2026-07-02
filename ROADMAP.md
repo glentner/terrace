@@ -34,15 +34,15 @@ CI is green on Linux 3.15 and 3.15t.
       formatting), `config.py` (cmdkit layered config: CLI > `SOSFS_*` env > `.sosfs.toml` >
       `~/.config/sosfs/config.toml` > `/etc/sosfs/config.toml` > defaults), `platform.py`
       (path conventions), `exceptions.py`
-- [ ] `src/sosfs/core/units.py`: size (`"10TB"`, `"512GiB"` — SI and binary suffixes),
+- [x] `src/sosfs/core/units.py`: size (`"10TB"`, `"512GiB"` — SI and binary suffixes),
       duration (`"60s"`, `"15m"`), and rate (`"4/day"`) parsing with unit tests
 - [ ] `src/sosfs/__init__.py`: `SOSFSApp(ApplicationGroup)` + `main()`; stub Application
       subclasses for `mount`, `umount`, `status`, `flush`, `commit`, `audit`, `config`;
       version via `importlib.metadata`; FUSE-touching imports kept lazy so the engine
       imports cleanly on hosts without libfuse
 - [ ] `tests/` skeleton: `conftest.py` with isolated `temp_site` fixture (scrub `SOSFS_*`
-      env, tmp state dir), test helpers (`main(argv)` shell-out, `assert_output`),
-      pytest strict markers (`unit`, `integration`) wired in `pyproject.toml`
+      env, tmp state dir), test helpers (`main(argv)` shell-out, `assert_output`) — strict
+      `unit`/`integration` markers already wired in `pyproject.toml` (landed with units)
 - [ ] CI (GitHub Actions): uv-based; Linux matrix {3.15, 3.15t} running unit tests;
       macOS job running engine-only unit tests; lint/build check
 - [ ] **Commit (logical):** "Phase 1 — project scaffolding: package, core modules, CLI
