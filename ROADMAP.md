@@ -68,7 +68,7 @@ After this phase the database can represent an overlay's full state and survive 
 - [x] `shutdown_state` transitions (`mounted` ↔ `clean`/`detached`) and mounting-host
       recording; managed-location markers (`.sosfs/marker`: overlay UUID, tier name,
       generation) — write, verify, mismatch detection (`state/lifecycle.py`)
-- [ ] Invariant primitives: dirty-transition transaction helper (metadata-before-ack)
+- [x] Invariant primitives: dirty-transition transaction helper (metadata-before-ack)
       and intent journal helpers (create/resolve/roll-back, temp-name conventions)
 - [ ] Unit tests: schema round-trips, WAL survival across simulated process death
       (subprocess `kill -9`), marker verification, intent resolution

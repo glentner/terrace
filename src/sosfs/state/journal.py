@@ -1,0 +1,220 @@
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
+# SPDX-License-Identifier: Apache-2.0
+
+"""Write-ordering invariant primitives: dirty transitions and the intent journal."""
+
+# Type annotations
+from __future__ import annotations
+from typing import List, Optional, Iterator, Final
+
+# Standard libs
+import json
+import sqlite3
+from dataclasses import dataclass
+from contextlib import contextmanager
+from pathlib import PurePosixPath
+
+# Internal libs
+from sosfs.core.logging import Logger
+from sosfs.state.db import Database
+from sosfs.state.catalog import normalize
+
+# Public interface
+__all__ = ['Journal', 'Intent', 'Writeback', 'ACTIONS', 'PARTIAL_DIR', 'temp_name', 'is_temp_name']
+
+# Initialize logger
+log = Logger.with_name(__name__)
+
+
+ACTIONS: Final[frozenset] = frozenset({'promote', 'commit', 'evict', 'compact', 'resync'})
+
+PARTIAL_DIR: Final[str] = '.sosfs/partial'
+
+
+def temp_name(intent_id: int, path: str) -> str:
+    """Tier-relative temp name for an intent's act phase, recognizable to the audit."""
+    return f'{PARTIAL_DIR}/{intent_id}-{PurePosixPath(normalize(path)).name}'
+
+
+def is_temp_name(name: str) -> bool:
+    """Whether a tier-relative name is a transfer temp by convention (an orphan if unjournaled)."""
+    return PurePosixPath(name).parts[:2] == ('.sosfs', 'partial')
+
+
+@dataclass(frozen=True)
+class Intent:
+    """A journaled in-flight mutation of a managed location."""
+
+    id: int
+    action: str
+    entry: Optional[int]
+    tier: str
+    temp_name: Optional[str]
+    detail: Optional[dict]
+    created: float
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Intent:
+        """Build from a database row."""
+        detail = row['detail']
+        return cls(id=row['id'], action=row['action'], entry=row['entry'], tier=row['tier'],
+                   temp_name=row['temp_name'], detail=None if detail is None else json.loads(detail),
+                   created=row['created'])
+
+
+@dataclass(frozen=True)
+class Writeback:
+    """A queued commit or namespace operation for one (entry, boundary)."""
+
+    id: int
+    entry: int
+    op: str
+    from_tier: Optional[str]
+    to_tier: str
+    detail: Optional[dict]
+    state: str
+    first_dirty: float
+    last_write: float
+    last_commit: Optional[float]
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Writeback:
+        """Build from a database row."""
+        detail = row['detail']
+        return cls(id=row['id'], entry=row['entry'], op=row['op'], from_tier=row['from_tier'],
+                   to_tier=row['to_tier'], detail=None if detail is None else json.loads(detail),
+                   state=row['state'], first_dirty=row['first_dirty'], last_write=row['last_write'],
+                   last_commit=row['last_commit'])
+
+
+class Journal:
+    """
+    The two write-ordering invariants that make the database authoritative after
+    any process death (PLAN.md -> State store):
+
+    * **Metadata before acknowledgment** — `mark_dirty` commits the clean->dirty
+      residency flip and the queued write-back as one transaction; the caller
+      acknowledges the triggering write only after it returns.
+    * **Intent journaling** — every managed-location mutation brackets its act
+      with `begin` (committed before any bytes move) and `confirm` (composed into
+      the same transaction as the metadata recording the act's effect), with the
+      act made atomic via a recognizable temp name + fsync + rename. `rollback`
+      abandons an intent whose act never took effect.
+
+    Like the catalog, single-statement methods run on the calling thread's
+    connection and multi-statement operations join a caller's open
+    `Database.transaction()`, so journal and catalog updates can commit together.
+    Timestamps are always passed in (injectable-clock convention).
+    """
+
+    def __init__(self, db: Database) -> None:
+        """Initialize over an initialized `Database`."""
+        self.db = db
+
+    @contextmanager
+    def _atomic(self) -> Iterator[sqlite3.Connection]:
+        """Join the caller's open transaction or start one for a multi-statement operation."""
+        conn = self.db.connection
+        if conn.in_transaction:
+            yield conn
+        else:
+            with self.db.transaction() as conn:
+                yield conn
+
+    def _entry_id(self, path: str) -> int:
+        """Resolve a path to its entry id or raise `LookupError`."""
+        row = self.db.execute(t'SELECT id FROM entry WHERE path = {normalize(path)}').fetchone()
+        if row is None:
+            raise LookupError(f'No such entry: {normalize(path)}')
+        return row['id']
+
+    # -- metadata before acknowledgment -------------------------------------------------------------------------
+
+    def mark_dirty(self, path: str, tier: str, *, to_tier: str, now: float) -> Writeback:
+        """
+        Record that the copy of `path` in `tier` holds new data and queue (or
+        refresh) its write-back toward `to_tier`.
+
+        The residency flip and the queue row commit as one transaction, and the
+        triggering write must not be acknowledged until this returns. Idempotent:
+        an already-dirty copy just refreshes `last_write` (and the LRU clock).
+        """
+        path = normalize(path)
+        with self._atomic():
+            entry = self._entry_id(path)
+            flipped = self.db.execute(
+                t"UPDATE residency SET state = 'dirty', atime = {now} "
+                t'WHERE entry = {entry} AND tier = {tier}')
+            if flipped.rowcount == 0:
+                raise LookupError(f'No copy of {path} in tier {tier}')
+            row = self.db.execute(
+                t'UPDATE writeback SET last_write = {now} '
+                t"WHERE entry = {entry} AND to_tier = {to_tier} AND op = 'data' RETURNING *").fetchone()
+            if row is None:
+                row = self.db.execute(
+                    t"INSERT INTO writeback (entry, op, from_tier, to_tier, first_dirty, last_write) "
+                    t"VALUES ({entry}, 'data', {tier}, {to_tier}, {now}, {now}) RETURNING *").fetchone()
+        log.trace(f'Marked dirty ({path}: {tier} -> {to_tier})')
+        return Writeback.from_row(row)
+
+    def queued(self, to_tier: Optional[str] = None) -> List[Writeback]:
+        """Queued write-back rows, oldest write first, optionally for one boundary."""
+        boundary = t'' if to_tier is None else t' AND to_tier = {to_tier}'
+        rows = self.db.execute(
+            t"SELECT * FROM writeback WHERE state = 'queued'{boundary} ORDER BY last_write")
+        return [Writeback.from_row(row) for row in rows]
+
+    # -- intent journal ------------------------------------------------------------------------------------------
+
+    def begin(self, action: str, tier: str, *, now: float, path: Optional[str] = None,
+              temp_for: Optional[str] = None, detail: Optional[dict] = None) -> Intent:
+        """
+        Journal the intent to mutate the managed location `tier`; the act may only
+        start after this returns. When `temp_for` names the destination path, a
+        recognizable temp name is assigned for the act (write-to-temp + fsync +
+        rename; atomic-per-key stores like S3 need no temp and omit it).
+        """
+        if action not in ACTIONS:
+            raise ValueError(f'Unknown intent action: {action!r}')
+        encoded = None if detail is None else json.dumps(detail, sort_keys=True)
+        with self._atomic():
+            entry = None if path is None else self._entry_id(path)
+            row = self.db.execute(
+                t'INSERT INTO intent (action, entry, tier, detail, created) '
+                t'VALUES ({action}, {entry}, {tier}, {encoded}, {now}) RETURNING *').fetchone()
+            if temp_for is not None:
+                temp = temp_name(row['id'], temp_for)
+                row = self.db.execute(
+                    t'UPDATE intent SET temp_name = {temp} WHERE id = {row["id"]} RETURNING *').fetchone()
+        intent = Intent.from_row(row)
+        log.trace(f'Intent begun (id={intent.id}, action={action}, tier={tier})')
+        return intent
+
+    def confirm(self, intent: Intent) -> None:
+        """
+        Resolve `intent`: the act completed. Call inside the same transaction as
+        the metadata recording the act's effect (e.g., the new residency row) so
+        the journal and the catalog commit together.
+        """
+        self._resolve(intent, 'confirmed')
+
+    def rollback(self, intent: Intent) -> None:
+        """
+        Abandon `intent`: the act never took effect. The caller discards the temp
+        when possible; either order is crash-safe, since an orphaned temp remains
+        recognizable by name and is discarded by the audit.
+        """
+        self._resolve(intent, 'rolled back')
+
+    def _resolve(self, intent: Intent, verb: str) -> None:
+        """Delete the intent row; resolving twice is a caller bug."""
+        cursor = self.db.execute(t'DELETE FROM intent WHERE id = {intent.id}')
+        if cursor.rowcount == 0:
+            raise LookupError(f'No such intent: {intent.id}')
+        log.trace(f'Intent {verb} (id={intent.id}, action={intent.action}, tier={intent.tier})')
+
+    def pending(self, tier: Optional[str] = None) -> List[Intent]:
+        """Unresolved intents in creation order, optionally for one tier — the audit's worklist."""
+        scope = t'' if tier is None else t' WHERE tier = {tier}'
+        rows = self.db.execute(t'SELECT * FROM intent{scope} ORDER BY id')
+        return [Intent.from_row(row) for row in rows]
