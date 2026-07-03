@@ -103,7 +103,7 @@ The mount-free heart of the system (PLAN.md → Overlay engine). After this phas
 multi-tier POSIX stack works end-to-end through the engine API, with no FUSE anywhere.
 
 - [x] `src/sosfs/engine/locks.py`: per-file lock registry
-- [ ] `src/sosfs/engine/transfer.py`: `TransferPool` (thread executor) with
+- [x] `src/sosfs/engine/transfer.py`: `TransferPool` (thread executor) with
       intent-journaled copies (intent → temp+rename act → confirm)
 - [ ] `src/sosfs/engine/overlay.py` (part 1): namespace — lazy catalog population from
       the source tier, `getattr`/`readdir`, `mkdir`/`rmdir`, `create`/`unlink`/`rename`
