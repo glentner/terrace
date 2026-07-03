@@ -112,7 +112,7 @@ multi-tier POSIX stack works end-to-end through the engine API, with no FUSE any
       promote-on-open (whole-file, `bypass_size` rule), read/write through passthrough
       handles, truncate, dirty transitions via metadata-before-ack, `fsync`
       (`fsync_policy = "resident" | "commit"`), release
-- [ ] Engine test suite: multi-tier POSIX stacks (2–4 tiers), promotion, residency, and
+- [x] Engine test suite: multi-tier POSIX stacks (2–4 tiers), promotion, residency, and
       metadata assertions
 - [ ] Hypothesis stateful model tests: random op sequences vs. plain-directory oracle,
       equivalence after quiesce + flush

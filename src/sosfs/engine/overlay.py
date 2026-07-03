@@ -564,9 +564,12 @@ class OverlayEngine:
                     os.ftruncate(fd, length)
                 finally:
                     os.close(fd)
+                previous = self.catalog.get_residency(path, serving)
                 with self.db.transaction():
                     self.catalog.update_meta(path, size=length, mtime=now)
                     self.catalog.update_residency(path, serving, size=length, mtime=now)
+                    if previous is not None and serving != self.source.name:
+                        self.registry.adjust_usage(serving, bytes=length - previous.size)
 
     def fsync(self, handle: Handle, datasync: bool = False) -> None:
         """
@@ -595,7 +598,11 @@ class OverlayEngine:
         self._record(handle)
 
     def _record(self, handle: Handle) -> Optional[Entry]:
-        """Record the serving copy's live size/mtime into the entry and residency rows."""
+        """
+        Record the serving copy's live size/mtime into the entry and residency
+        rows. Residency size is the accounted size: whoever updates it adjusts
+        the tier counter by the delta (source counters track pushes, not I/O).
+        """
         entry = self.catalog.by_id(handle.entry_id)
         if entry is None or entry.deleted:
             return None                                     # unlinked while open; nothing to record
@@ -604,11 +611,14 @@ class OverlayEngine:
         if stat is None:
             return entry
         with self.locks.hold(entry.path):
+            previous = self.catalog.get_residency(entry.path, handle.tier)
             with self.db.transaction():
                 if handle.written:
                     self.catalog.update_meta(entry.path, size=stat.size, mtime=stat.mtime)
                 self.catalog.update_residency(entry.path, handle.tier,
                                               size=stat.size, mtime=stat.mtime, atime=now)
+                if previous is not None and handle.tier != self.source.name:
+                    self.registry.adjust_usage(handle.tier, bytes=stat.size - previous.size)
         return entry
 
     # -- upstream commit ----------------------------------------------------------------------------------------

@@ -34,6 +34,7 @@ class Clock:
 
 def seed(root: Path, path: str, data: bytes, mode: int = 0o644, mtime: float = 50.0) -> None:
     """Place a file directly at a tier root (out-of-band content, as a user would)."""
+    root.mkdir(parents=True, exist_ok=True)
     tier = PosixTier('seed', root)
     for parent in reversed(PurePosixPath('/' + path).parents):
         if parent != PurePosixPath('/') and tier.stat(parent) is None:
