@@ -207,6 +207,17 @@ class Journal:
         if cursor.rowcount == 0:
             raise LookupError(f'No such writeback row: {writeback_id}')
 
+    def rearm(self, writeback_id: int, *, now: float) -> None:
+        """
+        Re-clock a row whose boundary committed without settling (writes landed
+        during the copy, so the holder stays dirty): quiescence restarts at `now`
+        and `max_interval` re-anchors on this commit.
+        """
+        cursor = self.db.execute(
+            t'UPDATE writeback SET last_write = {now}, last_commit = {now} WHERE id = {writeback_id}')
+        if cursor.rowcount == 0:
+            raise LookupError(f'No such writeback row: {writeback_id}')
+
     # -- intent journal ------------------------------------------------------------------------------------------
 
     def begin(self, action: str, tier: str, *, now: float, path: Optional[str] = None,

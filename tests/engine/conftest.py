@@ -46,7 +46,8 @@ def build_spec(tmp_path: Path, tiers: int = 2, **tier_kwargs) -> OverlaySpec:
     """
     An OverlaySpec over tmp directories: project (source) plus up to three stage
     tiers (scratch, tmp, shm — fastest last). Stage roots are auto-created by the
-    engine; the source root is created here and pre-seeded by tests.
+    engine; the source root is created here and pre-seeded by tests. Per-tier
+    quota and writeback policies override via `<name>_quota` / `<name>_writeback`.
     """
     (tmp_path / 'project').mkdir(exist_ok=True)
     names = ['scratch', 'tmp', 'shm'][:tiers - 1]
@@ -54,7 +55,7 @@ def build_spec(tmp_path: Path, tiers: int = 2, **tier_kwargs) -> OverlaySpec:
         TierSpec(name=name, type='posix', path=str(tmp_path / name), role='stage',
                  scope='node' if name in ('tmp', 'shm') else 'shared',
                  quota=tier_kwargs.get(f'{name}_quota', QuotaSpec()),
-                 writeback=WritebackSpec())
+                 writeback=tier_kwargs.get(f'{name}_writeback', WritebackSpec()))
         for name in names)
     source = TierSpec(name='project', type='posix', path=str(tmp_path / 'project'), role='source')
     return OverlaySpec(name='testspace', state=tmp_path / 'state', tiers=(source, ) + stages)

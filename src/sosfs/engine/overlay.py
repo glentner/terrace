@@ -24,7 +24,7 @@ from sosfs.core.exceptions import SOSFSError
 from sosfs.core.logging import Logger
 from sosfs.state.db import Database
 from sosfs.state.catalog import Catalog, Entry, normalize, parent_of
-from sosfs.state.journal import Journal
+from sosfs.state.journal import Journal, Writeback
 from sosfs.state.lifecycle import Lifecycle, MarkerStatus
 from sosfs.state.registry import TierRegistry
 from sosfs.tier.protocol import Tier, TierStat, FileMeta
@@ -583,8 +583,7 @@ class OverlayEngine:
             os.fsync(handle.fd)
         entry = self._record(handle)
         if self.spec.fsync_policy == 'commit' and handle.written and entry is not None:
-            self.commit_upstream(entry.path)
-            handle.marked_dirty = False                     # committed clean; next write re-marks
+            self.commit_upstream(entry.path)                # the hop re-arms this handle's dirty marking
 
     def release(self, handle: Handle) -> None:
         """Close the passthrough handle and record final size/mtime and LRU atime."""
@@ -624,34 +623,83 @@ class OverlayEngine:
 
     # -- upstream commit ----------------------------------------------------------------------------------------
 
+    def commit_row(self, row: Writeback) -> None:
+        """
+        Execute one queued write-back row — the scheduler's unit of work: a
+        namespace op runs against the source; a data row commits the dirty copy
+        one hop across its boundary. Rows made moot since they were scanned
+        (entry unlinked, copy already committed) settle quietly.
+        """
+        if row.op != 'data':
+            self._execute_namespace(row)
+            return
+        entry = self.catalog.by_id(row.entry)
+        if entry is None or entry.deleted:
+            self._settle_moot(row.id)
+            return
+        with self.locks.hold(entry.path):
+            residency = self.catalog.get_residency(entry.path, row.from_tier)
+            if residency is None or residency.state != 'dirty':
+                self._settle_moot(row.id)                   # committed by fsync or flush since queued
+                return
+            self._commit_hop(entry.path, row.from_tier, row.to_tier)
+
+    def _settle_moot(self, row_id: int) -> None:
+        """Settle a queue row unless a concurrent commit already did."""
+        try:
+            self.journal.settle(row_id)
+        except LookupError:
+            pass
+
+    def _commit_hop(self, path: str, holder: str, upstream: str) -> None:
+        """
+        Copy the dirty copy of `path` at `holder` one hop to `upstream` and
+        record the outcome (the caller holds the file lock). Open handles on the
+        holder re-arm their dirty marking, so a write after the copy re-queues;
+        a write racing the copy itself shows in the holder's stat, which leaves
+        the holder dirty and re-clocks the boundary instead of settling it.
+        """
+        copied = self.transfers.copy(path, self.tiers[holder], self.tiers[upstream],
+                                     action='commit', now=self.clock())
+        now = self.clock()
+        entry = self.catalog.get(path)
+        with self._handles_mutex:
+            for open_handle in self._handles.get(entry.id, []):
+                if open_handle.tier == holder:
+                    open_handle.marked_dirty = False        # re-marking queues on the path lock we hold
+        stat = self.tiers[holder].stat(_pure(path))
+        changed = stat is None or (stat.size, stat.mtime) != (copied.size, copied.mtime)
+        with self.db.transaction():
+            if changed:
+                for row in self.journal.queued_for(path, to_tier=upstream):
+                    if row.op == 'data':
+                        self.journal.rearm(row.id, now=now)
+            else:
+                self.catalog.update_residency(path, holder, state='clean')
+                for row in self.journal.queued_for(path, to_tier=upstream):
+                    if row.op == 'data':
+                        self.journal.settle(row.id)
+            beyond = self.upstream_of(upstream)
+            if beyond is not None:
+                self.journal.mark_dirty(path, upstream, to_tier=beyond.name, now=now)
+        log.trace(f'Committed {path} ({holder} -> {upstream}{", re-armed" if changed else ""})')
+
     def commit_upstream(self, path: str) -> None:
         """
-        Commit the newest copy of `path` hop by hop until the source holds it
-        (the mechanics the write-back scheduler and flush drive; policy clocks
-        live with the caller). No-op for a clean file.
+        Commit the newest copy of `path` hop by hop until the source holds it,
+        ignoring policy clocks (`fsync_policy = "commit"` and flush drive this;
+        the scheduler paces per boundary through `commit_row`). No-op when clean.
         """
         path = normalize(path)
         with self.locks.hold(path):
             while True:
-                dirty = [residency for residency in self.catalog.residencies(path)
-                         if residency.state == 'dirty']
-                if not dirty:
-                    break
-                holder = dirty[-1]                          # most-downstream dirty copy
-                upstream = self.upstream_of(holder.tier)
-                if upstream is None:
+                movable = [residency for residency in self.catalog.residencies(path)
+                           if residency.state == 'dirty'
+                           and self.upstream_of(residency.tier) is not None]
+                if not movable:
                     break                                   # a dirty source copy settles below
-                self.transfers.copy(path, self.tiers[holder.tier], upstream,
-                                    action='commit', now=self.clock())
-                now = self.clock()
-                with self.db.transaction():
-                    self.catalog.update_residency(path, holder.tier, state='clean')
-                    for row in self.journal.queued_for(path, to_tier=upstream.name):
-                        if row.op == 'data':
-                            self.journal.settle(row.id)
-                    beyond = self.upstream_of(upstream.name)
-                    if beyond is not None:
-                        self.journal.mark_dirty(path, upstream.name, to_tier=beyond.name, now=now)
+                holder = movable[-1]                        # most-downstream dirty copy
+                self._commit_hop(path, holder.tier, self.upstream_of(holder.tier).name)
             with self.db.transaction():
                 for residency in self.catalog.residencies(path):
                     if residency.state == 'dirty':
