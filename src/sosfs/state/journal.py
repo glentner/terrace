@@ -20,13 +20,16 @@ from sosfs.state.db import Database
 from sosfs.state.catalog import normalize
 
 # Public interface
-__all__ = ['Journal', 'Intent', 'Writeback', 'ACTIONS', 'PARTIAL_DIR', 'temp_name', 'is_temp_name']
+__all__ = ['Journal', 'Intent', 'Writeback', 'ACTIONS', 'NAMESPACE_OPS',
+           'PARTIAL_DIR', 'temp_name', 'is_temp_name']
 
 # Initialize logger
 log = Logger.with_name(__name__)
 
 
 ACTIONS: Final[frozenset] = frozenset({'promote', 'commit', 'evict', 'compact', 'resync'})
+
+NAMESPACE_OPS: Final[frozenset] = frozenset({'create', 'unlink', 'rename', 'mkdir', 'rmdir', 'meta'})
 
 PARTIAL_DIR: Final[str] = '.sosfs/partial'
 
@@ -157,12 +160,37 @@ class Journal:
         log.trace(f'Marked dirty ({path}: {tier} -> {to_tier})')
         return Writeback.from_row(row)
 
+    def queue(self, path: str, op: str, *, to_tier: str, now: float, detail: Optional[dict] = None) -> Writeback:
+        """
+        Queue a namespace operation for commit toward `to_tier` — no bytes to
+        move; data commits queue through `mark_dirty`. Call inside the same
+        transaction as the catalog mutation it propagates, so the op and the
+        namespace state it describes commit together.
+        """
+        if op not in NAMESPACE_OPS:
+            raise ValueError(f'Unknown namespace op: {op!r}')
+        path = normalize(path)
+        encoded = None if detail is None else json.dumps(detail, sort_keys=True)
+        with self._atomic():
+            entry = self._entry_id(path)
+            row = self.db.execute(
+                t'INSERT INTO writeback (entry, op, to_tier, detail, first_dirty, last_write) '
+                t'VALUES ({entry}, {op}, {to_tier}, {encoded}, {now}, {now}) RETURNING *').fetchone()
+        log.trace(f'Queued {op} ({path} -> {to_tier})')
+        return Writeback.from_row(row)
+
     def queued(self, to_tier: Optional[str] = None) -> List[Writeback]:
         """Queued write-back rows, oldest write first, optionally for one boundary."""
         boundary = t'' if to_tier is None else t' AND to_tier = {to_tier}'
         rows = self.db.execute(
             t"SELECT * FROM writeback WHERE state = 'queued'{boundary} ORDER BY last_write")
         return [Writeback.from_row(row) for row in rows]
+
+    def cancel(self, path: str) -> int:
+        """Drop all queued rows for `path` (a canceled or superseded propagation); returns the count."""
+        cursor = self.db.execute(
+            t'DELETE FROM writeback WHERE entry = (SELECT id FROM entry WHERE path = {normalize(path)})')
+        return cursor.rowcount
 
     # -- intent journal ------------------------------------------------------------------------------------------
 
