@@ -192,6 +192,21 @@ class Journal:
             t'DELETE FROM writeback WHERE entry = (SELECT id FROM entry WHERE path = {normalize(path)})')
         return cursor.rowcount
 
+    def queued_for(self, path: str, to_tier: Optional[str] = None) -> List[Writeback]:
+        """Queued rows for one entry, oldest first, optionally at one boundary."""
+        boundary = t'' if to_tier is None else t' AND to_tier = {to_tier}'
+        rows = self.db.execute(
+            t'SELECT * FROM writeback '
+            t'WHERE entry = (SELECT id FROM entry WHERE path = {normalize(path)}){boundary} '
+            t'ORDER BY last_write')
+        return [Writeback.from_row(row) for row in rows]
+
+    def settle(self, writeback_id: int) -> None:
+        """Remove a queued row whose operation committed (compose with the recording transaction)."""
+        cursor = self.db.execute(t'DELETE FROM writeback WHERE id = {writeback_id}')
+        if cursor.rowcount == 0:
+            raise LookupError(f'No such writeback row: {writeback_id}')
+
     # -- intent journal ------------------------------------------------------------------------------------------
 
     def begin(self, action: str, tier: str, *, now: float, path: Optional[str] = None,

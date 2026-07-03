@@ -9,10 +9,13 @@ from typing import Callable, Dict, List, Optional
 
 # Standard libs
 import io
+import os
 import time
 import errno
 import socket
 import sqlite3
+import threading
+import dataclasses
 from uuid import uuid4
 from pathlib import Path, PurePosixPath
 
@@ -31,7 +34,7 @@ from sosfs.engine.locks import LockRegistry
 from sosfs.engine.transfer import TransferPool, materialize_dirs
 
 # Public interface
-__all__ = ['OverlayEngine', 'EngineError', 'DB_NAME']
+__all__ = ['OverlayEngine', 'Handle', 'EngineError', 'DB_NAME']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -42,6 +45,20 @@ DB_NAME = 'state.db'
 
 class EngineError(SOSFSError):
     """The engine cannot start or continue against this stack."""
+
+
+class Handle:
+    """An open file: a passthrough OS fd on the serving tier plus dirty-tracking state."""
+
+    __slots__ = ('entry_id', 'tier', 'fd', 'flags', 'written', 'marked_dirty')
+
+    def __init__(self, entry_id: int, tier: str, fd: int, flags: int) -> None:
+        self.entry_id = entry_id
+        self.tier = tier
+        self.fd = fd
+        self.flags = flags
+        self.written = False
+        self.marked_dirty = False
 
 
 def _pure(path: str) -> PurePosixPath:
@@ -71,6 +88,8 @@ class OverlayEngine:
         self.locks = LockRegistry()
         self.tiers: Dict[str, Tier] = {}
         self.started = False
+        self._handles: Dict[int, List[Handle]] = {}
+        self._handles_mutex = threading.Lock()
 
     # -- lifecycle ----------------------------------------------------------------------------------------------
 
@@ -222,10 +241,17 @@ class OverlayEngine:
     # -- namespace ----------------------------------------------------------------------------------------------
 
     def getattr(self, path: str) -> Entry:
-        """Metadata for `path`."""
+        """Metadata for `path`; size/mtime read live from the serving tier while written handles are open."""
         entry = self._ensure(path)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', normalize(path))
+        if entry.kind == 'file':
+            with self._handles_mutex:
+                open_written = [h for h in self._handles.get(entry.id, []) if h.written]
+            if open_written:
+                stat = self.tiers[open_written[-1].tier].stat(_pure(entry.path))
+                if stat is not None:
+                    entry = dataclasses.replace(entry, size=stat.size, mtime=stat.mtime)
         return entry
 
     def readdir(self, path: str) -> List[Entry]:
@@ -442,6 +468,262 @@ class OverlayEngine:
                 self.journal.queue(path, op, to_tier=self.source.name, now=now)
             else:
                 self.catalog.purge(path)
+
+    # -- data path ----------------------------------------------------------------------------------------------
+
+    def open(self, path: str, flags: int = os.O_RDONLY) -> Handle:
+        """
+        Open a file, promoting it synchronously (whole-file) to the fastest tier
+        whose bypass_size and quota admit it, then hand back a passthrough handle
+        on the serving tier. O_TRUNC is honored through `truncate` so the dirty
+        transition commits before bytes vanish; O_APPEND positioning belongs to
+        the caller (FUSE sends explicit offsets).
+        """
+        path = normalize(path)
+        with self.locks.hold(path):
+            entry = self._ensure(path)
+            if entry is None:
+                raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+            if entry.kind == 'dir':
+                raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
+            if entry.kind == 'symlink':
+                raise OSError(errno.ELOOP, 'Symlink not followed here', path)
+            serving = self._serve(entry)
+            direct = flags & ~(os.O_CREAT | os.O_EXCL | os.O_TRUNC | os.O_APPEND)
+            fd = self.tiers[serving].open_direct(_pure(path), direct)
+            handle = Handle(entry.id, serving, fd, flags)
+            with self._handles_mutex:
+                self._handles.setdefault(entry.id, []).append(handle)
+            self.catalog.touch(path, serving, atime=self.clock())
+        if flags & os.O_TRUNC:
+            self.truncate(path, 0, handle=handle)
+        log.trace(f'Opened {path} (tier={serving})')
+        return handle
+
+    def _serve(self, entry: Entry) -> str:
+        """The tier to serve `entry` from, promoting first when a faster one admits it."""
+        fastest = self.catalog.fastest_copy(entry.path)
+        if fastest is None:
+            raise EngineError(f'No resident copy of {entry.path}')
+        names = [tier.name for tier in self.spec.tiers]
+        target = self.eligible_tier(entry.size)
+        if names.index(target.name) > names.index(fastest.tier):
+            self.transfers.copy(entry.path, self.tiers[fastest.tier], target,
+                                action='promote', now=self.clock())
+            return target.name
+        return fastest.tier
+
+    def read(self, handle: Handle, size: int, offset: int) -> bytes:
+        """Read through the passthrough handle."""
+        return os.pread(handle.fd, size, offset)
+
+    def write(self, handle: Handle, data: bytes, offset: int) -> int:
+        """
+        Write through the passthrough handle. The clean->dirty transition commits
+        before the bytes land (metadata before acknowledgment); writes to an
+        already-dirty handle carry no metadata cost. Writes served directly by
+        the source are write-through — nothing upstream to owe.
+        """
+        if not handle.marked_dirty:
+            self._mark_handle_dirty(handle)
+        count = os.pwrite(handle.fd, data, offset)
+        handle.written = True
+        return count
+
+    def _mark_handle_dirty(self, handle: Handle) -> None:
+        """Flip the serving copy dirty against its upstream boundary, once per handle."""
+        upstream = self.upstream_of(handle.tier)
+        if upstream is not None:
+            entry = self.catalog.by_id(handle.entry_id)
+            with self.locks.hold(entry.path):
+                self.journal.mark_dirty(entry.path, handle.tier, to_tier=upstream.name, now=self.clock())
+        handle.marked_dirty = True
+
+    def truncate(self, path: str, length: int, handle: Optional[Handle] = None) -> None:
+        """Truncate to `length` — a write: the dirty transition commits first."""
+        path = normalize(path)
+        if handle is not None:
+            if not handle.marked_dirty:
+                self._mark_handle_dirty(handle)
+            os.ftruncate(handle.fd, length)
+            handle.written = True
+        else:
+            with self.locks.hold(path):
+                entry = self._ensure(path)
+                if entry is None:
+                    raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+                if entry.kind != 'file':
+                    raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
+                serving = self._serve(entry)
+                upstream = self.upstream_of(serving)
+                now = self.clock()
+                if upstream is not None:
+                    self.journal.mark_dirty(path, serving, to_tier=upstream.name, now=now)
+                fd = self.tiers[serving].open_direct(_pure(path), os.O_WRONLY)
+                try:
+                    os.ftruncate(fd, length)
+                finally:
+                    os.close(fd)
+                with self.db.transaction():
+                    self.catalog.update_meta(path, size=length, mtime=now)
+                    self.catalog.update_residency(path, serving, size=length, mtime=now)
+
+    def fsync(self, handle: Handle, datasync: bool = False) -> None:
+        """
+        Make the handle durable in its resident tier and record its metadata;
+        under `fsync_policy = "commit"` also force the upstream commit now.
+        """
+        if datasync and hasattr(os, 'fdatasync'):
+            os.fdatasync(handle.fd)
+        else:
+            os.fsync(handle.fd)
+        entry = self._record(handle)
+        if self.spec.fsync_policy == 'commit' and handle.written and entry is not None:
+            self.commit_upstream(entry.path)
+            handle.marked_dirty = False                     # committed clean; next write re-marks
+
+    def release(self, handle: Handle) -> None:
+        """Close the passthrough handle and record final size/mtime and LRU atime."""
+        os.close(handle.fd)
+        with self._handles_mutex:
+            siblings = self._handles.get(handle.entry_id, [])
+            if handle in siblings:
+                siblings.remove(handle)
+            if not siblings:
+                self._handles.pop(handle.entry_id, None)
+        handle.fd = -1
+        self._record(handle)
+
+    def _record(self, handle: Handle) -> Optional[Entry]:
+        """Record the serving copy's live size/mtime into the entry and residency rows."""
+        entry = self.catalog.by_id(handle.entry_id)
+        if entry is None or entry.deleted:
+            return None                                     # unlinked while open; nothing to record
+        now = self.clock()
+        stat = self.tiers[handle.tier].stat(_pure(entry.path))
+        if stat is None:
+            return entry
+        with self.locks.hold(entry.path):
+            with self.db.transaction():
+                if handle.written:
+                    self.catalog.update_meta(entry.path, size=stat.size, mtime=stat.mtime)
+                self.catalog.update_residency(entry.path, handle.tier,
+                                              size=stat.size, mtime=stat.mtime, atime=now)
+        return entry
+
+    # -- upstream commit ----------------------------------------------------------------------------------------
+
+    def commit_upstream(self, path: str) -> None:
+        """
+        Commit the newest copy of `path` hop by hop until the source holds it
+        (the mechanics the write-back scheduler and flush drive; policy clocks
+        live with the caller). No-op for a clean file.
+        """
+        path = normalize(path)
+        with self.locks.hold(path):
+            while True:
+                dirty = [residency for residency in self.catalog.residencies(path)
+                         if residency.state == 'dirty']
+                if not dirty:
+                    break
+                holder = dirty[-1]                          # most-downstream dirty copy
+                upstream = self.upstream_of(holder.tier)
+                if upstream is None:
+                    break                                   # a dirty source copy settles below
+                self.transfers.copy(path, self.tiers[holder.tier], upstream,
+                                    action='commit', now=self.clock())
+                now = self.clock()
+                with self.db.transaction():
+                    self.catalog.update_residency(path, holder.tier, state='clean')
+                    for row in self.journal.queued_for(path, to_tier=upstream.name):
+                        if row.op == 'data':
+                            self.journal.settle(row.id)
+                    beyond = self.upstream_of(upstream.name)
+                    if beyond is not None:
+                        self.journal.mark_dirty(path, upstream.name, to_tier=beyond.name, now=now)
+            with self.db.transaction():
+                for residency in self.catalog.residencies(path):
+                    if residency.state == 'dirty':
+                        self.catalog.update_residency(path, residency.tier, state='clean')
+                for row in self.journal.queued_for(path):
+                    if row.op == 'data':
+                        self.journal.settle(row.id)
+        log.trace(f'Committed {path} to source')
+
+    def flush(self) -> None:
+        """
+        Push everything queued to the source now, ignoring policy clocks:
+        namespace ops first in queue order (they shape the tree data lands in),
+        then data commits against current catalog paths.
+        """
+        for row in self.journal.queued(self.source.name):
+            if row.op != 'data':
+                self._execute_namespace(row)
+        for row in self.journal.queued():
+            if row.op != 'data':
+                continue
+            entry = self.catalog.by_id(row.entry)
+            if entry is None or entry.deleted:
+                self.journal.settle(row.id)
+                continue
+            self.commit_upstream(entry.path)
+        log.debug('Flushed write-back queue to source')
+
+    def _execute_namespace(self, row) -> None:
+        """Apply one queued namespace op to the source, intent-bracketed and tolerant of no-ops."""
+        entry = self.catalog.by_id(row.entry)
+        if entry is None:
+            self.journal.settle(row.id)
+            return
+        path = entry.path
+        now = self.clock()
+        detail = dict(row.detail or {})
+        detail['op'] = row.op
+        intent = self.journal.begin('commit', self.source.name, now=now, path=path, detail=detail)
+        try:
+            if row.op == 'mkdir':
+                materialize_dirs(self.catalog, self.source, path)
+                try:
+                    self.source.mkdir(_pure(path), entry.mode)
+                except FileExistsError:
+                    pass
+            elif row.op == 'unlink':
+                try:
+                    self.source.delete(_pure(path))
+                except FileNotFoundError:
+                    pass
+            elif row.op == 'rmdir':
+                try:
+                    self.source.rmdir(_pure(path))
+                except FileNotFoundError:
+                    pass
+            elif row.op == 'rename':
+                materialize_dirs(self.catalog, self.source, path)
+                try:
+                    self.source.rename(PurePosixPath(row.detail['old']), _pure(path))
+                except FileNotFoundError:
+                    pass                                    # nothing at the old path; data ops fill in
+            else:
+                raise EngineError(f'Unhandled namespace op: {row.op}')
+        except BaseException:
+            self.journal.rollback(intent)
+            raise
+        with self.db.transaction():
+            self.journal.settle(row.id)
+            self.journal.confirm(intent)                    # before any purge — cascades eat intent rows
+            if row.op in ('unlink', 'rmdir'):
+                self.catalog.drop_residency(path, self.source.name)
+                self.catalog.purge(path)
+            elif row.op == 'rename':
+                old = self.catalog.get(row.detail['old'], include_deleted=True)
+                if old is not None and old.deleted:
+                    self.catalog.purge(row.detail['old'])
+                residency = self.catalog.get_residency(path, self.source.name)
+                if residency is None:
+                    stat = self.source.stat(_pure(path))
+                    if stat is not None and entry.kind == 'file':
+                        self.catalog.add_residency(path, self.source.name,
+                                                   atime=now, size=stat.size, mtime=stat.mtime)
 
     def _vacate(self, path: str) -> None:
         """

@@ -108,7 +108,7 @@ multi-tier POSIX stack works end-to-end through the engine API, with no FUSE any
 - [x] `src/sosfs/engine/overlay.py` (part 1): namespace — lazy catalog population from
       the source tier, `getattr`/`readdir`, `mkdir`/`rmdir`, `create`/`unlink`/`rename`
       journaled as namespace ops in the write-back queue
-- [ ] `src/sosfs/engine/overlay.py` (part 2): data path — open with synchronous
+- [x] `src/sosfs/engine/overlay.py` (part 2): data path — open with synchronous
       promote-on-open (whole-file, `bypass_size` rule), read/write through passthrough
       handles, truncate, dirty transitions via metadata-before-ack, `fsync`
       (`fsync_policy = "resident" | "commit"`), release

@@ -130,6 +130,11 @@ class Catalog:
         row = self.db.execute(t'SELECT * FROM entry WHERE path = {normalize(path)}{mask}').fetchone()
         return None if row is None else Entry.from_row(row)
 
+    def by_id(self, entry_id: int) -> Optional[Entry]:
+        """Look up an entry by id, tombstones included — writeback and intent rows carry ids."""
+        row = self.db.execute(t'SELECT * FROM entry WHERE id = {entry_id}').fetchone()
+        return None if row is None else Entry.from_row(row)
+
     def children(self, path: str) -> List[Entry]:
         """Direct children of a directory, tombstones masked, ordered by path."""
         rows = self.db.execute(

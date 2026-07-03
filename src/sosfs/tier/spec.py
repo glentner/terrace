@@ -24,7 +24,7 @@ __all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'SpecError',
 TIER_TYPES: Final[frozenset] = frozenset({'posix', 's3', 'zip', 'tar', 'tar.gz'})
 SUPPORTED_TYPES: Final[frozenset] = frozenset({'posix'})
 
-OVERLAY_KEYS: Final[frozenset] = frozenset({'name', 'state', 'drain_timeout', 'checksum'})
+OVERLAY_KEYS: Final[frozenset] = frozenset({'name', 'state', 'drain_timeout', 'checksum', 'fsync_policy'})
 TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'role', 'scope', 'quota', 'writeback'})
 QUOTA_KEYS: Final[frozenset] = frozenset({'size', 'files', 'bypass_size'})
 WRITEBACK_KEYS: Final[frozenset] = frozenset({'mode', 'delay', 'max_interval'})
@@ -158,6 +158,7 @@ class OverlaySpec:
     tiers: Tuple[TierSpec, ...]
     drain_timeout: float = 300.0
     checksum: bool = False
+    fsync_policy: str = 'resident'       # fsync durability scope: 'resident' | 'commit' (to source)
 
     @property
     def source(self) -> TierSpec:
@@ -194,6 +195,9 @@ class OverlaySpec:
         checksum = overlay.get('checksum', False)
         if not isinstance(checksum, bool):
             raise SpecError(f'Invalid checksum flag: {checksum!r}')
+        fsync_policy = overlay.get('fsync_policy', 'resident')
+        if fsync_policy not in ('resident', 'commit'):
+            raise SpecError(f'Invalid fsync_policy: {fsync_policy!r}')
         drain_timeout = _duration(overlay.get('drain_timeout', DEFAULT_DRAIN_TIMEOUT),
                                   '[overlay].drain_timeout')
         tables = data.get('tier')
@@ -203,7 +207,7 @@ class OverlaySpec:
         state_dir = Path(os.path.abspath(os.path.expanduser(state)))
         cls._validate_stack(tiers, state_dir=state_dir)
         return cls(name=name, state=state_dir, tiers=tiers,
-                   drain_timeout=drain_timeout, checksum=checksum)
+                   drain_timeout=drain_timeout, checksum=checksum, fsync_policy=fsync_policy)
 
     @staticmethod
     def _validate_stack(tiers: Tuple[TierSpec, ...], *, state_dir: Path) -> None:
