@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 4
-phases_completed: ["1", "2", "3"]
+current_phase: 5
+phases_completed: ["1", "2", "3", "4"]
 last_updated: 2026-07-02
 plan_ref: "PLAN.md"
 ---
@@ -114,9 +114,9 @@ multi-tier POSIX stack works end-to-end through the engine API, with no FUSE any
       (`fsync_policy = "resident" | "commit"`), release
 - [x] Engine test suite: multi-tier POSIX stacks (2–4 tiers), promotion, residency, and
       metadata assertions
-- [ ] Hypothesis stateful model tests: random op sequences vs. plain-directory oracle,
+- [x] Hypothesis stateful model tests: random op sequences vs. plain-directory oracle,
       equivalence after quiesce + flush
-- [ ] **Commit (logical):** "Phase 4 — overlay engine: namespace, promotion,
+- [x] **Commit (logical):** "Phase 4 — overlay engine: namespace, promotion,
       read/write paths, transfer pool, model-based tests"
 
 

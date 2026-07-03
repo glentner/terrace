@@ -362,11 +362,12 @@ class OverlayEngine:
         old, new = normalize(old), normalize(new)
         if old == '/' or new == '/':
             raise OSError(errno.EBUSY, 'Cannot rename the overlay root')
+        moving_dir = self.getattr(old).kind == 'dir'        # ENOENT here even when old == new
         if new == old:
             return
         if _pure(new).is_relative_to(_pure(old)):
             raise OSError(errno.EINVAL, 'Cannot move a directory into itself', new)
-        if self.getattr(old).kind == 'dir':
+        if moving_dir:
             self._populate_tree(old)                        # everything it moves must be cataloged
         with self.locks.hold(old, new):
             entry = self._ensure(old)
