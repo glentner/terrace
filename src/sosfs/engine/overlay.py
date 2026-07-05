@@ -808,3 +808,42 @@ class OverlayEngine:
                 pass
             self.journal.confirm(intent)
         self.catalog.purge(path)
+
+    # -- eviction -----------------------------------------------------------------------------------------------
+
+    def evict_copy(self, path: str, tier: str) -> bool:
+        """
+        Drop a clean staged copy of `path` from `tier`, freeing its bytes
+        (PLAN.md -> Eviction) — the eviction manager's unit of reclaim. Safe by
+        construction: a clean copy means its upstream already holds the data, so
+        losing it loses nothing. A no-op returning False when the copy is gone,
+        lives on the source, is still dirty (the manager commits it upstream
+        first), or has an open handle on this tier (never pull bytes from under a
+        live fd); otherwise the tier file drops under an eviction intent and the
+        residency and counters fall in one transaction with its confirmation.
+        """
+        path = normalize(path)
+        if tier == self.source.name:
+            return False
+        with self.locks.hold(path):
+            entry = self.catalog.get(path, include_deleted=True)
+            if entry is None:
+                return False
+            residency = self.catalog.get_residency(path, tier)
+            if residency is None or residency.state != 'clean':
+                return False
+            with self._handles_mutex:
+                if any(handle.tier == tier for handle in self._handles.get(entry.id, [])):
+                    return False
+            now = self.clock()
+            intent = self.journal.begin('evict', tier, now=now, path=path)
+            try:
+                self.tiers[tier].delete(_pure(path))
+            except FileNotFoundError:
+                pass                                        # already gone on disk; audit's business
+            with self.db.transaction():
+                self.catalog.drop_residency(path, tier)
+                self.registry.adjust_usage(tier, bytes=-residency.size, files=-1)
+                self.journal.confirm(intent)
+        log.trace(f'Evicted {path} from {tier} ({residency.size} bytes)')
+        return True
