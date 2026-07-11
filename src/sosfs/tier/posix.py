@@ -159,7 +159,7 @@ class PosixTier:
 
     @staticmethod
     def _apply_meta(real: Path, meta: FileMeta) -> None:
-        """Apply what the backend can: mode and mtime always, ownership only with privilege."""
+        """Apply what the backend can and what `meta` sets: mode/mtime when given, ownership with privilege."""
         if meta.mode is not None:
             os.chmod(real, stat.S_IMODE(meta.mode))
         if meta.uid is not None or meta.gid is not None:
@@ -168,7 +168,8 @@ class PosixTier:
                          meta.gid if meta.gid is not None else -1)
             except PermissionError:
                 log.trace(f'Ownership not applied (unprivileged): {real}')
-        os.utime(real, (meta.mtime, meta.mtime))
+        if meta.mtime is not None:
+            os.utime(real, (meta.mtime, meta.mtime))
 
     def delete(self, path: PurePosixPath) -> None:
         """Remove the file at `path`."""

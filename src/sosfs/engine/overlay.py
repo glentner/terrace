@@ -517,9 +517,8 @@ class OverlayEngine:
             if entry is None:
                 raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
             now = self.clock()
-            target_mtime = mtime if mtime is not None else entry.mtime
-            fastest = self.catalog.fastest_copy(path) if entry.kind == 'file' else None
-            holder = None if fastest is None or fastest.tier == self.source.name else fastest.tier
+            residencies = self.catalog.residencies(path) if entry.kind == 'file' else []
+            holders = [residency.tier for residency in residencies if residency.tier != self.source.name]
             updates: Dict[str, object] = {'ctime': now}
             for name, value in (('mode', mode), ('uid', uid), ('gid', gid), ('atime', atime), ('mtime', mtime)):
                 if value is not None:
@@ -527,11 +526,14 @@ class OverlayEngine:
             with self.db.transaction():
                 self.catalog.update_meta(path, **updates)
                 self.journal.queue(path, 'meta', to_tier=self.source.name, now=now, detail={'fields': list(fields)})
-                if holder is not None and mtime is not None:
-                    self.catalog.update_residency(path, holder, mtime=target_mtime)
-            if holder is not None:
-                self.tiers[holder].set_meta(
-                    _pure(path), FileMeta(size=entry.size, mtime=target_mtime, mode=mode, uid=uid, gid=gid))
+                if mtime is not None:
+                    for tier in holders:
+                        self.catalog.update_residency(path, tier, mtime=mtime)
+            # Apply to every staged copy — the copy that later commits content need not be the
+            # fastest one — so its on-disk mtime is truthful; mode/ownership ride the catalog on commit.
+            meta = FileMeta(size=entry.size, mtime=mtime, mode=mode, uid=uid, gid=gid)
+            for tier in holders:
+                self.tiers[tier].set_meta(_pure(path), meta)
         log.trace(f'Set meta {path} (fields={",".join(fields) or "-"})')
         return self.catalog.get(path)
 
@@ -865,7 +867,8 @@ class OverlayEngine:
                 fields = set(detail.get('fields', ()))
                 try:
                     self.source.set_meta(_pure(path), FileMeta(
-                        size=entry.size, mtime=entry.mtime,
+                        size=entry.size,
+                        mtime=entry.mtime if 'mtime' in fields else None,
                         mode=entry.mode if 'mode' in fields else None,
                         uid=entry.uid if 'uid' in fields else None,
                         gid=entry.gid if 'gid' in fields else None))

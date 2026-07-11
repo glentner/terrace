@@ -131,6 +131,56 @@ def test_meta_rides_the_writeback_clock(tmp_path: Path, clock: Clock) -> None:
         engine.stop()
 
 
+def test_chmod_survives_partial_cascade(tmp_path: Path, clock: Clock) -> None:
+    """Regression: a chmod while the dirty holder is upstream of the fastest (clean) copy must
+    not be reverted when the content commit lands (content commit carries authoritative mode)."""
+    engine = make_engine(tmp_path, clock, tiers=3)          # project <- scratch <- tmp
+    try:
+        handle = engine.open(PATH, os.O_RDWR)
+        engine.write(handle, b'BRAVO', 0)
+        engine.release(handle)                              # dirty on tmp (fastest)
+        row = engine.journal.queued()[0]
+        WritebackScheduler(engine).poll(now=row.last_write + 60.0)   # hop tmp -> scratch
+        assert engine.catalog.get_residency(PATH, 'tmp').state == 'clean'     # fastest, clean
+        assert engine.catalog.get_residency(PATH, 'scratch').state == 'dirty'  # holder, upstream
+        engine.chmod(PATH, 0o600)
+        engine.flush()
+        assert engine.source.stat(PurePosixPath(PATH)).mode == 0o600
+        assert engine.source.read(PurePosixPath(PATH)) == b'BRAVO'
+    finally:
+        engine.stop()
+
+
+def test_utimens_survives_partial_cascade(tmp_path: Path, clock: Clock) -> None:
+    """Regression: a utimens mid-cascade reaches the source, carried by the dirty holder's copy."""
+    engine = make_engine(tmp_path, clock, tiers=3)
+    try:
+        handle = engine.open(PATH, os.O_RDWR)
+        engine.write(handle, b'BRAVO', 0)
+        engine.release(handle)
+        row = engine.journal.queued()[0]
+        WritebackScheduler(engine).poll(now=row.last_write + 60.0)   # hop tmp -> scratch
+        engine.utimens(PATH, atime=555.0, mtime=777.0)
+        engine.flush()
+        assert engine.source.stat(PurePosixPath(PATH)).mtime == 777.0
+        assert engine.source.read(PurePosixPath(PATH)) == b'BRAVO'
+    finally:
+        engine.stop()
+
+
+def test_chmod_does_not_revert_mtime(tmp_path: Path, clock: Clock) -> None:
+    """Regression: a mode-only chmod must leave the modification time alone."""
+    engine = make_engine(tmp_path, clock)
+    try:
+        handle = engine.open(PATH, os.O_RDWR)
+        engine.write(handle, b'XXXX', 0)                    # bumps the holder's on-disk mtime to now
+        engine.chmod(PATH, 0o600)                           # mode only — must not touch mtime
+        engine.release(handle)
+        assert engine.getattr(PATH).mtime > 50.0            # the seed mtime, reverted by the bug
+    finally:
+        engine.stop()
+
+
 def test_setattr_missing_path_raises(tmp_path: Path, clock: Clock) -> None:
     """setattr on a missing path raises ENOENT."""
     engine = make_engine(tmp_path, clock)

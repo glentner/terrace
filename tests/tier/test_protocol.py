@@ -60,7 +60,10 @@ class MemoryTier:
 
     def set_meta(self, path: PurePosixPath, meta: FileMeta) -> None:
         data, previous = self.files[str(path)]
-        self.files[str(path)] = (data, dataclasses.replace(previous, mtime=meta.mtime, mode=meta.mode))
+        self.files[str(path)] = (data, dataclasses.replace(
+            previous,
+            mtime=meta.mtime if meta.mtime is not None else previous.mtime,
+            mode=meta.mode if meta.mode is not None else previous.mode))
 
     def delete(self, path: PurePosixPath) -> None:
         del self.files[str(path)]

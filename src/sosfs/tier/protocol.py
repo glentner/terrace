@@ -64,7 +64,7 @@ class FileMeta:
     """Source-file metadata carried alongside content on `put`; adapters apply what their backend can."""
 
     size: int
-    mtime: float
+    mtime: Optional[float]           # None leaves the mtime unchanged (set_meta); `put` always supplies it
     mode: Optional[int] = None
     uid: Optional[int] = None
     gid: Optional[int] = None

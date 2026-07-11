@@ -78,7 +78,13 @@ class TransferPool:
             stat = source.stat(PurePosixPath(path))
             if stat is None or stat.kind != 'file':
                 raise TierError(f'No file at {path} in tier {source.name}')
-            meta = FileMeta(size=stat.size, mtime=stat.mtime, mode=stat.mode, uid=stat.uid, gid=stat.gid)
+            # Content (size/mtime) comes from the copied bytes; the catalog is the authority
+            # for mode/ownership, so a pending chmod/chown is never clobbered by a stale on-disk copy.
+            entry = self.catalog.get(path, include_deleted=True)
+            meta = FileMeta(size=stat.size, mtime=stat.mtime,
+                            mode=entry.mode if entry is not None else stat.mode,
+                            uid=entry.uid if entry is not None else stat.uid,
+                            gid=entry.gid if entry is not None else stat.gid)
             materialize_dirs(self.catalog, dest, path)
             with source.open_read(PurePosixPath(path)) as stream:
                 dest.put(PurePosixPath(path), stream, meta=meta)
