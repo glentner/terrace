@@ -2,7 +2,7 @@
 status: in-progress
 current_phase: 5
 phases_completed: ["1", "2", "3", "4"]
-last_updated: 2026-07-04
+last_updated: 2026-07-11
 plan_ref: "PLAN.md"
 ---
 
@@ -130,7 +130,7 @@ All policy logic is driven by an injectable clock so tests are deterministic.
 - [x] `src/sosfs/engine/evict.py`: `EvictionManager` FSM thread — high/low watermarks
       (default 95%/85%), LRU on per-tier atime, commit-before-evict, never evict the
       most-upstream dirty holder, `bypass_size` respected
-- [ ] Drain mode: collapse policy clocks, waive re-sync rate limits, loss-risk ordering
+- [x] Drain mode: collapse policy clocks, waive re-sync rate limits, loss-risk ordering
       (most-volatile dirty first, then upstream hop by hop)
 - [ ] Rescue mode: dirty data on `scope = "node"` tiers one hop to the nearest shared
       durable tier, bounded by a time budget; shared ordering logic with drain
