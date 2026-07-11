@@ -144,7 +144,7 @@ All policy logic is driven by an injectable clock so tests are deterministic.
 
 The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle → Shutdown).
 
-- [ ] `src/sosfs/fuse/adapter.py`: mfusepy `Operations` mapping FUSE callbacks to engine
+- [x] `src/sosfs/fuse/adapter.py`: mfusepy `Operations` mapping FUSE callbacks to engine
       calls; `statfs` from source capacity (or configured quota for unbounded sources);
       read-only xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`)
 - [ ] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized

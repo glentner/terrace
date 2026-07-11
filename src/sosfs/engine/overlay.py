@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from sosfs.core.exceptions import SOSFSError
 from sosfs.core.logging import Logger
 from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog, Entry, normalize, parent_of
+from sosfs.state.catalog import Catalog, Entry, Residency, normalize, parent_of
 from sosfs.state.journal import Journal, Writeback
 from sosfs.state.lifecycle import Lifecycle, MarkerStatus
 from sosfs.state.registry import TierRegistry
@@ -253,6 +253,14 @@ class OverlayEngine:
                 if stat is not None:
                     entry = dataclasses.replace(entry, size=stat.size, mtime=stat.mtime)
         return entry
+
+    def residencies(self, path: str) -> List[Residency]:
+        """
+        Every tier holding a copy of `path`, source-first — the read behind the
+        FUSE observability xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`).
+        """
+        entry = self.getattr(path)
+        return self.catalog.residencies(entry.path)
 
     def readdir(self, path: str) -> List[Entry]:
         """Children of the directory at `path` (the adapter adds '.' and '..')."""
