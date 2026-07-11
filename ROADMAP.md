@@ -132,7 +132,7 @@ All policy logic is driven by an injectable clock so tests are deterministic.
       most-upstream dirty holder, `bypass_size` respected
 - [x] Drain mode: collapse policy clocks, waive re-sync rate limits, loss-risk ordering
       (most-volatile dirty first, then upstream hop by hop)
-- [ ] Rescue mode: dirty data on `scope = "node"` tiers one hop to the nearest shared
+- [x] Rescue mode: dirty data on `scope = "node"` tiers one hop to the nearest shared
       durable tier, bounded by a time budget; shared ordering logic with drain
 - [ ] Virtual-clock policy tests: grace expiry, max-interval under constant writes,
       passthrough, watermark hysteresis, drain/rescue ordering under constrained budgets

@@ -709,6 +709,40 @@ class OverlayEngine:
                         self.journal.settle(row.id)
         log.trace(f'Committed {path} to source')
 
+    def commit_to_shared(self, path: str) -> bool:
+        """
+        Rescue one file: commit its newest dirty copy upstream hop by hop only
+        until the copy rests on a shared (non-node) tier — the minimal move that
+        survives losing the node (PLAN.md -> Lifecycle, Detach/Rescue). Unlike
+        `commit_upstream`, which finalizes the source, this stops at the first
+        shared tier and leaves the copy dirty there for a later `sosfs commit`;
+        when the only shared tier upstream is the source, it finalizes there.
+
+        Each hop keeps the residency invariant truthful (a copy goes clean only
+        once its immediate upstream holds its bytes), so the data traverses any
+        intervening node tiers rather than skipping them. Returns True when a hop
+        moved data onto shared storage, False when the newest dirty copy is
+        already shared (or the file is clean). The engine must be quiescent, as
+        for a drain.
+        """
+        path = normalize(path)
+        scope = {tier.name: tier.scope for tier in self.spec.tiers}
+        moved = False
+        with self.locks.hold(path):
+            while True:
+                movable = [residency for residency in self.catalog.residencies(path)
+                           if residency.state == 'dirty' and self.upstream_of(residency.tier) is not None]
+                if not movable:
+                    break                                   # nothing dirty below the source
+                holder = movable[-1]                        # most-downstream dirty copy
+                if scope[holder.tier] != 'node':
+                    break                                   # newest dirty data already on shared storage
+                self._commit_hop(path, holder.tier, self.upstream_of(holder.tier).name)
+                moved = True
+        if moved:
+            log.trace(f'Rescued {path} to shared storage')
+        return moved
+
     def flush(self) -> None:
         """
         Push everything queued to the source now, ignoring policy clocks:
