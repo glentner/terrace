@@ -150,7 +150,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [x] Metadata-mutation tier support: add `set_meta` to the `Tier` protocol
       (`tier/protocol.py`) and implement it in `PosixTier` (mode and mtime always, ownership
       best-effort under privilege — reuse `put`'s metadata-application path); unit tests
-- [ ] Engine setattr path (`engine/overlay.py`): `chmod`/`chown`/`utimens` record to the
+- [x] Engine setattr path (`engine/overlay.py`): `chmod`/`chown`/`utimens` record to the
       catalog via `update_meta` (metadata-before-ack), apply to the fastest resident copy, and
       enqueue a `meta` write-back op carrying only the changed attributes; wire the `meta`
       branch in `_execute_namespace` to apply upstream via `Tier.set_meta`; a `meta` op never

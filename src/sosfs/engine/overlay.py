@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 # Standard libs
 import io
@@ -478,6 +478,63 @@ class OverlayEngine:
             else:
                 self.catalog.purge(path)
 
+    # -- metadata -----------------------------------------------------------------------------------------------
+
+    def chmod(self, path: str, mode: int) -> Entry:
+        """Change permission bits; durable in the catalog now, on the source via the queue."""
+        return self._set_meta(path, fields=('mode',), mode=mode & 0o7777)
+
+    def chown(self, path: str, uid: Optional[int] = None, gid: Optional[int] = None) -> Entry:
+        """
+        Change ownership. `-1` or None leaves a field alone (POSIX chown semantics);
+        application to managed copies is best-effort (an unprivileged mount cannot
+        chown), but the catalog records the intent regardless — it is the authority.
+        """
+        changed = {}
+        if uid is not None and uid != -1:
+            changed['uid'] = uid
+        if gid is not None and gid != -1:
+            changed['gid'] = gid
+        return self._set_meta(path, fields=tuple(changed), **changed)
+
+    def utimens(self, path: str, atime: float, mtime: float) -> Entry:
+        """Set access and modification times; the tier copies carry mtime, the catalog keeps both."""
+        return self._set_meta(path, fields=('mtime',), atime=atime, mtime=mtime)
+
+    def _set_meta(self, path: str, *, fields: Tuple[str, ...], mode: Optional[int] = None,
+                  uid: Optional[int] = None, gid: Optional[int] = None,
+                  atime: Optional[float] = None, mtime: Optional[float] = None) -> Entry:
+        """
+        Shared setattr core (PLAN.md -> Write-back): record the attribute change in
+        the catalog (metadata before acknowledgment) and enqueue a `meta` write-back
+        op that reaches the source on the namespace clock, then apply the change to
+        the fastest resident copy so a later content commit carries it. A `meta` op
+        changes no bytes, so it never touches the residency dirty state.
+        """
+        path = normalize(path)
+        with self.locks.hold(path):
+            entry = self._ensure(path)
+            if entry is None:
+                raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+            now = self.clock()
+            target_mtime = mtime if mtime is not None else entry.mtime
+            fastest = self.catalog.fastest_copy(path) if entry.kind == 'file' else None
+            holder = None if fastest is None or fastest.tier == self.source.name else fastest.tier
+            updates: Dict[str, object] = {'ctime': now}
+            for name, value in (('mode', mode), ('uid', uid), ('gid', gid), ('atime', atime), ('mtime', mtime)):
+                if value is not None:
+                    updates[name] = value
+            with self.db.transaction():
+                self.catalog.update_meta(path, **updates)
+                self.journal.queue(path, 'meta', to_tier=self.source.name, now=now, detail={'fields': list(fields)})
+                if holder is not None and mtime is not None:
+                    self.catalog.update_residency(path, holder, mtime=target_mtime)
+            if holder is not None:
+                self.tiers[holder].set_meta(
+                    _pure(path), FileMeta(size=entry.size, mtime=target_mtime, mode=mode, uid=uid, gid=gid))
+        log.trace(f'Set meta {path} (fields={",".join(fields) or "-"})')
+        return self.catalog.get(path)
+
     # -- data path ----------------------------------------------------------------------------------------------
 
     def open(self, path: str, flags: int = os.O_RDONLY) -> Handle:
@@ -804,6 +861,16 @@ class OverlayEngine:
                     self.source.rename(PurePosixPath(row.detail['old']), _pure(path))
                 except FileNotFoundError:
                     pass                                    # nothing at the old path; data ops fill in
+            elif row.op == 'meta':
+                fields = set(detail.get('fields', ()))
+                try:
+                    self.source.set_meta(_pure(path), FileMeta(
+                        size=entry.size, mtime=entry.mtime,
+                        mode=entry.mode if 'mode' in fields else None,
+                        uid=entry.uid if 'uid' in fields else None,
+                        gid=entry.gid if 'gid' in fields else None))
+                except FileNotFoundError:
+                    pass                                    # source copy not materialized yet; the data commit carries it
             else:
                 raise EngineError(f'Unhandled namespace op: {row.op}')
         except BaseException:
@@ -825,6 +892,10 @@ class OverlayEngine:
                     if stat is not None and entry.kind == 'file':
                         self.catalog.add_residency(path, self.source.name,
                                                    atime=now, size=stat.size, mtime=stat.mtime)
+            elif row.op == 'meta':
+                if 'mtime' in set(detail.get('fields', ())) \
+                        and self.catalog.get_residency(path, self.source.name) is not None:
+                    self.catalog.update_residency(path, self.source.name, mtime=entry.mtime)
 
     def _vacate(self, path: str) -> None:
         """
