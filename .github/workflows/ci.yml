@@ -11,7 +11,9 @@ jobs:
   unit:
     name: Unit (Linux, ${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 3.15t compiles obstore from source (no free-threaded wheel yet); allow headroom
+    # for a cold Rust build. uv's cache makes subsequent runs fast.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +27,13 @@ jobs:
           enable-cache: true
       - name: Install Python
         run: uv python install ${{ matrix.python }}
+      # obstore ships no free-threaded (cp315t) wheel — its cp311-abi3 wheel is unusable on
+      # free-threaded builds and its newest cp3XXt wheel targets 3.14t. On 3.15t, uv compiles
+      # obstore from source via maturin/pyo3, which needs a Rust toolchain (verified Phase 7:
+      # builds and imports GIL-disabled). Regular 3.15 uses the abi3 wheel and skips this.
+      - name: Install Rust toolchain (free-threaded source build)
+        if: ${{ endsWith(matrix.python, 't') }}
+        uses: dtolnay/rust-toolchain@stable
       - name: Install project
         run: uv sync
       - name: Assert free-threading is active

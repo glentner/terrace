@@ -177,7 +177,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 
 Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
 
-- [ ] Risk gate: verify obstore free-threaded (cp315t) wheels; if absent, wire
+- [x] Risk gate: verify obstore free-threaded (cp315t) wheels; if absent, wire
       source-build in CI and record the outcome in PLAN.md (Risks)
 - [ ] `src/sosfs/tier/s3.py`: `S3Tier` via obstore (`get`/`get_range`/`put`/`list`/`head`);
       note: S3 PUT is atomic per key, so the intent journal's act step is a single PUT

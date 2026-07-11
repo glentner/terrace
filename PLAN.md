@@ -422,7 +422,7 @@ Decided 2026-07-01 with rationale; alternatives noted.
 | Python baseline | **3.15** (beta now; final 2026-10-01), free-threaded build a first-class target | Research brief calls for modern innovations: lazy imports (PEP 810), `frozendict` (PEP 814), sampling profiler (PEP 799), stable free-threaded ABI (PEP 803). CI on both builds. Rejected: 3.14 floor. |
 | FUSE binding | **mfusepy**, threaded | Maintained fusepy fork (ratarmount's binding); high-level path API; libfuse 2/3 + macFUSE (dev on macOS); pure ctypes → runs unmodified free-threaded. Rejected: pyfuse3 (async/Trio, Linux-only, forces async through the engine); fusepy (unmaintained). |
 | Tier abstraction | **Purpose-built `Tier` protocol** | Small owned surface; no third-party caching semantics fighting our tiering. Rejected: fsspec (~56-method API, tar read-only anyway); hybrid. |
-| S3 SDK | **obstore** | Rust-backed; API maps 1:1 onto the protocol; strong async/throughput story. Risk: free-threaded (cp315t) wheels — verify in Phase 7, fall back to source builds in CI. Rejected: boto3 (pure Python, but clunky/slow). |
+| S3 SDK | **obstore** | Rust-backed; API maps 1:1 onto the protocol; strong async/throughput story. Free-threaded (cp315t) wheels absent (verified Phase 7); CI compiles obstore from source on 3.15t (see Risks). Rejected: boto3 (pure Python, but clunky/slow). |
 | Staging granularity | **Whole-file + size bypass, range-ready protocol** | Simple and predictable for v1; `bypass_size` handles files larger than a tier; range ops in the protocol keep chunk-level staging a non-breaking future phase. |
 | State store | **stdlib `sqlite3`** (WAL, plain SQL schema) | Zero deps, transparent, free-threading-friendly. Rejected: SQLAlchemy (house style, but heavyweight for a small embedded schema). |
 | Archives | **stdlib `zipfile`/`tarfile`** | ZIP append-supersede + compaction; uncompressed TAR append; tar.gz always staged re-sync. Optimization path (indexed gzip random access) is future work. |
@@ -462,8 +462,14 @@ Risks and mitigations
 * **Python FUSE throughput** — this is a reference implementation, not a kernel bypass;
   mitigate with passthrough file handles for resident-copy I/O, free-threading, and a
   benchmark harness (Phase 10) to keep honest numbers in the docs.
-* **obstore free-threaded wheels** — verify at Phase 7 start; fall back to source builds,
-  or (worst case) a boto3 adapter behind the same protocol.
+* **obstore free-threaded wheels** — *verified 2026-07-11 (Phase 7 start): absent.* obstore
+  0.11.0 publishes `cp310`, `cp311-abi3`, `cp314-cp314t`, and PyPy wheels — no `cp315t`, and
+  the abi3 wheel is not usable on free-threaded builds, so `uv sync --only-binary` on 3.15t is
+  unsatisfiable. Mitigation is live: the CI 3.15t job installs a Rust toolchain and `uv sync`
+  compiles obstore from source via maturin/pyo3 — confirmed to build and import with the GIL
+  disabled (`_obstore.cpython-315t*.so`, `sys._is_gil_enabled() is False`), with uv's wheel
+  cache reusing the build across runs. A boto3 adapter behind the same protocol remains the
+  worst-case fallback should pyo3 free-threaded support regress.
 * **3.15 is beta until October** — pin beta in `.python-version` via uv; the final lands
   mid-roadmap; nothing in the design depends on beta-only behavior.
 * **macFUSE dev friction** (kext approval) — engine-first testing means mounts are rarely
