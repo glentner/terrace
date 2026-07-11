@@ -58,6 +58,10 @@ class MemoryTier:
         data = source.read_bytes() if isinstance(source, Path) else source.read()
         self.files[str(path)] = (data, meta)
 
+    def set_meta(self, path: PurePosixPath, meta: FileMeta) -> None:
+        data, previous = self.files[str(path)]
+        self.files[str(path)] = (data, dataclasses.replace(previous, mtime=meta.mtime, mode=meta.mode))
+
     def delete(self, path: PurePosixPath) -> None:
         del self.files[str(path)]
 

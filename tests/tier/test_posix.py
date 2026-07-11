@@ -213,6 +213,35 @@ def test_managed_internals_hidden_and_guarded(tier: PosixTier) -> None:
             operation()
 
 
+def test_set_meta_changes_mode_and_mtime(tier: PosixTier) -> None:
+    """set_meta applies mode and mtime to an existing file without touching its content."""
+    put(tier, '/f', b'payload', mode=0o644, mtime=100.0)
+    tier.set_meta(PurePosixPath('/f'), FileMeta(size=0, mtime=4242.0, mode=0o600))
+    result = tier.stat(PurePosixPath('/f'))
+    assert (result.mode, result.mtime) == (0o600, 4242.0)
+    assert tier.read(PurePosixPath('/f')) == b'payload'      # content untouched
+
+
+def test_set_meta_mode_none_leaves_mode(tier: PosixTier) -> None:
+    """A None mode leaves the permission bits alone (only mtime moves)."""
+    put(tier, '/f', b'x', mode=0o640, mtime=100.0)
+    tier.set_meta(PurePosixPath('/f'), FileMeta(size=0, mtime=200.0, mode=None))
+    result = tier.stat(PurePosixPath('/f'))
+    assert (result.mode, result.mtime) == (0o640, 200.0)
+
+
+def test_set_meta_missing_raises(tier: PosixTier) -> None:
+    """set_meta on an absent path raises the natural FileNotFoundError."""
+    with raises(FileNotFoundError):
+        tier.set_meta(PurePosixPath('/nope'), FileMeta(size=0, mtime=1.0, mode=0o644))
+
+
+def test_set_meta_refuses_internal(tier: PosixTier) -> None:
+    """The managed '.sosfs' tree refuses metadata mutation like every other write."""
+    with raises(PermissionError):
+        tier.set_meta(PurePosixPath('/.sosfs/marker'), FileMeta(size=0, mtime=1.0, mode=0o600))
+
+
 def test_escape_refused(tier: PosixTier) -> None:
     """Parent-directory components never resolve outside the root."""
     with raises(ValueError):

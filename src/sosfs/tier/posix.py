@@ -149,6 +149,14 @@ class PosixTier:
             raise
         log.trace(f'Put {pure} (tier={self.name}, size={meta.size})')
 
+    def set_meta(self, path: PurePosixPath, meta: FileMeta) -> None:
+        """Apply mode/ownership/mtime to the existing object at `path` (content untouched)."""
+        pure = self._pure(path)
+        if self._internal(pure):
+            raise PermissionError(f'Managed internal: {pure}')
+        self._apply_meta(self.resolve(pure), meta)
+        log.trace(f'Set meta {pure} (tier={self.name}, mode={meta.mode}, mtime={meta.mtime})')
+
     @staticmethod
     def _apply_meta(real: Path, meta: FileMeta) -> None:
         """Apply what the backend can: mode and mtime always, ownership only with privilege."""

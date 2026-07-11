@@ -147,7 +147,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [x] `src/sosfs/fuse/adapter.py`: mfusepy `Operations` mapping FUSE callbacks to engine
       calls; `statfs` from source capacity (or configured quota for unbounded sources);
       read-only xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`)
-- [ ] Metadata-mutation tier support: add `set_meta` to the `Tier` protocol
+- [x] Metadata-mutation tier support: add `set_meta` to the `Tier` protocol
       (`tier/protocol.py`) and implement it in `PosixTier` (mode and mtime always, ownership
       best-effort under privilege — reuse `put`'s metadata-application path); unit tests
 - [ ] Engine setattr path (`engine/overlay.py`): `chmod`/`chown`/`utimens` record to the

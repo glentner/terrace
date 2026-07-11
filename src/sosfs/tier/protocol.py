@@ -103,6 +103,14 @@ class Tier(Protocol):
     def put(self, path: PurePosixPath, source: BinaryIO | Path, *, meta: FileMeta) -> None:
         """Store the full content of `source` at `path` atomically, applying `meta` where possible."""
 
+    def set_meta(self, path: PurePosixPath, meta: FileMeta) -> None:
+        """
+        Apply `meta` (mode, ownership, mtime) to the existing object at `path`, as far as
+        the backend allows — the content is untouched. `size` and `checksum` are ignored;
+        ownership is best-effort where the process lacks privilege. Raises the natural
+        `OSError` (e.g. `FileNotFoundError`) when nothing exists at `path`.
+        """
+
     def delete(self, path: PurePosixPath) -> None:
         """Remove the file at `path`."""
 
