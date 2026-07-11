@@ -156,7 +156,7 @@ The thin layer that makes it a filesystem (PLAN.md â†’ FUSE adapter, Lifecycle â
       branch in `_execute_namespace` to apply upstream via `Tier.set_meta`; a `meta` op never
       dirties content (it rides the namespace-op queue, not the residency dirty bit);
       flush/drain carry it like other namespace ops; engine + write-back-clock unit tests
-- [ ] FUSE adapter (`fuse/adapter.py`): override `chmod`/`chown`/`utimens` to the engine
+- [x] FUSE adapter (`fuse/adapter.py`): override `chmod`/`chown`/`utimens` to the engine
       setattr path (replacing the current unimplemented/`ENOSYS` behavior), returning 0 on
       success; adapter unit tests
 - [ ] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized

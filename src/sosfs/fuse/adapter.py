@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # Standard libs
 import os
@@ -161,6 +161,27 @@ class OverlayOperations(Operations):
     def rename(self, old: str, new: str) -> int:
         """Rename, replacing any file (or empty directory) at the destination."""
         self.engine.rename(old, new)
+        return 0
+
+    # -- metadata (setattr) -------------------------------------------------------------------------------------
+
+    def chmod(self, path: str, mode: int) -> int:
+        """Change permission bits (propagated to the source on the write-back clock)."""
+        self.engine.chmod(path, mode)
+        return 0
+
+    def chown(self, path: str, uid: int, gid: int) -> int:
+        """Change ownership; `-1` leaves a field unchanged, application is best-effort under privilege."""
+        self.engine.chown(path, uid, gid)
+        return 0
+
+    def utimens(self, path: str, times: Optional[Tuple[float, float]] = None) -> int:
+        """Set access and modification times; `None` means now (the engine clock)."""
+        if times is None:
+            atime = mtime = self.engine.clock()
+        else:
+            atime, mtime = times
+        self.engine.utimens(path, atime, mtime)
         return 0
 
     # -- data path ----------------------------------------------------------------------------------------------

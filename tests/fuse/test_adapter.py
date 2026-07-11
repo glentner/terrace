@@ -151,6 +151,42 @@ def test_rename(operations: OverlayOperations) -> None:
     assert info.value.errno == errno.ENOENT
 
 
+# -- metadata (setattr) -----------------------------------------------------------------------------------------
+
+def test_chmod_maps_to_engine(operations: OverlayOperations) -> None:
+    """chmod changes the permission bits seen through getattr (no longer ENOSYS)."""
+    assert operations.chmod('/data/a.txt', 0o600) == 0
+    assert stat.S_IMODE(operations.getattr('/data/a.txt')['st_mode']) == 0o600
+
+
+def test_chown_maps_to_engine(operations: OverlayOperations) -> None:
+    """chown records ownership; -1 leaves a field unchanged."""
+    assert operations.chown('/data/a.txt', os.getuid(), os.getgid()) == 0
+    attrs = operations.getattr('/data/a.txt')
+    assert (attrs['st_uid'], attrs['st_gid']) == (os.getuid(), os.getgid())
+
+
+def test_utimens_explicit_times(operations: OverlayOperations) -> None:
+    """utimens with an explicit (atime, mtime) tuple sets both."""
+    assert operations.utimens('/data/a.txt', (555.0, 777.0)) == 0
+    attrs = operations.getattr('/data/a.txt')
+    assert (attrs['st_atime'], attrs['st_mtime']) == (555.0, 777.0)
+
+
+def test_utimens_now_uses_clock(operations: OverlayOperations) -> None:
+    """utimens with no times stamps the current (engine-clock) time over the seeded mtime."""
+    assert operations.getattr('/top.txt')['st_mtime'] == 50.0
+    assert operations.utimens('/top.txt', None) == 0
+    assert operations.getattr('/top.txt')['st_mtime'] > 50.0
+
+
+def test_chmod_missing_is_enoent(operations: OverlayOperations) -> None:
+    """chmod on a missing path is ENOENT."""
+    with raises(OSError) as info:
+        operations.chmod('/nope', 0o600)
+    assert info.value.errno == errno.ENOENT
+
+
 # -- statfs -----------------------------------------------------------------------------------------------------
 
 def test_statfs_reports_source_capacity(operations: OverlayOperations) -> None:
