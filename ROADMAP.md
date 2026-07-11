@@ -162,7 +162,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [x] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized
       (default) modes, pidfile in the state directory, `shutdown_state = mounted` on
       start, state-dir validation
-- [ ] Signal handling: SIGINT → drain → `clean`; second SIGINT → downgrade to detach;
+- [x] Signal handling: SIGINT → drain → `clean`; second SIGINT → downgrade to detach;
       SIGTERM → detach with `drain_timeout` rescue budget → `detached`
 - [ ] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
       `--detach` (SIGTERM), `--force` (plain unmount, skips even the rescue)

@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import time
+import signal
 import socket
 import threading
 import subprocess
@@ -126,6 +127,7 @@ class Mount:
         self._sigint = 0
         self._stop = threading.Event()
         self._loop_error: Optional[Exception] = None
+        self._prev_handlers: Dict = {}
 
     @property
     def pidfile(self) -> Path:
@@ -217,6 +219,44 @@ class Mount:
             self._remove_pidfile()
         log.info(f'Unmounted {self.spec.name!r} ({mode.value} -> {state})')
 
+    # -- signals ------------------------------------------------------------------------------------------------
+
+    def _on_sigint(self, *_) -> None:
+        """SIGINT: drain to the source; a repeat mid-drain downgrades to a detach (PLAN.md -> Shutdown)."""
+        self._sigint += 1
+        if self._mode is None:
+            self._mode = Shutdown.DRAIN
+            log.warning('SIGINT — draining to source (send SIGINT again to downgrade to detach)')
+        elif self._mode is Shutdown.DRAIN:
+            log.warning('SIGINT — downgrading drain to detach')
+        self._stop.set()
+
+    def _on_sigterm(self, *_) -> None:
+        """SIGTERM: detach now, rescuing node-local dirty data within the `drain_timeout` budget."""
+        if self._mode is None:
+            self._mode = Shutdown.DETACH
+            log.warning('SIGTERM — detaching (rescuing node-local dirty data)')
+        self._stop.set()
+
+    def _install_signals(self) -> None:
+        """Take over SIGINT/SIGTERM for the serve loop; a no-op off the main thread (as in tests)."""
+        try:
+            self._prev_handlers = {signal.SIGINT: signal.signal(signal.SIGINT, self._on_sigint),
+                                   signal.SIGTERM: signal.signal(signal.SIGTERM, self._on_sigterm)}
+            log.trace('Installed SIGINT/SIGTERM shutdown handlers')
+        except ValueError:
+            self._prev_handlers = {}
+            log.debug('Signal handlers not installed (serving off the main thread)')
+
+    def _restore_signals(self) -> None:
+        """Restore the signal handlers that were in place before the serve loop."""
+        for sig, handler in self._prev_handlers.items():
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, TypeError):
+                pass
+        self._prev_handlers = {}
+
     # -- serve loop ---------------------------------------------------------------------------------------------
 
     def _default_runner(self) -> None:
@@ -243,19 +283,27 @@ class Mount:
             log.error(f'Could not break FUSE loop: {exc}')
 
     def _serve_after_start(self) -> None:
-        """Run the FUSE loop on a worker thread, wait for a shutdown request, then tear down."""
-        fuse_thread = threading.Thread(target=self._run_loop, name='sosfs-fuse', daemon=True)
-        fuse_thread.start()
-        while fuse_thread.is_alive():
-            if self._stop.wait(0.5):
-                if fuse_thread.is_alive():
-                    self._break_loop()
-                break
-        fuse_thread.join()
-        if self._loop_error is not None:
-            self.shutdown(Shutdown.FORCE)
-            raise MountError(f'FUSE session failed: {self._loop_error}') from self._loop_error
-        self.shutdown(self._mode or Shutdown.FORCE)
+        """
+        Run the FUSE loop on a worker thread, wait for a shutdown signal, then
+        tear down. The signal handlers stay installed across `shutdown` so a
+        second SIGINT is still caught mid-drain and downgrades it to a detach.
+        """
+        self._install_signals()
+        try:
+            fuse_thread = threading.Thread(target=self._run_loop, name='sosfs-fuse', daemon=True)
+            fuse_thread.start()
+            while fuse_thread.is_alive():
+                if self._stop.wait(0.5):
+                    if fuse_thread.is_alive():
+                        self._break_loop()
+                    break
+            fuse_thread.join()
+            if self._loop_error is not None:
+                self.shutdown(Shutdown.FORCE)
+                raise MountError(f'FUSE session failed: {self._loop_error}') from self._loop_error
+            self.shutdown(self._mode or Shutdown.FORCE)
+        finally:
+            self._restore_signals()
 
     def serve(self) -> None:
         """Start the overlay and run the FUSE session until shutdown (the foreground path)."""

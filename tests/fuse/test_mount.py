@@ -158,6 +158,50 @@ def test_serve_runs_the_loop_and_tears_down_on_request(tmp_path: Path, mountpoin
     assert settled_state(mount.spec.state) == 'clean'
 
 
+def test_sigint_selects_drain_and_counts_repeats(tmp_path: Path, mountpoint: Path, clock: Clock) -> None:
+    """SIGINT requests a drain; repeats bump the counter that a mid-drain cancel reads, mode unchanged."""
+    mount, _ = make_mount(tmp_path, mountpoint, clock)
+    mount._on_sigint()
+    assert mount._mode is Shutdown.DRAIN and mount._sigint == 1 and mount._stop.is_set()
+    mount._on_sigint()
+    assert mount._mode is Shutdown.DRAIN and mount._sigint == 2
+
+
+def test_sigterm_selects_detach(tmp_path: Path, mountpoint: Path, clock: Clock) -> None:
+    """SIGTERM requests a detach; a later SIGINT does not steal the mode but is still counted."""
+    mount, _ = make_mount(tmp_path, mountpoint, clock)
+    mount._on_sigterm()
+    assert mount._mode is Shutdown.DETACH and mount._stop.is_set()
+    mount._on_sigint()
+    assert mount._mode is Shutdown.DETACH and mount._sigint == 1
+
+
+def test_second_sigint_mid_drain_downgrades_to_detach(tmp_path: Path, mountpoint: Path, clock: Clock,
+                                                      monkeypatch) -> None:
+    """A second SIGINT during the drain cancels it after the most-volatile file, settling `detached`."""
+    mount, _ = make_mount(tmp_path, mountpoint, clock, tiers=3)
+    mount.start()
+    dirty_new(mount.engine, '/a.dat', b'aaaa')
+    dirty_new(mount.engine, '/b.dat', b'bbbb')             # two node-local dirty files -> two drain commits
+    mount._on_sigint()                                     # first SIGINT: mode=DRAIN
+
+    real = mount.engine.commit_upstream
+    committed = []
+
+    def wrapped(path: str) -> None:
+        committed.append(path)
+        real(path)
+        mount._on_sigint()                                 # a second SIGINT arrives during the first commit
+
+    monkeypatch.setattr(mount.engine, 'commit_upstream', wrapped)
+    mount.shutdown(mount._mode)
+    assert mount._sigint == 2
+    assert len(committed) == 1                             # cancel fired before the second file
+    assert settled_state(mount.spec.state) == 'detached'
+    at_source = [name for name in ('a.dat', 'b.dat') if (tmp_path / 'project' / name).exists()]
+    assert len(at_source) == 1                             # only the volatile-first file reached the source
+
+
 def test_serve_surfaces_a_loop_failure(tmp_path: Path, mountpoint: Path, clock: Clock) -> None:
     """A FUSE session that dies is reported as a `MountError` and force-stops the overlay."""
     def boom() -> None:
