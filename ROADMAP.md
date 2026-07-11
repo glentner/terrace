@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 6
-phases_completed: ["1", "2", "3", "4", "5"]
+current_phase: 7
+phases_completed: ["1", "2", "3", "4", "5", "6"]
 last_updated: 2026-07-11
 plan_ref: "PLAN.md"
 ---
@@ -166,10 +166,10 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
       SIGTERM → detach with `drain_timeout` rescue budget → `detached`
 - [x] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
       `--detach` (SIGTERM), `--force` (plain unmount, skips even the rescue)
-- [ ] FUSE integration tests (`@mark.integration`, Linux): POSIX tooling against a real
+- [x] FUSE integration tests (`@mark.integration`, Linux): POSIX tooling against a real
       mount, xattr residency assertions, metadata propagation (`chmod`/`chown`/`touch`
       reflected at the source after flush), mount/umount/detach lifecycle
-- [ ] **Commit (logical):** "Phase 6 — mfusepy adapter, metadata-mutation propagation,
+- [x] **Commit (logical):** "Phase 6 — mfusepy adapter, metadata-mutation propagation,
       mount/umount commands, signal lifecycle (drain, detach, rescue budget)"
 
 
