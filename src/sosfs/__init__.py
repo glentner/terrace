@@ -101,11 +101,46 @@ class MountApp(Application):
         Mount(overlay, self.mountpoint, foreground=self.foreground or self.debug, debug=self.debug).run()
 
 
-class UmountApp(StubApp):
+UMOUNT_USAGE = """\
+Usage:
+  sosfs umount [-h] <spec> [--detach | --force]
+  Drain (or detach) and unmount a running overlay.\
+"""
+
+UMOUNT_HELP = f"""\
+{UMOUNT_USAGE}
+
+Arguments:
+  spec                   Path to the overlay spec (TOML); its state directory locates the daemon.
+
+Options:
+      --detach           Detach (rescue node-local dirty data, finalize later with `commit`).
+      --force            Plain unmount, skipping even the rescue.
+  -h, --help             Show this message and exit.
+
+With no option the overlay drains fully to the source and settles clean.\
+"""
+
+
+class UmountApp(Application):
     """Drain (or detach) and unmount an overlay."""
-    command, phase = 'umount', 6
-    interface = Interface('sosfs umount', stub_usage('umount', __doc__), stub_usage('umount', __doc__))
-    interface.add_argument('args', nargs='*')
+
+    interface = Interface('sosfs umount', UMOUNT_USAGE, UMOUNT_HELP)
+    interface.add_argument('spec')
+    interface.add_argument('--detach', action='store_true')
+    interface.add_argument('--force', action='store_true')
+    exceptions = get_shared_exception_mapping()
+
+    spec: str
+    detach: bool = False
+    force: bool = False
+
+    def run(self) -> None:
+        """Load the spec and ask the running daemon to tear down (FUSE imports stay lazy)."""
+        from sosfs.tier.spec import OverlaySpec
+        from sosfs.fuse.mount import request_shutdown
+        overlay = OverlaySpec.load(self.spec)
+        request_shutdown(overlay, detach=self.detach, force=self.force)
 
 
 class StatusApp(StubApp):

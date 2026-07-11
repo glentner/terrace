@@ -164,7 +164,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
       start, state-dir validation
 - [x] Signal handling: SIGINT → drain → `clean`; second SIGINT → downgrade to detach;
       SIGTERM → detach with `drain_timeout` rescue budget → `detached`
-- [ ] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
+- [x] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
       `--detach` (SIGTERM), `--force` (plain unmount, skips even the rescue)
 - [ ] FUSE integration tests (`@mark.integration`, Linux): POSIX tooling against a real
       mount, xattr residency assertions, metadata propagation (`chmod`/`chown`/`touch`

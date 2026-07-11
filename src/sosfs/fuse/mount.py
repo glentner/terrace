@@ -31,7 +31,8 @@ from sosfs.engine.drain import drain
 from sosfs.engine.rescue import rescue
 
 # Public interface
-__all__ = ['Mount', 'Shutdown', 'MountError', 'unmount', 'read_pidfile', 'PIDFILE_NAME', 'LOCK_NAME']
+__all__ = ['Mount', 'Shutdown', 'MountError', 'unmount', 'read_pidfile', 'request_shutdown',
+           'PIDFILE_NAME', 'LOCK_NAME']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -90,6 +91,49 @@ def read_pidfile(state: str | Path) -> Optional[Dict]:
     except (json.JSONDecodeError, ValueError):
         log.warning(f'Ignoring unparseable pidfile in {state}')
         return None
+
+
+def _wait_for_unmount(state: str | Path, *, poll: float = 0.2) -> None:
+    """Block until the daemon drops its pidfile (its teardown has finished); Ctrl-C stops waiting."""
+    try:
+        while read_pidfile(state) is not None:
+            time.sleep(poll)
+    except KeyboardInterrupt:
+        log.warning('Stopped waiting for unmount to finish (the daemon is still tearing down)')
+
+
+def request_shutdown(spec: OverlaySpec, *, detach: bool = False, force: bool = False, wait: bool = True) -> None:
+    """
+    Ask a running mount daemon to tear down (`sosfs umount`, PLAN.md -> Shutdown).
+    Default is a drain (SIGINT); `detach` is a detach (SIGTERM, rescue then stop);
+    `force` skips even the rescue by unmounting the mount point directly, which
+    breaks the daemon's loop into a force teardown. Resolution is via the pidfile
+    in the overlay state directory; `wait` blocks until the daemon has finished.
+    """
+    if detach and force:
+        raise MountError('Choose at most one of --detach and --force')
+    record = read_pidfile(spec.state)
+    if force:
+        mountpoint = (record or {}).get('mountpoint')
+        if mountpoint is None:
+            raise MountError(f'No pidfile for overlay {spec.name!r} in {spec.state}; cannot resolve mount point')
+        unmount(mountpoint)
+        log.info(f'Force-unmounted {mountpoint}')
+    else:
+        if record is None:
+            raise MountError(f'No running mount for overlay {spec.name!r} (no pidfile in {spec.state})')
+        if record.get('host') and record['host'] != socket.gethostname():
+            raise MountError(f'Overlay {spec.name!r} is mounted on {record["host"]}, not this host — '
+                             f'unmount it there, or finalize with `sosfs commit`')
+        pid = int(record['pid'])
+        sig = signal.SIGTERM if detach else signal.SIGINT
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            raise MountError(f'Mount daemon (pid {pid}) is not running — stale pidfile in {spec.state}') from None
+        log.info(f'Requested {"detach" if detach else "drain"} of {spec.name!r} (pid {pid})')
+    if wait:
+        _wait_for_unmount(spec.state)
 
 
 class Mount:

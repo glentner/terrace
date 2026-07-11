@@ -9,6 +9,9 @@ from typing import Optional, Tuple
 
 # Standard libs
 import os
+import json
+import signal
+import socket
 import threading
 from pathlib import Path
 
@@ -20,7 +23,7 @@ from sosfs.state.db import Database, DatabaseLocked
 from sosfs.state.lifecycle import Lifecycle
 from sosfs.tier.spec import WritebackSpec
 from sosfs.engine.overlay import DB_NAME
-from sosfs.fuse.mount import Mount, Shutdown, MountError, read_pidfile
+from sosfs.fuse.mount import Mount, Shutdown, MountError, read_pidfile, request_shutdown, PIDFILE_NAME
 from tests.engine.conftest import Clock, build_spec, seed
 from tests.engine.test_drain import dirty_new
 
@@ -212,3 +215,80 @@ def test_serve_surfaces_a_loop_failure(tmp_path: Path, mountpoint: Path, clock: 
         mount.serve()
     assert not mount.pidfile.exists() and not mount.lock.held
     assert settled_state(mount.spec.state) == 'detached'
+
+
+# -- umount command (request_shutdown) ------------------------------------------------------------------------
+
+
+def put_pidfile(state: Path, *, pid: int = 424242, host: object = None, mountpoint: str = '/mnt/x') -> None:
+    """Drop a pidfile as a running daemon would, for the umount-resolution tests."""
+    Path(state).mkdir(parents=True, exist_ok=True)
+    record = {'pid': pid, 'host': socket.gethostname() if host is None else host,
+              'mountpoint': mountpoint, 'started': 1.0}
+    (Path(state) / PIDFILE_NAME).write_text(json.dumps(record) + '\n')
+
+
+@fixture
+def spec(tmp_path: Path):
+    """A parsed spec (no engine started) whose state directory hosts the pidfile."""
+    seed(tmp_path / 'project', 'seed.txt', b'x')
+    return build_spec(tmp_path, tiers=2)
+
+
+def test_request_shutdown_drain_sends_sigint(spec, monkeypatch) -> None:
+    """A plain umount signals the daemon to drain (SIGINT)."""
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    put_pidfile(spec.state, pid=999)
+    request_shutdown(spec, wait=False)
+    assert sent == [(999, signal.SIGINT)]
+
+
+def test_request_shutdown_detach_sends_sigterm(spec, monkeypatch) -> None:
+    """`--detach` signals the daemon to detach (SIGTERM)."""
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    put_pidfile(spec.state, pid=1001)
+    request_shutdown(spec, detach=True, wait=False)
+    assert sent == [(1001, signal.SIGTERM)]
+
+
+def test_request_shutdown_force_unmounts_directly(spec, monkeypatch) -> None:
+    """`--force` unmounts the recorded mount point rather than signalling the daemon."""
+    unmounted, killed = [], []
+    monkeypatch.setattr('sosfs.fuse.mount.unmount', lambda mp: unmounted.append(str(mp)))
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: killed.append(pid))
+    put_pidfile(spec.state, mountpoint='/mnt/space')
+    request_shutdown(spec, force=True, wait=False)
+    assert unmounted == ['/mnt/space'] and killed == []
+
+
+def test_request_shutdown_missing_pidfile_errors(spec) -> None:
+    """Umount of an overlay with no running mount is a clear error, not a crash."""
+    with raises(MountError, match='No running mount'):
+        request_shutdown(spec, wait=False)
+
+
+def test_request_shutdown_stale_pid_errors(spec, monkeypatch) -> None:
+    """A pidfile whose process is gone is reported as stale rather than signalling a reused pid."""
+    def dead(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(os, 'kill', dead)
+    put_pidfile(spec.state, pid=777)
+    with raises(MountError, match='stale pidfile'):
+        request_shutdown(spec, wait=False)
+
+
+def test_request_shutdown_wrong_host_errors(spec, monkeypatch) -> None:
+    """A mount recorded on another host is not signalled from here."""
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: (_ for _ in ()).throw(AssertionError('must not signal')))
+    put_pidfile(spec.state, host='some-other-host')
+    with raises(MountError, match='mounted on'):
+        request_shutdown(spec, wait=False)
+
+
+def test_request_shutdown_detach_and_force_conflict(spec) -> None:
+    """`--detach` and `--force` are mutually exclusive."""
+    with raises(MountError, match='at most one'):
+        request_shutdown(spec, detach=True, force=True, wait=False)

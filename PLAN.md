@@ -263,7 +263,7 @@ an archive re-pack or S3 upload. Instead:
 
 ```bash
 # last line (or trap) of the GPU job script — seconds to minutes:
-sosfs umount --detach "$MOUNT"    # rescue node-local dirty data to scratch, stop cleanly
+sosfs umount --detach spec.toml   # rescue node-local dirty data to scratch, stop cleanly
 
 # later, from a single-CPU job or a login node — off the GPU bill:
 sosfs commit spec.toml            # finalize scratch → project / archive / S3
