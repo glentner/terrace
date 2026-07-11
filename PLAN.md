@@ -114,6 +114,7 @@ class Tier(Protocol):
     def read(self, path, offset: int = 0, size: int = -1) -> bytes: ...   # range-ready
     def open_read(self, path) -> BinaryIO: ...                            # streaming
     def put(self, path, source: BinaryIO | Path, *, meta: FileMeta) -> None: ...
+    def set_meta(self, path, meta: FileMeta) -> None: ...  # apply mode/owner/mtime to an existing object
     def delete(self, path) -> None: ...
     def mkdir(self, path) / rmdir(self, path) / rename(self, old, new): ...
     def usage(self) -> TierUsage: ...          # bytes + file count for quota accounting
@@ -138,8 +139,8 @@ Adapters:
 ### Overlay engine
 
 The engine is the product. It exposes a synchronous VFS-operations API (`getattr`, `readdir`,
-`open`, `read`, `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, …) consumed by the
-FUSE adapter and, directly, by the test suite.
+`open`, `read`, `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`,
+`utimens`, …) consumed by the FUSE adapter and, directly, by the test suite.
 
 **Read path.** Locate the fastest resident copy. Default policy promotes on open
 (synchronously, whole-file) into the fastest tier whose size-bypass threshold and quota admit
@@ -159,9 +160,16 @@ with a pass-through policy commits immediately to `/tmp`, which then ages agains
 * `mode = "delayed" | "passthrough"` — pass-through tiers never delay (write-through).
 * Archive re-sync tiers: `max_frequency` (e.g., `"4/day"`) bounds full re-creations.
 
-Namespace operations (create, unlink, rename, mkdir, rmdir, chmod/chown/utimens) propagate
-upstream through the same journaled pipeline as journaled ops, so a rename is durable in the
-catalog immediately and reaches the source on the same policy clock as data.
+Namespace operations (create, unlink, rename, mkdir, rmdir) and metadata mutations
+(chmod/chown/utimens) propagate upstream through the same journaled pipeline, so a rename or a
+mode change is durable in the catalog immediately and reaches the source on the same policy
+clock as data. A metadata mutation records to the catalog first (metadata before
+acknowledgment), applies to the fastest resident copy, then enqueues a `meta` write-back op
+carrying only the changed attributes; the source receives it through the tier's `set_meta`.
+Because no bytes change, a `meta` op never marks content dirty — it rides the namespace-op
+queue, not the residency dirty bit. Ownership is best-effort (an unprivileged mount cannot
+`chown`): the catalog stays the authority and each tier applies what its privileges allow,
+mirroring `put`'s metadata handling.
 
 **Eviction.** Per-tier quota on bytes and file count, with high/low watermarks (default
 95%/85%) to avoid thrash. When the high watermark is crossed, the eviction manager removes

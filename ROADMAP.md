@@ -147,6 +147,18 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [x] `src/sosfs/fuse/adapter.py`: mfusepy `Operations` mapping FUSE callbacks to engine
       calls; `statfs` from source capacity (or configured quota for unbounded sources);
       read-only xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`)
+- [ ] Metadata-mutation tier support: add `set_meta` to the `Tier` protocol
+      (`tier/protocol.py`) and implement it in `PosixTier` (mode and mtime always, ownership
+      best-effort under privilege — reuse `put`'s metadata-application path); unit tests
+- [ ] Engine setattr path (`engine/overlay.py`): `chmod`/`chown`/`utimens` record to the
+      catalog via `update_meta` (metadata-before-ack), apply to the fastest resident copy, and
+      enqueue a `meta` write-back op carrying only the changed attributes; wire the `meta`
+      branch in `_execute_namespace` to apply upstream via `Tier.set_meta`; a `meta` op never
+      dirties content (it rides the namespace-op queue, not the residency dirty bit);
+      flush/drain carry it like other namespace ops; engine + write-back-clock unit tests
+- [ ] FUSE adapter (`fuse/adapter.py`): override `chmod`/`chown`/`utimens` to the engine
+      setattr path (replacing the current unimplemented/`ENOSYS` behavior), returning 0 on
+      success; adapter unit tests
 - [ ] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized
       (default) modes, pidfile in the state directory, `shutdown_state = mounted` on
       start, state-dir validation
@@ -155,9 +167,10 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [ ] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
       `--detach` (SIGTERM), `--force` (plain unmount, skips even the rescue)
 - [ ] FUSE integration tests (`@mark.integration`, Linux): POSIX tooling against a real
-      mount, xattr residency assertions, mount/umount/detach lifecycle
-- [ ] **Commit (logical):** "Phase 6 — mfusepy adapter, mount/umount commands, signal
-      lifecycle (drain, detach, rescue budget)"
+      mount, xattr residency assertions, metadata propagation (`chmod`/`chown`/`touch`
+      reflected at the source after flush), mount/umount/detach lifecycle
+- [ ] **Commit (logical):** "Phase 6 — mfusepy adapter, metadata-mutation propagation,
+      mount/umount commands, signal lifecycle (drain, detach, rescue budget)"
 
 
 ## Phase 7 — S3 tier
