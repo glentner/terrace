@@ -58,11 +58,47 @@ def stub_usage(command: str, summary: str) -> str:
     return f'Usage:\n  sosfs {command} [<args>...]\n  {summary}\n\nThis command is not yet implemented.'
 
 
-class MountApp(StubApp):
+MOUNT_USAGE = """\
+Usage:
+  sosfs mount [-h] <spec> <mountpoint> [-f] [-d]
+  Mount an overlay filesystem defined by <spec> at <mountpoint>.\
+"""
+
+MOUNT_HELP = f"""\
+{MOUNT_USAGE}
+
+Arguments:
+  spec                   Path to the overlay spec (TOML).
+  mountpoint             Existing directory to mount the overlay over.
+
+Options:
+  -f, --foreground       Run in the foreground instead of daemonizing.
+  -d, --debug            Enable libfuse debug output (implies foreground behavior).
+  -h, --help             Show this message and exit.\
+"""
+
+
+class MountApp(Application):
     """Mount an overlay filesystem."""
-    command, phase = 'mount', 6
-    interface = Interface('sosfs mount', stub_usage('mount', __doc__), stub_usage('mount', __doc__))
-    interface.add_argument('args', nargs='*')
+
+    interface = Interface('sosfs mount', MOUNT_USAGE, MOUNT_HELP)
+    interface.add_argument('spec')
+    interface.add_argument('mountpoint')
+    interface.add_argument('-f', '--foreground', action='store_true')
+    interface.add_argument('-d', '--debug', action='store_true')
+    exceptions = get_shared_exception_mapping()
+
+    spec: str
+    mountpoint: str
+    foreground: bool = False
+    debug: bool = False
+
+    def run(self) -> None:
+        """Load the spec and hand off to the mount lifecycle (FUSE imports stay lazy)."""
+        from sosfs.tier.spec import OverlaySpec
+        from sosfs.fuse.mount import Mount
+        overlay = OverlaySpec.load(self.spec)
+        Mount(overlay, self.mountpoint, foreground=self.foreground or self.debug, debug=self.debug).run()
 
 
 class UmountApp(StubApp):

@@ -159,7 +159,7 @@ The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle �
 - [x] FUSE adapter (`fuse/adapter.py`): override `chmod`/`chown`/`utimens` to the engine
       setattr path (replacing the current unimplemented/`ENOSYS` behavior), returning 0 on
       success; adapter unit tests
-- [ ] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized
+- [x] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized
       (default) modes, pidfile in the state directory, `shutdown_state = mounted` on
       start, state-dir validation
 - [ ] Signal handling: SIGINT → drain → `clean`; second SIGINT → downgrade to detach;

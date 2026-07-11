@@ -39,12 +39,19 @@ def test_bare_invocation() -> None:
     assert_output(r'Usage:', stdout + stderr)
 
 
-@mark.parametrize('command', ['mount', 'umount', 'status', 'flush', 'commit', 'audit', 'config'])
+@mark.parametrize('command', ['umount', 'status', 'flush', 'commit', 'audit', 'config'])
 def test_stub_commands(command: str) -> None:
     """Stub subcommands fail uniformly with a pointer to the roadmap."""
     returncode, _, stderr = main([command])
     assert returncode == exit_status.runtime_error
     assert_output(rf'Not implemented: sosfs {command}', stderr)
+
+
+def test_mount_command_requires_arguments() -> None:
+    """The mount command is implemented and rejects a bare invocation (no stub message)."""
+    returncode, stdout, stderr = main(['mount'])
+    assert returncode != exit_status.success
+    assert 'Not implemented' not in stdout + stderr
 
 
 def test_unknown_command() -> None:
