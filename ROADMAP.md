@@ -1,7 +1,7 @@
 ---
 status: in-progress
-current_phase: 5
-phases_completed: ["1", "2", "3", "4"]
+current_phase: 6
+phases_completed: ["1", "2", "3", "4", "5"]
 last_updated: 2026-07-11
 plan_ref: "PLAN.md"
 ---
@@ -134,9 +134,9 @@ All policy logic is driven by an injectable clock so tests are deterministic.
       (most-volatile dirty first, then upstream hop by hop)
 - [x] Rescue mode: dirty data on `scope = "node"` tiers one hop to the nearest shared
       durable tier, bounded by a time budget; shared ordering logic with drain
-- [ ] Virtual-clock policy tests: grace expiry, max-interval under constant writes,
+- [x] Virtual-clock policy tests: grace expiry, max-interval under constant writes,
       passthrough, watermark hysteresis, drain/rescue ordering under constrained budgets
-- [ ] **Commit (logical):** "Phase 5 — write-back scheduler, LRU eviction, drain and
+- [x] **Commit (logical):** "Phase 5 — write-back scheduler, LRU eviction, drain and
       rescue with loss-risk ordering"
 
 
