@@ -118,7 +118,7 @@ class S3Tier:
         with _s3_errors(pure):
             try:
                 meta = obstore.head(self.store, key)
-            except FileNotFoundError:
+            except (FileNotFoundError, NotFoundError):
                 meta = None
             if meta is not None:
                 return TierStat(kind='file', size=meta['size'], mtime=meta['last_modified'].timestamp())

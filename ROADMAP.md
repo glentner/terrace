@@ -184,7 +184,7 @@ Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
       (multipart for large objects) — no temp-key dance
 - [x] Credentials and endpoint config (env, profile, explicit endpoint for
       moto/MinIO/on-prem)
-- [ ] moto-server pytest fixture + unit tests for S3Tier semantics
+- [x] moto-server pytest fixture + unit tests for S3Tier semantics
 - [ ] MinIO integration tests (`@mark.integration`); end-to-end: S3 source with POSIX
       staging stack through the engine
 - [ ] **Commit (logical):** "Phase 7 — S3 tier via obstore with moto-server unit tests
