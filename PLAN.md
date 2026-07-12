@@ -489,9 +489,10 @@ Risks and mitigations
   *uncommitted* deferred rename can orphan its source copy at the pre-rename path, because the
   physical source location is encoded only in the (then-cancelled) rename op. A dedicated
   hardening pass — likely reconciling the source to the catalog at flush rather than replaying
-  a fragile op log, and tracking each entry's committed source path — is scheduled before the
-  offline `commit`/`audit` work in Phase 9 leans on this path. The hypothesis model test skips
-  this narrow deferred-op window (see `tests/engine/test_model.py`) until it lands.
+  a fragile op log, and tracking each entry's committed source path — is scheduled as **Phase 8**,
+  ahead of the archive tiers and offline `commit`/`audit` work that build on this path. The
+  hypothesis model test skips this narrow deferred-op window (see `tests/engine/test_model.py`)
+  until it lands.
 
 
 Phase outline
@@ -512,12 +513,15 @@ Expanded with discrete checklist steps in ROADMAP.md; summarized here:
 6. **FUSE adapter** — mfusepy Operations, mount/umount commands (`--detach`), signal handling
    (SIGINT drain, SIGTERM detach with rescue budget), statfs, xattrs, Linux integration tests.
 7. **S3 tier** — obstore adapter, moto-server unit tests, MinIO integration tests.
-8. **Archive tiers** — ZIP/TAR direct-update, tar.gz staged re-sync with rate limiting,
+8. **Write-back namespace-replay hardening** — correct deferred rename/remove replay under
+   path mutation (source-path tracking or flush-time reconciliation); drop the model-test
+   guard added in Phase 7.
+9. **Archive tiers** — ZIP/TAR direct-update, tar.gz staged re-sync with rate limiting,
    archive indexing.
-9. **Control + operations** — control socket, status/flush commands, `sosfs audit`
-   (auto-at-mount, standalone), `sosfs commit` (offline finalize, `--direct`, `--forfeit`),
-   observability polish.
-10. **Hardening & release** — crash-recovery and concurrency stress tests, free-threaded CI,
+10. **Control + operations** — control socket, status/flush commands, `sosfs audit`
+    (auto-at-mount, standalone), `sosfs commit` (offline finalize, `--direct`, `--forfeit`),
+    observability polish.
+11. **Hardening & release** — crash-recovery and concurrency stress tests, free-threaded CI,
     benchmark harness, Sphinx docs, packaging, v0.1.0.
 
 

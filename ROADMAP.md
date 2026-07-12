@@ -191,7 +191,34 @@ Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
       and MinIO integration tests"
 
 
-## Phase 8 — Archive tiers
+## Phase 8 — Write-back namespace-replay hardening
+
+Close the systemic deferred-op gap the hypothesis model test surfaced during Phase 7,
+before the archive tiers and offline commit/audit build on the same path (PLAN.md →
+Risks, Write-back). The write-back queue is entry-keyed and replayed at flush; Phase 7
+fixed the replay-at-historical-paths crash class and left a documented residual gap.
+
+- [ ] Characterize the divergence classes with focused engine regression tests: removing
+      (`unlink`/`rmdir`) an entry that still holds an uncommitted deferred rename orphans
+      its source copy at the pre-rename path; enumerate siblings (rename over a pending
+      target, double-rename-then-remove)
+- [ ] Design decision (record in PLAN.md → Write-back): replay vs. reconcile — track each
+      entry's committed source path so deferred removals/renames target where the source
+      physically holds it, or reconcile the source tree to the catalog at flush; keep
+      metadata-before-ack and intent → act → confirm intact
+- [ ] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
+      offline-commit path): correct source-path resolution for deferred removals and
+      renames — no orphaned source objects, no invalid moves
+- [ ] Drop the `_pending` skip-guard in `tests/engine/test_model.py` and raise its
+      exploration (max_examples / step count); source must equal the oracle after quiesce
+      + flush across the full op mix, over many seeds
+- [ ] Retire the residual-gap caveat in PLAN.md → Risks and note the resolved semantics in
+      the Write-back design section
+- [ ] **Commit (logical):** "Phase 8 — write-back namespace-replay hardening: correct
+      deferred rename/remove replay, drop the model-test guard"
+
+
+## Phase 9 — Archive tiers
 
 TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
 
@@ -207,11 +234,11 @@ TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
       finalization, never per-file operations
 - [ ] Tests: both modes over POSIX; tar.gz over S3 (moto); index persistence across
       remounts; compaction correctness
-- [ ] **Commit (logical):** "Phase 8 — archive tiers: ZIP/TAR direct-update with
+- [ ] **Commit (logical):** "Phase 9 — archive tiers: ZIP/TAR direct-update with
       compaction, staged re-sync with rate limiting"
 
 
-## Phase 9 — Control + operations
+## Phase 10 — Control + operations
 
 The operational surface (PLAN.md → Control channel, Audit, Deferred commit).
 
@@ -232,11 +259,11 @@ The operational surface (PLAN.md → Control channel, Audit, Deferred commit).
 - [ ] `commit` command — offline finalize: exclusive lock, direct after detach,
       auto-audit after crash, loss-risk ordering, checksum-match skip, batched archive
       finalization, `--direct` hop collapse with stale-copy invalidation
-- [ ] **Commit (logical):** "Phase 9 — control socket, status/flush, audit and offline
+- [ ] **Commit (logical):** "Phase 10 — control socket, status/flush, audit and offline
       commit commands"
 
 
-## Phase 10 — Hardening & release
+## Phase 11 — Hardening & release
 
 Prove the invariants, measure honestly, document, ship v0.1.0.
 
@@ -254,5 +281,5 @@ Prove the invariants, measure honestly, document, ship v0.1.0.
       PLAN.md), operations guide (job-script detach/commit pattern), CLI reference
 - [ ] Release readiness: CHANGELOG for 0.1.0, README polish, `uv build` artifacts
       verified, version to `0.1.0`
-- [ ] **Commit (logical):** "Phase 10 — hardening, benchmarks, documentation; release
+- [ ] **Commit (logical):** "Phase 11 — hardening, benchmarks, documentation; release
       v0.1.0" (then ship via `/release minor bump with tag`)

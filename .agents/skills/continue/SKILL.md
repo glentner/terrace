@@ -120,7 +120,7 @@ uv sync && uv run pytest -m unit
 2. Advance `current_phase` and append to `phases_completed` (as a string) **only** when
    every item in the phase is checked. Partial completion earns nothing.
 3. Set `last_updated` (UTC, `YYYY-MM-DD`). Set `status: in-progress` on first work,
-   `status: complete` when Phase 10 closes.
+   `status: complete` when the final phase closes.
 
 ### Step 6 — Commit
 
