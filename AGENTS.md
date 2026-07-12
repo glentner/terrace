@@ -132,6 +132,7 @@ Development commands
 ```bash
 uv sync                                  # install (dev group included by default)
 uv run pytest -m unit                    # fast suite — must pass before every commit
+docker compose up -d --wait              # MinIO for the S3 integration tests (docker-compose.yml)
 uv run pytest -m integration             # mounts, MinIO; Linux + services required
 uv run pytest -n auto -m unit            # parallel via pytest-xdist
 uv run sosfs --help                      # CLI surface

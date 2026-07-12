@@ -5,7 +5,8 @@
 
 Point at a MinIO (or any S3) endpoint with the SOSFS_TEST_MINIO_* environment variables;
 the suite skips when none is reachable. Defaults target a local MinIO on 127.0.0.1:9000
-with the stock minioadmin credentials.
+with the stock minioadmin credentials — `docker compose up -d --wait` (see docker-compose.yml
+at the repo root) brings up exactly that.
 """
 
 # Type annotations
