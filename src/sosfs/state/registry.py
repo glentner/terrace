@@ -105,22 +105,36 @@ class TierRegistry:
 
     def attach(self, name: str, *, position: int, type: str, role: str, scope: str,
                root: str | Path, uuid: str, now: float) -> Tuple[TierRecord, MarkerStatus]:
+        """Register a POSIX tier and initialize or verify its filesystem marker under `root`."""
+        return self._attach(name, position=position, type=type, role=role, scope=scope, uuid=uuid, now=now,
+                            read=lambda: Marker.read(root), write=lambda marker: marker.write(root))
+
+    def attach_tier(self, tier, *, position: int, type: str, role: str, scope: str,
+                    uuid: str, now: float) -> Tuple[TierRecord, MarkerStatus]:
+        """Register a tier that owns its marker I/O (e.g. S3) and initialize or verify it via the tier."""
+        return self._attach(tier.name, position=position, type=type, role=role, scope=scope, uuid=uuid, now=now,
+                            read=tier.read_marker, write=tier.write_marker)
+
+    def _attach(self, name: str, *, position: int, type: str, role: str, scope: str, uuid: str, now: float,
+                read, write) -> Tuple[TierRecord, MarkerStatus]:
         """
         Register the tier and initialize or verify its managed-location marker.
 
         A brand-new registration with no marker writes one (this overlay now owns
         the location). Every other combination verifies and reports: any status
         but OK is the audit's business, not grounds to proceed with a mount.
+        Marker I/O is supplied by the caller so POSIX (filesystem) and object-store
+        tiers share the identity/generation logic.
         """
         record, new = self.register(name, position=position, type=type, role=role, scope=scope)
         try:
-            marker = Marker.read(root)
+            marker = read()
         except MarkerError:
             return record, MarkerStatus.CORRUPT
         if marker is None:
             if not new:
                 return record, MarkerStatus.MISSING
-            Marker(uuid=uuid, tier=name, generation=record.generation, written=now).write(root)
+            write(Marker(uuid=uuid, tier=name, generation=record.generation, written=now))
             return record, MarkerStatus.OK
         return record, marker.status(uuid=uuid, tier=name, generation=record.generation)
 

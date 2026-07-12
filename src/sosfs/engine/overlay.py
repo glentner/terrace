@@ -107,18 +107,26 @@ class OverlayEngine:
             self.lifecycle.create(self.spec.name, uuid=str(uuid4()), now=now)
         self.overlay = self.lifecycle.begin_mount(socket.gethostname(), now=now)
         for position, tier_spec in enumerate(self.spec.tiers):
-            root = Path(tier_spec.path)
-            if tier_spec.role == 'source':
-                if not root.is_dir():
-                    raise EngineError(f'Source root does not exist: {root}')
+            if tier_spec.type == 's3':
+                from sosfs.tier.s3 import S3Tier                 # lazy: keeps the engine importable without obstore
+                tier = S3Tier.from_spec(tier_spec.name, tier_spec.s3)
+                record, status = self.registry.attach_tier(
+                    tier, position=position, type=tier_spec.type, role=tier_spec.role,
+                    scope=tier_spec.scope, uuid=self.overlay.uuid, now=now)
             else:
-                root.mkdir(parents=True, exist_ok=True)
-            record, status = self.registry.attach(
-                tier_spec.name, position=position, type=tier_spec.type, role=tier_spec.role,
-                scope=tier_spec.scope, root=root, uuid=self.overlay.uuid, now=now)
+                root = Path(tier_spec.path)
+                if tier_spec.role == 'source':
+                    if not root.is_dir():
+                        raise EngineError(f'Source root does not exist: {root}')
+                else:
+                    root.mkdir(parents=True, exist_ok=True)
+                tier = PosixTier(tier_spec.name, root)
+                record, status = self.registry.attach(
+                    tier_spec.name, position=position, type=tier_spec.type, role=tier_spec.role,
+                    scope=tier_spec.scope, root=root, uuid=self.overlay.uuid, now=now)
             if status is not MarkerStatus.OK:
                 raise EngineError(f'Tier {tier_spec.name!r} marker is {status.value} — audit required')
-            self.tiers[tier_spec.name] = PosixTier(tier_spec.name, root)
+            self.tiers[tier_spec.name] = tier
         if self.catalog.get('/') is None:
             stat = self.source.stat(PurePosixPath('/'))
             self.catalog.add('/', 'dir', mode=stat.mode if stat.mode is not None else 0o755,
@@ -158,11 +166,20 @@ class OverlayEngine:
         position = names.index(name)
         return None if position == 0 else self.tiers[names[position - 1]]
 
+    @staticmethod
+    def _passthrough(tier: Tier) -> bool:
+        """Whether a tier can hand out OS file handles for hot I/O (POSIX); object stores cannot."""
+        return hasattr(tier, 'open_direct')
+
     def eligible_tier(self, size: int) -> Tier:
         """
         The fastest tier admitting a file of `size`: bypass_size excludes large
         files outright, quota headroom excludes full tiers; the source always
         admits (its quota is informational, PLAN.md -> FUSE adapter).
+
+        A file is served by a passthrough (OS-fd) copy, so a non-passthrough
+        source (S3, archive) can never be the serving tier — when no stage admits
+        by policy we still stage onto the fastest passthrough tier available.
         """
         for tier_spec in reversed(self.spec.tiers[1:]):
             quota = tier_spec.quota
@@ -174,7 +191,14 @@ class OverlayEngine:
             if quota.files is not None and usage.files + 1 > quota.files:
                 continue
             return self.tiers[tier_spec.name]
-        return self.source
+        if self._passthrough(self.source):
+            return self.source
+        for tier_spec in reversed(self.spec.tiers[1:]):
+            tier = self.tiers[tier_spec.name]
+            if self._passthrough(tier):
+                return tier
+        raise EngineError(f'No passthrough-capable tier to stage a {size}-byte file from a '
+                          f'{self.spec.source.type} source; an S3/archive source needs a POSIX staging tier')
 
     # -- lazy population ----------------------------------------------------------------------------------------
 

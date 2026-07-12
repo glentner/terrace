@@ -1,8 +1,8 @@
 ---
 status: in-progress
-current_phase: 7
-phases_completed: ["1", "2", "3", "4", "5", "6"]
-last_updated: 2026-07-11
+current_phase: 8
+phases_completed: ["1", "2", "3", "4", "5", "6", "7"]
+last_updated: 2026-07-12
 plan_ref: "PLAN.md"
 ---
 
@@ -185,9 +185,9 @@ Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
 - [x] Credentials and endpoint config (env, profile, explicit endpoint for
       moto/MinIO/on-prem)
 - [x] moto-server pytest fixture + unit tests for S3Tier semantics
-- [ ] MinIO integration tests (`@mark.integration`); end-to-end: S3 source with POSIX
+- [x] MinIO integration tests (`@mark.integration`); end-to-end: S3 source with POSIX
       staging stack through the engine
-- [ ] **Commit (logical):** "Phase 7 — S3 tier via obstore with moto-server unit tests
+- [x] **Commit (logical):** "Phase 7 — S3 tier via obstore with moto-server unit tests
       and MinIO integration tests"
 
 
