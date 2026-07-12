@@ -198,7 +198,7 @@ before the archive tiers and offline commit/audit build on the same path (PLAN.m
 Risks, Write-back). The write-back queue is entry-keyed and replayed at flush; Phase 7
 fixed the replay-at-historical-paths crash class and left a documented residual gap.
 
-- [ ] Characterize the divergence classes with focused engine regression tests: removing
+- [x] Characterize the divergence classes with focused engine regression tests: removing
       (`unlink`/`rmdir`) an entry that still holds an uncommitted deferred rename orphans
       its source copy at the pre-rename path; enumerate siblings (rename over a pending
       target, double-rename-then-remove)
