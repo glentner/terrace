@@ -482,6 +482,16 @@ Risks and mitigations
   be lost with them; exposure is bounded by each boundary's write-back policy and reported
   precisely by the audit. Tighten `delay`/`max_interval` (or use `passthrough`) where the loss
   window matters more than write amplification.
+* **Write-back namespace replay under path mutation** — the write-back queue is entry-keyed;
+  namespace ops now replay at the *historical* path each was queued against (recorded in the
+  op's `detail`), so rename chains that reuse names reconstruct the source tree correctly. A
+  residual gap remains: structurally removing an entry (`unlink`/`rmdir`) that still holds an
+  *uncommitted* deferred rename can orphan its source copy at the pre-rename path, because the
+  physical source location is encoded only in the (then-cancelled) rename op. A dedicated
+  hardening pass — likely reconciling the source to the catalog at flush rather than replaying
+  a fragile op log, and tracking each entry's committed source path — is scheduled before the
+  offline `commit`/`audit` work in Phase 9 leans on this path. The hypothesis model test skips
+  this narrow deferred-op window (see `tests/engine/test_model.py`) until it lands.
 
 
 Phase outline

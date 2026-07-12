@@ -166,11 +166,16 @@ class Journal:
         move; data commits queue through `mark_dirty`. Call inside the same
         transaction as the catalog mutation it propagates, so the op and the
         namespace state it describes commit together.
+
+        The queue-time `path` is recorded in `detail` so the op replays at the
+        location it operated on, not wherever the (entry-keyed) row's entry has
+        since moved — reproducing the namespace history faithfully on the source.
         """
         if op not in NAMESPACE_OPS:
             raise ValueError(f'Unknown namespace op: {op!r}')
         path = normalize(path)
-        encoded = None if detail is None else json.dumps(detail, sort_keys=True)
+        detail = {**(detail or {}), 'path': path}
+        encoded = json.dumps(detail, sort_keys=True)
         with self._atomic():
             entry = self._entry_id(path)
             row = self.db.execute(
@@ -180,10 +185,10 @@ class Journal:
         return Writeback.from_row(row)
 
     def queued(self, to_tier: Optional[str] = None) -> List[Writeback]:
-        """Queued write-back rows, oldest write first, optionally for one boundary."""
+        """Queued write-back rows in queue order (oldest first; `id` breaks clock ties), optionally for one boundary."""
         boundary = t'' if to_tier is None else t' AND to_tier = {to_tier}'
         rows = self.db.execute(
-            t"SELECT * FROM writeback WHERE state = 'queued'{boundary} ORDER BY last_write")
+            t"SELECT * FROM writeback WHERE state = 'queued'{boundary} ORDER BY last_write, id")
         return [Writeback.from_row(row) for row in rows]
 
     def cancel(self, path: str) -> int:

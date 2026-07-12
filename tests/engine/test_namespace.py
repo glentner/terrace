@@ -155,7 +155,26 @@ def test_rename_file_moves_staging_copy(engine: OverlayEngine) -> None:
         engine.getattr('/a.dat')
     assert engine.getattr('/b.dat').kind == 'file'
     ops = [(row.op, row.detail) for row in engine.journal.queued() if row.op == 'rename']
-    assert ops == [('rename', {'old': '/a.dat', 'new': '/b.dat'})]
+    # `path` (the queue-time location) is recorded so the op replays historically at flush.
+    assert ops == [('rename', {'old': '/a.dat', 'new': '/b.dat', 'path': '/b.dat'})]
+
+
+def test_flush_replays_renames_at_historical_paths(engine: OverlayEngine) -> None:
+    """
+    A rename chain that reuses a directory name must replay on the source at the paths each op
+    was queued against, not the entry's final path — otherwise the flush reconstructs a wrong
+    tree (or attempts a move-into-self). Regression for the write-back replay fix.
+    """
+    engine.mkdir('/d1')
+    engine.rename('/d1', '/d2')
+    engine.mkdir('/d1')                                      # reuse the freed name for a new entry
+    engine.rename('/d2', '/d1/s1')
+    engine.flush()
+    source = engine.tiers['project']
+    assert source.stat(PurePosixPath('/d1')).kind == 'dir'
+    assert source.stat(PurePosixPath('/d1/s1')).kind == 'dir'
+    assert source.stat(PurePosixPath('/d2')) is None
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
 
 
 def test_rename_replaces_live_file(engine: OverlayEngine) -> None:

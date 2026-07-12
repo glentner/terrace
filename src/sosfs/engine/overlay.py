@@ -839,28 +839,34 @@ class OverlayEngine:
         now = self.clock()
         detail = dict(row.detail or {})
         detail['op'] = row.op
+        # Namespace ops replay at the path they were queued against (recorded in `detail`),
+        # not the entry's current path — the queue is entry-keyed, so an op whose entry has
+        # since been renamed must still take effect where it originally happened for the
+        # replayed history to reconstruct the tree. `meta` is the exception: it sets
+        # attributes on the object's final location, so it targets the current path.
+        op_path = detail.get('path', path)
         intent = self.journal.begin('commit', self.source.name, now=now, path=path, detail=detail)
         try:
             if row.op == 'mkdir':
-                materialize_dirs(self.catalog, self.source, path)
+                materialize_dirs(self.catalog, self.source, op_path)
                 try:
-                    self.source.mkdir(_pure(path), entry.mode)
+                    self.source.mkdir(_pure(op_path), entry.mode)
                 except FileExistsError:
                     pass
             elif row.op == 'unlink':
                 try:
-                    self.source.delete(_pure(path))
+                    self.source.delete(_pure(op_path))
                 except FileNotFoundError:
                     pass
             elif row.op == 'rmdir':
                 try:
-                    self.source.rmdir(_pure(path))
+                    self.source.rmdir(_pure(op_path))
                 except FileNotFoundError:
                     pass
             elif row.op == 'rename':
-                materialize_dirs(self.catalog, self.source, path)
+                materialize_dirs(self.catalog, self.source, row.detail['new'])
                 try:
-                    self.source.rename(PurePosixPath(row.detail['old']), _pure(path))
+                    self.source.rename(PurePosixPath(row.detail['old']), PurePosixPath(row.detail['new']))
                 except FileNotFoundError:
                     pass                                    # nothing at the old path; data ops fill in
             elif row.op == 'meta':
