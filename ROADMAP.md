@@ -179,10 +179,10 @@ Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
 
 - [x] Risk gate: verify obstore free-threaded (cp315t) wheels; if absent, wire
       source-build in CI and record the outcome in PLAN.md (Risks)
-- [ ] `src/sosfs/tier/s3.py`: `S3Tier` via obstore (`get`/`get_range`/`put`/`list`/`head`);
+- [x] `src/sosfs/tier/s3.py`: `S3Tier` via obstore (`get`/`get_range`/`put`/`list`/`head`);
       note: S3 PUT is atomic per key, so the intent journal's act step is a single PUT
       (multipart for large objects) — no temp-key dance
-- [ ] Credentials and endpoint config (env, profile, explicit endpoint for
+- [x] Credentials and endpoint config (env, profile, explicit endpoint for
       moto/MinIO/on-prem)
 - [ ] moto-server pytest fixture + unit tests for S3Tier semantics
 - [ ] MinIO integration tests (`@mark.integration`); end-to-end: S3 source with POSIX

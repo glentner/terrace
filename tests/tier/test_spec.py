@@ -13,7 +13,7 @@ from pathlib import Path
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, SpecError
+from sosfs.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, SpecError
 
 
 pytestmark = mark.unit
@@ -146,7 +146,78 @@ def test_tier_type_validation() -> None:
                                        'type = "nfs"\npath = "/fast/space"'}))
     with raises(SpecError, match='not yet supported'):
         OverlaySpec.parse(spec_text(**{'type = "posix"\npath = "/fast/space"':
-                                       'type = "s3"\npath = "/fast/space"'}))
+                                       'type = "tar"\npath = "/fast/space"'}))
+
+
+S3_SPEC = '''
+[overlay]
+name  = "cloud"
+state = "/data/state"
+
+[[tier]]
+name = "bucket"
+type = "s3"
+role = "source"
+url  = "s3://my-bucket/datasets/run01"
+s3   = { region = "us-east-1", endpoint = "http://minio:9000", allow_http = true }
+
+[[tier]]
+name  = "scratch"
+type  = "posix"
+path  = "/scratch/space"
+writeback = { delay = "60s" }
+'''
+
+
+def test_parse_s3_source() -> None:
+    """An S3 tier parses its url into bucket + prefix and carries the connection knobs."""
+    spec = OverlaySpec.parse(S3_SPEC)
+    bucket, scratch = spec.tiers
+    assert (bucket.type, bucket.role) == ('s3', 'source')
+    assert bucket.url == 's3://my-bucket/datasets/run01'
+    assert bucket.path == bucket.url                        # identity/overlap key mirrors the url
+    assert bucket.s3 == S3Spec(bucket='my-bucket', prefix='datasets/run01',
+                               region='us-east-1', endpoint='http://minio:9000', allow_http=True)
+    assert scratch.type == 'posix' and scratch.s3 is None
+
+
+def test_s3_url_without_prefix() -> None:
+    """A bucket-only url yields an empty key prefix."""
+    spec = OverlaySpec.parse(S3_SPEC.replace('s3://my-bucket/datasets/run01', 's3://my-bucket'))
+    assert spec.source.s3 == S3Spec(bucket='my-bucket', prefix='', region='us-east-1',
+                                    endpoint='http://minio:9000', allow_http=True)
+
+
+def test_s3_requires_url() -> None:
+    """An S3 tier without a url is malformed."""
+    with raises(SpecError, match='requires a url'):
+        OverlaySpec.parse(S3_SPEC.replace('url  = "s3://my-bucket/datasets/run01"\n', ''))
+
+
+def test_s3_rejects_path_key() -> None:
+    """An S3 tier configured with a filesystem path is a mix-up."""
+    with raises(SpecError, match='uses url'):
+        OverlaySpec.parse(S3_SPEC.replace('url  = "s3://my-bucket/datasets/run01"',
+                                          'path = "/local/space"'))
+
+
+def test_s3_url_scheme_enforced() -> None:
+    """The url must carry the s3:// scheme."""
+    with raises(SpecError, match='must be s3://'):
+        OverlaySpec.parse(S3_SPEC.replace('s3://my-bucket/datasets/run01', 'https://my-bucket/x'))
+
+
+def test_s3_unknown_connection_key_rejected() -> None:
+    """Typos in the s3 = {...} table never pass silently."""
+    with raises(SpecError, match='Unknown key'):
+        OverlaySpec.parse(S3_SPEC.replace('region = "us-east-1"', 'reigon = "us-east-1"'))
+
+
+def test_s3_settings_only_for_s3_tiers() -> None:
+    """url/s3 settings on a posix tier are rejected."""
+    with raises(SpecError, match='only valid for s3'):
+        OverlaySpec.parse(spec_text(**{'path = "/fast/space"':
+                                       'path = "/fast/space"\nurl = "s3://b/p"'}))
 
 
 def test_posix_requires_path() -> None:

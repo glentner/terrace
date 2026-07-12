@@ -18,16 +18,18 @@ from sosfs.core.exceptions import SOSFSError
 from sosfs.core.units import parse_bytes, parse_duration
 
 # Public interface
-__all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'SpecError',
+__all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'S3Spec', 'SpecError',
            'TIER_TYPES', 'SUPPORTED_TYPES']
 
 TIER_TYPES: Final[frozenset] = frozenset({'posix', 's3', 'zip', 'tar', 'tar.gz'})
-SUPPORTED_TYPES: Final[frozenset] = frozenset({'posix'})
+SUPPORTED_TYPES: Final[frozenset] = frozenset({'posix', 's3'})
 
 OVERLAY_KEYS: Final[frozenset] = frozenset({'name', 'state', 'drain_timeout', 'checksum', 'fsync_policy'})
-TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'role', 'scope', 'quota', 'writeback'})
+TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'url', 's3', 'role', 'scope', 'quota', 'writeback'})
 QUOTA_KEYS: Final[frozenset] = frozenset({'size', 'files', 'bypass_size'})
 WRITEBACK_KEYS: Final[frozenset] = frozenset({'mode', 'delay', 'max_interval'})
+S3_KEYS: Final[frozenset] = frozenset({'region', 'endpoint', 'access_key_id', 'secret_access_key',
+                                       'session_token', 'allow_http', 'anonymous', 'virtual_hosted'})
 
 DEFAULT_DRAIN_TIMEOUT: Final[str] = '5m'
 DEFAULT_DELAY: Final[str] = '60s'
@@ -106,12 +108,53 @@ class WritebackSpec:
 
 
 @dataclass(frozen=True)
+class S3Spec:
+    """Connection settings for an S3 tier: bucket and key prefix from the url, plus obstore knobs."""
+
+    bucket: str
+    prefix: str = ''
+    region: Optional[str] = None
+    endpoint: Optional[str] = None                # explicit endpoint for MinIO / moto / on-prem
+    access_key_id: Optional[str] = None
+    secret_access_key: Optional[str] = None
+    session_token: Optional[str] = None
+    allow_http: bool = False                      # required for http:// endpoints
+    anonymous: bool = False                       # skip request signing (public buckets)
+    virtual_hosted: bool = False                  # virtual-hosted-style addressing
+
+    @classmethod
+    def from_data(cls, url: str, data: dict, where: str) -> S3Spec:
+        """Build from the tier `url` (s3://bucket[/prefix]) and an optional `s3 = {...}` table."""
+        if not url.startswith('s3://'):
+            raise SpecError(f'S3 {where} url must be s3://bucket[/prefix] (found {url!r})')
+        bucket, _, prefix = url[len('s3://'):].partition('/')
+        if not bucket:
+            raise SpecError(f'S3 {where} url has no bucket (found {url!r})')
+        _reject_unknown(data, S3_KEYS, f'{where}.s3')
+        flags = {}
+        for flag in ('allow_http', 'anonymous', 'virtual_hosted'):
+            value = data.get(flag, False)
+            if not isinstance(value, bool):
+                raise SpecError(f'Invalid boolean for {where}.s3.{flag}: {value!r}')
+            flags[flag] = value
+        strings = {}
+        for name in ('region', 'endpoint', 'access_key_id', 'secret_access_key', 'session_token'):
+            value = data.get(name)
+            if value is not None and not isinstance(value, str):
+                raise SpecError(f'Invalid value for {where}.s3.{name}: {value!r}')
+            strings[name] = value
+        return cls(bucket=bucket, prefix=prefix.strip('/'), **flags, **strings)
+
+
+@dataclass(frozen=True)
 class TierSpec:
     """One configured tier; position in `OverlaySpec.tiers` is stack order, source first."""
 
     name: str
     type: str
-    path: str
+    path: str                                    # POSIX root, or the url string for an S3 tier (identity/overlap key)
+    url: Optional[str] = None                    # set for s3 tiers
+    s3: Optional[S3Spec] = None                  # parsed connection settings for s3 tiers
     role: str = 'stage'
     scope: str = 'shared'
     quota: QuotaSpec = field(default_factory=QuotaSpec)
@@ -131,9 +174,7 @@ class TierSpec:
                             f'(expected one of {", ".join(sorted(TIER_TYPES))})')
         if kind not in SUPPORTED_TYPES:
             raise SpecError(f'Tier type {kind!r} is not yet supported ({where})')
-        path = data.get('path')
-        if not isinstance(path, str) or not path:
-            raise SpecError(f'Posix {where} requires a path')
+        path, url, s3 = cls._location(kind, data, where)
         role = data.get('role', 'stage')
         if role not in ('source', 'stage'):
             raise SpecError(f'Invalid role for {where}: {role!r}')
@@ -145,8 +186,25 @@ class TierSpec:
         quota = QuotaSpec.from_data(data.get('quota', {}), where)
         writeback = None if role == 'source' \
             else WritebackSpec.from_data(data.get('writeback', {}), where)
-        return cls(name=name, type=kind, path=os.path.abspath(os.path.expanduser(path)),
+        return cls(name=name, type=kind, path=path, url=url, s3=s3,
                    role=role, scope=scope, quota=quota, writeback=writeback)
+
+    @staticmethod
+    def _location(kind: str, data: dict, where: str) -> Tuple[str, Optional[str], Optional[S3Spec]]:
+        """Resolve a tier's backing location by type: a POSIX `path`, or an S3 `url` + `s3` table."""
+        if kind == 's3':
+            if 'path' in data:
+                raise SpecError(f'S3 {where} uses url = "s3://bucket[/prefix]", not path')
+            url = data.get('url')
+            if not isinstance(url, str) or not url:
+                raise SpecError(f'S3 {where} requires a url')
+            return url, url, S3Spec.from_data(url, data.get('s3', {}), where)
+        if 'url' in data or 's3' in data:
+            raise SpecError(f'The url/s3 settings are only valid for s3 tiers ({where})')
+        path = data.get('path')
+        if not isinstance(path, str) or not path:
+            raise SpecError(f'Posix {where} requires a path')
+        return os.path.abspath(os.path.expanduser(path)), None, None
 
 
 @dataclass(frozen=True)
