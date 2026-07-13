@@ -51,6 +51,7 @@ class Entry:
     ctime: float
     atime: float
     target: Optional[str]
+    source_path: Optional[str]
     listed: bool
     deleted: bool
 
@@ -60,7 +61,7 @@ class Entry:
         return cls(id=row['id'], path=row['path'], parent=row['parent'], kind=row['kind'],
                    mode=row['mode'], uid=row['uid'], gid=row['gid'], size=row['size'],
                    mtime=row['mtime'], ctime=row['ctime'], atime=row['atime'], target=row['target'],
-                   listed=bool(row['listed']), deleted=bool(row['deleted']))
+                   source_path=row['source_path'], listed=bool(row['listed']), deleted=bool(row['deleted']))
 
 
 @dataclass(frozen=True)
@@ -82,7 +83,8 @@ class Residency:
                    size=row['size'], mtime=row['mtime'], checksum=row['checksum'])
 
 
-META_FIELDS: Final[frozenset] = frozenset({'mode', 'uid', 'gid', 'size', 'mtime', 'ctime', 'atime', 'target'})
+META_FIELDS: Final[frozenset] = frozenset(
+    {'mode', 'uid', 'gid', 'size', 'mtime', 'ctime', 'atime', 'target', 'source_path'})
 RESIDENCY_FIELDS: Final[frozenset] = frozenset({'state', 'atime', 'size', 'mtime', 'checksum'})
 
 
@@ -113,14 +115,14 @@ class Catalog:
 
     # -- entries ------------------------------------------------------------------------------------------------
 
-    def add(self, path: str, kind: str, *, mode: int, uid: int, gid: int,
-            mtime: float, ctime: float, atime: float, size: int = 0, target: Optional[str] = None) -> Entry:
-        """Insert a new entry; parent is derived from `path`."""
+    def add(self, path: str, kind: str, *, mode: int, uid: int, gid: int, mtime: float, ctime: float,
+            atime: float, size: int = 0, target: Optional[str] = None, source_path: Optional[str] = None) -> Entry:
+        """Insert a new entry; parent is derived from `path`. `source_path` records where the source holds it."""
         path = normalize(path)
         row = self.db.execute(
-            t'INSERT INTO entry (path, parent, kind, mode, uid, gid, size, mtime, ctime, atime, target) '
+            t'INSERT INTO entry (path, parent, kind, mode, uid, gid, size, mtime, ctime, atime, target, source_path) '
             t'VALUES ({path}, {parent_of(path)}, {kind}, {mode}, {uid}, {gid}, '
-            t'        {size}, {mtime}, {ctime}, {atime}, {target}) '
+            t'        {size}, {mtime}, {ctime}, {atime}, {target}, {source_path}) '
             t'RETURNING *').fetchone()
         return Entry.from_row(row)
 
@@ -173,6 +175,20 @@ class Catalog:
                 t'UPDATE entry SET path = {new} || substr(path, {offset}), '
                 t'                 parent = {new} || substr(parent, {offset}) '
                 t'WHERE path >= {old + "/"} AND path < {old + "0"}')
+
+    def advance_source_path(self, old_source: str, new: str) -> None:
+        """
+        Relocate the recorded committed source path from `old_source` to `new` — a source-tier
+        rename committing upstream — rewriting the prefix for every descendant so a directory
+        move carries its whole subtree (mirrors `rename`'s range selection).
+        """
+        old_source, new = normalize(old_source), normalize(new)
+        offset = len(old_source) + 1
+        with self._atomic():
+            self.db.execute(t'UPDATE entry SET source_path = {new} WHERE source_path = {old_source}')
+            self.db.execute(
+                t'UPDATE entry SET source_path = {new} || substr(source_path, {offset}) '
+                t'WHERE source_path >= {old_source + "/"} AND source_path < {old_source + "0"}')
 
     # -- residency ----------------------------------------------------------------------------------------------
 

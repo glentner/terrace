@@ -62,22 +62,25 @@ class TransferPool:
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='sosfs-transfer')
 
     def copy(self, path: str, source: Tier, dest: Tier, *,
-             action: str, now: float, state: str = 'clean') -> Residency:
+             action: str, now: float, state: str = 'clean', src_path: Optional[str] = None) -> Residency:
         """
         Copy `path` whole from `source` to `dest` under an intent.
 
         `action` is the journal verb ('promote' downstream, 'commit' upstream);
         `state` is the resulting residency ('clean' for promotion and commit,
-        'dirty' for a rescue hop). The caller holds the file lock.
+        'dirty' for a rescue hop). `src_path` is where `source` physically holds
+        the bytes when that lags the logical `path` (a copy promoted off the source
+        during a deferred rename); it defaults to `path`. The caller holds the lock.
         """
         path = normalize(path)
+        read_path = normalize(src_path) if src_path is not None else path
         if self.catalog.get(path, include_deleted=True) is None:
             raise LookupError(f'No such entry: {path}')
         intent = self.journal.begin(action, dest.name, now=now, path=path)
         try:
-            stat = source.stat(PurePosixPath(path))
+            stat = source.stat(PurePosixPath(read_path))
             if stat is None or stat.kind != 'file':
-                raise TierError(f'No file at {path} in tier {source.name}')
+                raise TierError(f'No file at {read_path} in tier {source.name}')
             # Content (size/mtime) comes from the copied bytes; the catalog is the authority
             # for mode/ownership, so a pending chmod/chown is never clobbered by a stale on-disk copy.
             entry = self.catalog.get(path, include_deleted=True)
@@ -86,7 +89,7 @@ class TransferPool:
                             uid=entry.uid if entry is not None else stat.uid,
                             gid=entry.gid if entry is not None else stat.gid)
             materialize_dirs(self.catalog, dest, path)
-            with source.open_read(PurePosixPath(path)) as stream:
+            with source.open_read(PurePosixPath(read_path)) as stream:
                 dest.put(PurePosixPath(path), stream, meta=meta)
         except BaseException:
             self.journal.rollback(intent)

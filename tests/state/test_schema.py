@@ -45,7 +45,7 @@ def test_tables(db: sqlite3.Connection) -> None:
 
 def test_user_version(db: sqlite3.Connection) -> None:
     """Schema version is stamped."""
-    assert db.execute('PRAGMA user_version').fetchone()[0] == 1
+    assert db.execute('PRAGMA user_version').fetchone()[0] == 2
 
 
 def test_overlay_single_row(db: sqlite3.Connection) -> None:

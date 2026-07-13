@@ -11,7 +11,7 @@
 --     intent -> act -> confirm. An intent row's presence means the act is
 --     unresolved; confirming deletes the row.
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 
 -- Single-row overlay identity and lifecycle flag.
@@ -68,11 +68,17 @@ CREATE TABLE entry (
     ctime   REAL    NOT NULL,
     atime   REAL    NOT NULL,
     target  TEXT,                                -- symlink target
+    -- The path at which the source tier physically holds this entry's bytes, which lags the
+    -- logical `path` while a rename is queued but not yet committed upstream. NULL means the
+    -- source holds no copy at all. Deferred removals/renames resolve against this, not `path`,
+    -- so a removed or superseded entry never orphans its source object (PLAN.md -> Write-back).
+    source_path TEXT,
     listed  INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX entry_parent ON entry (parent);
+CREATE INDEX entry_source_path ON entry (source_path) WHERE source_path IS NOT NULL;
 
 
 -- Which tiers hold a copy of an entry. 'dirty' means this copy holds data newer

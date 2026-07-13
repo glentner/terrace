@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Characterization tests for write-back namespace-replay divergence (ROADMAP Phase 8).
+Regression tests for write-back namespace-replay under deferred path mutation
+(PLAN.md -> Write-back -> Deferred-op replay).
 
-The write-back queue is entry-keyed and namespace ops replay at the *historical* path
-each was queued against (the Phase 7 fix; see `test_namespace.test_flush_replays_renames_
-at_historical_paths`). A residual gap remains, documented in PLAN.md -> Risks: structurally
-mutating an entry that still carries an *uncommitted* deferred rename cancels that rename
-(`Journal.cancel` is entry-keyed) while the source copy still sits at its pre-rename path —
-so the flush orphans it. The correct source tree after quiesce + flush is the oracle's; each
-test below asserts that and is `xfail(strict)` until the hardening lands (items 2-3), at which
-point the strict marker forces its removal and the test becomes a live regression guard.
+The write-back queue is entry-keyed and the source lags the catalog while a rename is queued
+but uncommitted, so the source physically holds an entry's bytes at a path that differs from
+its logical one. Each entry tracks that committed source path; deferred removals and renames
+resolve against it, so structurally removing or superseding an entry that still carries an
+uncommitted rename removes or moves the *real* source object instead of orphaning it at the
+pre-rename path. Each test drives one such divergence class and asserts the source tree equals
+the oracle's after quiesce + flush.
 """
 
 # Type annotations
@@ -31,18 +31,8 @@ from tests.engine.conftest import seed
 pytestmark = mark.unit
 
 
-# Every scenario below diverges through the same root cause: a deferred rename's physical
-# source location survives only in the (now-cancelled) rename op, so its source copy is
-# orphaned at the pre-rename path once the entry is removed or the rename superseded.
-writeback_hardening = mark.xfail(
-    reason='ROADMAP Phase 8 — deferred rename/remove replay orphans the source copy at its '
-           'pre-rename path (PLAN.md -> Risks)',
-    strict=True)
-
-
-@writeback_hardening
-def test_unlink_of_pending_rename_orphans_source_copy(engine: OverlayEngine) -> None:
-    """Unlinking a file whose deferred rename has not committed must not orphan its source copy."""
+def test_unlink_of_pending_rename_removes_source_copy(engine: OverlayEngine) -> None:
+    """Unlinking a file whose deferred rename has not committed removes its source copy, no orphan."""
     root = Path(engine.spec.tiers[0].path)
     seed(root, 'x.dat', b'payload')
     engine.getattr('/x.dat')                                 # adopt the source file
@@ -50,13 +40,12 @@ def test_unlink_of_pending_rename_orphans_source_copy(engine: OverlayEngine) -> 
     engine.unlink('/y.dat')                                  # removes the entry that owns the pending rename
     engine.flush()
     assert not (root / 'y.dat').exists()
-    assert not (root / 'x.dat').exists()                     # orphaned at the pre-rename path today
+    assert not (root / 'x.dat').exists()                     # the pre-rename source copy is removed, not orphaned
     assert engine.journal.queued() == [] and engine.journal.pending() == []
 
 
-@writeback_hardening
-def test_rmdir_of_pending_rename_orphans_source_dir(engine: OverlayEngine) -> None:
-    """rmdir of a directory whose deferred rename has not committed must not orphan the source dir."""
+def test_rmdir_of_pending_rename_removes_source_dir(engine: OverlayEngine) -> None:
+    """rmdir of a directory whose deferred rename has not committed removes the source dir, no orphan."""
     root = Path(engine.spec.tiers[0].path)
     (root / 'd1').mkdir()                                    # an empty source directory
     engine.getattr('/d1')                                    # adopt it
@@ -64,13 +53,12 @@ def test_rmdir_of_pending_rename_orphans_source_dir(engine: OverlayEngine) -> No
     engine.rmdir('/d2')
     engine.flush()
     assert not (root / 'd2').exists()
-    assert not (root / 'd1').exists()                        # orphaned at the pre-rename path today
+    assert not (root / 'd1').exists()                        # the pre-rename source dir is removed, not orphaned
     assert engine.journal.queued() == [] and engine.journal.pending() == []
 
 
-@writeback_hardening
-def test_rename_over_pending_target_orphans_source_copy(engine: OverlayEngine) -> None:
-    """Renaming over a target that itself holds a pending rename must not orphan the target's source copy."""
+def test_rename_over_pending_target_removes_stale_source_copy(engine: OverlayEngine) -> None:
+    """Renaming over a target that itself holds a pending rename removes the target's stale source copy."""
     root = Path(engine.spec.tiers[0].path)
     seed(root, 'a.dat', b'aaa')
     seed(root, 'b.dat', b'bbb')
@@ -79,15 +67,14 @@ def test_rename_over_pending_target_orphans_source_copy(engine: OverlayEngine) -
     engine.rename('/a.dat', '/c.dat')                        # deferred: the source still holds /a.dat
     engine.rename('/b.dat', '/c.dat')                        # supersedes the pending /c.dat target
     engine.flush()
-    assert not (root / 'a.dat').exists()                     # orphaned at the pre-rename path today
+    assert not (root / 'a.dat').exists()                     # the superseded source copy is removed, not orphaned
     assert not (root / 'b.dat').exists()
     assert (root / 'c.dat').read_bytes() == b'bbb'           # last writer wins
     assert engine.journal.queued() == [] and engine.journal.pending() == []
 
 
-@writeback_hardening
-def test_double_rename_then_unlink_orphans_source_copy(engine: OverlayEngine) -> None:
-    """Chaining two deferred renames then unlinking must not orphan the original source copy."""
+def test_double_rename_then_unlink_removes_source_copy(engine: OverlayEngine) -> None:
+    """Chaining two deferred renames then unlinking removes the original source copy, no orphan."""
     root = Path(engine.spec.tiers[0].path)
     seed(root, 'a.dat', b'aaa')
     engine.getattr('/a.dat')
@@ -95,7 +82,7 @@ def test_double_rename_then_unlink_orphans_source_copy(engine: OverlayEngine) ->
     engine.rename('/b.dat', '/c.dat')                        # deferred again; both ops key the same entry
     engine.unlink('/c.dat')                                  # cancels both renames
     engine.flush()
-    assert not (root / 'a.dat').exists()                     # orphaned at the pre-rename path today
+    assert not (root / 'a.dat').exists()                     # the original source copy is removed, not orphaned
     assert not (root / 'b.dat').exists()
     assert not (root / 'c.dat').exists()
     assert engine.journal.queued() == [] and engine.journal.pending() == []

@@ -31,7 +31,7 @@ __all__ = ['Database', 'ExclusiveLock', 'load_schema', 'SCHEMA_VERSION',
 log = Logger.with_name(__name__)
 
 
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 2
 DEFAULT_TIMEOUT: Final[float] = 5.0
 
 

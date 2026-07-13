@@ -130,8 +130,8 @@ class OverlayEngine:
         if self.catalog.get('/') is None:
             stat = self.source.stat(PurePosixPath('/'))
             self.catalog.add('/', 'dir', mode=stat.mode if stat.mode is not None else 0o755,
-                             uid=stat.uid or 0, gid=stat.gid or 0,
-                             mtime=stat.mtime, ctime=stat.ctime or stat.mtime, atime=stat.atime or stat.mtime)
+                             uid=stat.uid or 0, gid=stat.gid or 0, mtime=stat.mtime,
+                             ctime=stat.ctime or stat.mtime, atime=stat.atime or stat.mtime, source_path='/')
         self.started = True
         log.info(f'Engine started (overlay={self.spec.name}, tiers={len(self.tiers)})')
 
@@ -229,7 +229,8 @@ class OverlayEngine:
                 entry = self.catalog.add(
                     path, stat.kind, mode=stat.mode if stat.mode is not None else 0o644,
                     uid=stat.uid or 0, gid=stat.gid or 0, size=stat.size, mtime=stat.mtime,
-                    ctime=stat.ctime or stat.mtime, atime=stat.atime or stat.mtime, target=stat.target)
+                    ctime=stat.ctime or stat.mtime, atime=stat.atime or stat.mtime, target=stat.target,
+                    source_path=path)                       # adopted: the source holds it at this path
                 if stat.kind != 'dir':
                     self.catalog.add_residency(path, self.source.name,
                                                atime=now, size=stat.size, mtime=stat.mtime)
@@ -341,11 +342,14 @@ class OverlayEngine:
             except BaseException:
                 self.journal.rollback(intent)
                 raise
+            upstream = self.upstream_of(dest.name)
             with self.db.transaction():
+                # A file created straight onto the source (no upstream) is already there; one staged
+                # upstream of the source has no source copy yet (source_path stays NULL until it commits).
                 entry = self.catalog.add(path, 'file', mode=mode,
                                          uid=uid if uid is not None else 0, gid=gid if gid is not None else 0,
-                                         mtime=now, ctime=now, atime=now)
-                upstream = self.upstream_of(dest.name)
+                                         mtime=now, ctime=now, atime=now,
+                                         source_path=None if upstream is not None else path)
                 state = 'dirty' if upstream is not None else 'clean'
                 self.catalog.add_residency(path, dest.name, atime=now, size=0, mtime=now, state=state)
                 self.registry.adjust_usage(dest.name, files=1)
@@ -460,15 +464,16 @@ class OverlayEngine:
     def _remove(self, entry: Entry, replaced: bool = False) -> None:
         """
         Remove `entry`: staging copies (and their bytes) drop immediately under
-        eviction intents; the source copy outlives as a tombstone plus a queued
-        op — unless nothing upstream exists (purge) or a rename is about to
-        overwrite the source copy anyway (`replaced`, purge).
+        eviction intents; the source copy outlives as a tombstone plus a queued op
+        that targets its committed source path — unless the source holds no copy
+        (purge) or a rename is about to overwrite it (`replaced`). In the replaced
+        case the source object is removed now, at its committed source path (which
+        may differ from the path the rename reuses during a deferred rename), so it
+        is never orphaned, and the entry is purged.
         """
         path = entry.path
         now = self.clock()
-        on_source = False
         if entry.kind == 'dir':
-            on_source = self.source.stat(_pure(path)) is not None
             for name, tier in self.tiers.items():
                 if tier is self.source or tier.stat(_pure(path)) is None:
                     continue
@@ -481,7 +486,6 @@ class OverlayEngine:
         else:
             for residency in self.catalog.residencies(path):
                 if residency.tier == self.source.name:
-                    on_source = True
                     continue
                 tier = self.tiers[residency.tier]
                 intent = self.journal.begin('evict', residency.tier, now=now, path=path)
@@ -493,6 +497,9 @@ class OverlayEngine:
                     self.catalog.drop_residency(path, residency.tier)
                     self.registry.adjust_usage(residency.tier, bytes=-residency.size, files=-1)
                     self.journal.confirm(intent)
+        on_source = entry.source_path is not None
+        if on_source and replaced:
+            self._purge_source(entry, now)                  # overwritten by a rename; may sit off the reused path
         with self.db.transaction():
             self.journal.cancel(path)                       # pending propagation is moot now
             if on_source and not replaced:
@@ -501,6 +508,24 @@ class OverlayEngine:
                 self.journal.queue(path, op, to_tier=self.source.name, now=now)
             else:
                 self.catalog.purge(path)
+
+    def _purge_source(self, entry: Entry, now: float) -> None:
+        """
+        Remove `entry`'s source object now (intent-bracketed) at its committed source
+        path — used when a rename overwrites the entry, since that physical path may
+        differ from the one the rename reuses. Tolerant of a copy already gone.
+        """
+        intent = self.journal.begin('commit', self.source.name, now=now, path=entry.path,
+                                    detail={'op': 'rmdir' if entry.kind == 'dir' else 'unlink',
+                                            'source_path': entry.source_path})
+        try:
+            if entry.kind == 'dir':
+                self.source.rmdir(_pure(entry.source_path))
+            else:
+                self.source.delete(_pure(entry.source_path))
+        except FileNotFoundError:
+            pass
+        self.journal.confirm(intent)
 
     # -- metadata -----------------------------------------------------------------------------------------------
 
@@ -582,7 +607,10 @@ class OverlayEngine:
                 raise OSError(errno.ELOOP, 'Symlink not followed here', path)
             serving = self._serve(entry)
             direct = flags & ~(os.O_CREAT | os.O_EXCL | os.O_TRUNC | os.O_APPEND)
-            fd = self.tiers[serving].open_direct(_pure(path), direct)
+            # Served directly off the source (no faster tier admitted), the bytes may sit at the
+            # committed source path rather than the logical one during a deferred rename.
+            serve_path = entry.source_path if serving == self.source.name and entry.source_path else path
+            fd = self.tiers[serving].open_direct(_pure(serve_path), direct)
             handle = Handle(entry.id, serving, fd, flags)
             with self._handles_mutex:
                 self._handles.setdefault(entry.id, []).append(handle)
@@ -600,8 +628,11 @@ class OverlayEngine:
         names = [tier.name for tier in self.spec.tiers]
         target = self.eligible_tier(entry.size)
         if names.index(target.name) > names.index(fastest.tier):
+            # Promoting off the source reads where it physically holds the bytes, which lags the
+            # logical path while a rename is queued but uncommitted.
+            src_path = entry.source_path if fastest.tier == self.source.name else None
             self.transfers.copy(entry.path, self.tiers[fastest.tier], target,
-                                action='promote', now=self.clock())
+                                action='promote', now=self.clock(), src_path=src_path)
             return target.name
         return fastest.tier
 
@@ -773,6 +804,8 @@ class OverlayEngine:
             beyond = self.upstream_of(upstream)
             if beyond is not None:
                 self.journal.mark_dirty(path, upstream, to_tier=beyond.name, now=now)
+            else:
+                self.catalog.update_meta(path, source_path=path)    # the source now holds this copy at its path
         log.trace(f'Committed {path} ({holder} -> {upstream}{", re-armed" if changed else ""})')
 
     def commit_upstream(self, path: str) -> None:
@@ -863,12 +896,14 @@ class OverlayEngine:
         now = self.clock()
         detail = dict(row.detail or {})
         detail['op'] = row.op
-        # Namespace ops replay at the path they were queued against (recorded in `detail`),
-        # not the entry's current path — the queue is entry-keyed, so an op whose entry has
-        # since been renamed must still take effect where it originally happened for the
-        # replayed history to reconstruct the tree. `meta` is the exception: it sets
-        # attributes on the object's final location, so it targets the current path.
+        # Removals and renames resolve against the committed source path — where the source
+        # physically holds the bytes — which lags the entry's logical `path` while a rename is
+        # queued but uncommitted, so a superseded op never orphans its source object. `mkdir`
+        # creates at its queue-time path (`op_path`, historical if the dir was later renamed) and
+        # records that as the source path; a following rename op then relocates it. `meta` sets
+        # attributes on the object wherever it currently sits.
         op_path = detail.get('path', path)
+        source_path = entry.source_path
         intent = self.journal.begin('commit', self.source.name, now=now, path=path, detail=detail)
         try:
             if row.op == 'mkdir':
@@ -877,26 +912,26 @@ class OverlayEngine:
                     self.source.mkdir(_pure(op_path), entry.mode)
                 except FileExistsError:
                     pass
-            elif row.op == 'unlink':
-                try:
-                    self.source.delete(_pure(op_path))
-                except FileNotFoundError:
-                    pass
-            elif row.op == 'rmdir':
-                try:
-                    self.source.rmdir(_pure(op_path))
-                except FileNotFoundError:
-                    pass
+            elif row.op in ('unlink', 'rmdir'):
+                if source_path is not None:
+                    try:
+                        if row.op == 'rmdir':
+                            self.source.rmdir(_pure(source_path))
+                        else:
+                            self.source.delete(_pure(source_path))
+                    except FileNotFoundError:
+                        pass
             elif row.op == 'rename':
                 materialize_dirs(self.catalog, self.source, row.detail['new'])
-                try:
-                    self.source.rename(PurePosixPath(row.detail['old']), PurePosixPath(row.detail['new']))
-                except FileNotFoundError:
-                    pass                                    # nothing at the old path; data ops fill in
+                if source_path is not None:
+                    try:
+                        self.source.rename(_pure(source_path), PurePosixPath(row.detail['new']))
+                    except FileNotFoundError:
+                        pass                                # copy vanished mid-flight; data ops fill in
             elif row.op == 'meta':
                 fields = set(detail.get('fields', ()))
                 try:
-                    self.source.set_meta(_pure(path), FileMeta(
+                    self.source.set_meta(_pure(source_path if source_path is not None else path), FileMeta(
                         size=entry.size,
                         mtime=entry.mtime if 'mtime' in fields else None,
                         mode=entry.mode if 'mode' in fields else None,
@@ -915,7 +950,11 @@ class OverlayEngine:
             if row.op in ('unlink', 'rmdir'):
                 self.catalog.drop_residency(path, self.source.name)
                 self.catalog.purge(path)
+            elif row.op == 'mkdir':
+                self.catalog.update_meta(entry.path, source_path=op_path)
             elif row.op == 'rename':
+                if source_path is not None:
+                    self.catalog.advance_source_path(source_path, row.detail['new'])
                 old = self.catalog.get(row.detail['old'], include_deleted=True)
                 if old is not None and old.deleted:
                     self.catalog.purge(row.detail['old'])
@@ -940,16 +979,18 @@ class OverlayEngine:
         if tombstone is None or not tombstone.deleted:
             return
         now = self.clock()
+        target = tombstone.source_path                      # where the source physically holds it (may lag the path)
         for row in self.journal.queued(self.source.name):
             if row.entry != tombstone.id or row.op not in ('unlink', 'rmdir'):
                 continue
             intent = self.journal.begin('commit', self.source.name, now=now, path=path,
-                                        detail={'op': row.op})
+                                        detail={'op': row.op, 'source_path': target})
             try:
-                if row.op == 'unlink':
-                    self.source.delete(_pure(path))
-                else:
-                    self.source.rmdir(_pure(path))
+                if target is not None:
+                    if row.op == 'unlink':
+                        self.source.delete(_pure(target))
+                    else:
+                        self.source.rmdir(_pure(target))
             except FileNotFoundError:
                 pass
             self.journal.confirm(intent)

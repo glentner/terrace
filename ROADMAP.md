@@ -207,7 +207,7 @@ fixed the replay-at-historical-paths crash class and left a documented residual 
       physically holds it, or reconcile the source tree to the catalog at flush; keep
       metadata-before-ack and intent → act → confirm intact
       **[decided: replay + committed-source-path tracking; reconcile stays the audit's job]**
-- [ ] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
+- [x] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
       offline-commit path): correct source-path resolution for deferred removals and
       renames — no orphaned source objects, no invalid moves
 - [ ] Drop the `_pending` skip-guard in `tests/engine/test_model.py` and raise its
