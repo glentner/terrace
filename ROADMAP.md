@@ -223,7 +223,7 @@ fixed the replay-at-historical-paths crash class and left a documented residual 
 
 TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
 
-- [ ] `src/sosfs/tier/archive.py`: `ArchiveTier` skeleton over an inner location
+- [x] `src/sosfs/tier/archive.py`: `ArchiveTier` skeleton over an inner location
       (POSIX path first, S3 object next); member indexing (ZIP central directory, TAR
       single sequential scan) cached in `archive_index`
 - [ ] Direct-update mode: ZIP append-with-supersede (last-entry-wins) + compaction
