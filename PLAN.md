@@ -504,19 +504,15 @@ Risks and mitigations
   be lost with them; exposure is bounded by each boundary's write-back policy and reported
   precisely by the audit. Tighten `delay`/`max_interval` (or use `passthrough`) where the loss
   window matters more than write amplification.
-* **Write-back namespace replay under path mutation** — the write-back queue is entry-keyed;
-  namespace ops now replay at the *historical* path each was queued against (recorded in the
-  op's `detail`), so rename chains that reuse names reconstruct the source tree correctly. A
-  residual gap remains: structurally removing an entry (`unlink`/`rmdir`) that still holds an
-  *uncommitted* deferred rename can orphan its source copy at the pre-rename path, because the
-  physical source location is encoded only in the (then-cancelled) rename op. The **Phase 8**
-  hardening (decided; see Write-back → Deferred-op replay) closes this by recording each
-  entry's committed source path and resolving deferred removals/renames against it, keeping the
-  op log as ordering-and-intent metadata and leaving full catalog↔source reconciliation to the
-  audit; it lands ahead of the archive tiers and offline `commit`/`audit` work that build on
-  this path. Until the fix lands, the hypothesis model test skips this narrow deferred-op
-  window (see `tests/engine/test_model.py`) and the divergence classes are pinned as
-  `xfail(strict)` regressions in `tests/engine/test_replay.py`.
+* **Write-back namespace replay under path mutation** *(resolved, Phase 8)* — the write-back
+  queue is entry-keyed, so a deferred namespace op's target can drift from where the source
+  physically holds the bytes while a rename is queued but uncommitted. Each entry now tracks
+  its committed source path, and deferred removals/renames resolve against it (see Write-back →
+  Deferred-op replay), so removing or superseding an entry that still carries an uncommitted
+  rename no longer orphans its source copy at the pre-rename path. The hypothesis model test
+  exercises the full op mix with no skipped window (`tests/engine/test_model.py`) and
+  `tests/engine/test_replay.py` guards the specific divergence classes; full catalog↔source
+  reconciliation remains the audit's job (Phase 10), reusing the committed source path.
 
 
 Phase outline
