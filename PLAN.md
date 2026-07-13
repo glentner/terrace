@@ -127,9 +127,13 @@ Adapters:
 * **S3Tier** — obstore (`get`, `get_range`, `put`, `list`, `head` map 1:1 onto the protocol).
 * **ArchiveTier** — stdlib `zipfile`/`tarfile` over an inner *location* (POSIX path or S3
   object). Two operating modes, matching the two patterns in GOAL.md:
-  1. **Direct-update** (ZIP, uncompressed TAR): the archive is the tier. ZIP commits append
-     new entries that supersede old ones (last-entry-wins on read) with periodic compaction;
-     uncompressed TAR appends similarly. Deletions are catalog tombstones until compaction.
+  1. **Direct-update** (ZIP, uncompressed TAR): the archive is the tier. A commit re-packs
+     the archive in place — the live member set (the changed member applied, deleted members
+     dropped) is written to a temp beside it, fsynced, and renamed over the original — so the
+     temp+rename atomicity invariant holds and the archive is always compact (no superseded
+     entries or tombstones accumulate; compaction is implicit in the re-pack). This suits the
+     low, batched write frequency of an archive source (one re-pack per commit/flush, never
+     per-file — PLAN.md → Deferred commit); the member index is rebuilt from the new archive.
   2. **Staged re-sync** (tar.gz and any compressed/remote archive): a full archive file is
      periodically re-created in a staging location and pushed to its final location (e.g.,
      `/scratch/some.tar.gz` → `s3://…/some.tar.gz`), rate-limited to at most N refreshes per
@@ -447,7 +451,7 @@ Decided 2026-07-01 with rationale; alternatives noted.
 | S3 SDK | **obstore** | Rust-backed; API maps 1:1 onto the protocol; strong async/throughput story. Free-threaded (cp315t) wheels absent (verified Phase 7); CI compiles obstore from source on 3.15t (see Risks). Rejected: boto3 (pure Python, but clunky/slow). |
 | Staging granularity | **Whole-file + size bypass, range-ready protocol** | Simple and predictable for v1; `bypass_size` handles files larger than a tier; range ops in the protocol keep chunk-level staging a non-breaking future phase. |
 | State store | **stdlib `sqlite3`** (WAL, plain SQL schema) | Zero deps, transparent, free-threading-friendly. Rejected: SQLAlchemy (house style, but heavyweight for a small embedded schema). |
-| Archives | **stdlib `zipfile`/`tarfile`** | ZIP append-supersede + compaction; uncompressed TAR append; tar.gz always staged re-sync. Optimization path (indexed gzip random access) is future work. |
+| Archives | **stdlib `zipfile`/`tarfile`** | ZIP/uncompressed-TAR direct-update via atomic in-place re-pack (temp+fsync+rename; compaction implicit, no tombstones); tar.gz always staged re-sync. Optimization path (true append-supersede, indexed gzip random access) is future work. |
 | S3 testing | **moto-server** (unit, pure Python, real S3 HTTP → works with obstore) + **MinIO** container behind `@mark.integration` | Matches the unit/integration marker split. |
 | CLI / config / logging / style | cmdkit `ApplicationGroup`; layered TOML + `SOSFS_*`; hypershell `Logger` w/ `TRACE`; `src/` layout, SPDX Apache-2.0 headers, 120-char lines, `from __future__ import annotations`, FSM + `Thread` idioms | House style per hypershell. hatchling + uv; Sphinx/furo docs; Keep-a-Changelog + SemVer. |
 | Package / entry point | **`sosfs`** | Per GOAL.md; repo name is a placeholder and unimportant. |

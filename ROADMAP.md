@@ -2,7 +2,7 @@
 status: in-progress
 current_phase: 9
 phases_completed: ["1", "2", "3", "4", "5", "6", "7", "8"]
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 plan_ref: "PLAN.md"
 ---
 
@@ -226,9 +226,12 @@ TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
 - [x] `src/sosfs/tier/archive.py`: `ArchiveTier` skeleton over an inner location
       (POSIX path first, S3 object next); member indexing (ZIP central directory, TAR
       single sequential scan) cached in `archive_index`
-- [ ] Direct-update mode: ZIP append-with-supersede (last-entry-wins) + compaction
-      operation; uncompressed TAR append; deletion tombstones in the catalog until
-      compaction
+- [x] Direct-update mode (ZIP, uncompressed TAR): every mutation re-packs the archive in
+      place via temp+fsync+rename (live member set written, changed member applied, deleted
+      members dropped) so the archive stays compact and the temp+rename atomicity invariant
+      holds — compaction is implicit, no tombstones; `InnerLocation.atomic_write` (POSIX).
+      **[reconciled to atomic re-pack; append-supersede was in tension with the sacred
+      temp+rename invariant — PLAN.md → ArchiveTier]**
 - [ ] Staged re-sync mode: extracted staging area + full re-pack to a staging archive +
       atomic push to the inner location; `max_frequency` rate limiting
 - [ ] Drain/commit integration: one batched re-pack and one re-sync/upload at

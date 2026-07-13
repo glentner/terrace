@@ -235,16 +235,149 @@ def test_bad_format_rejected(db: Database, tmp_path: Path) -> None:
         ArchiveTier('arc', PosixInnerLocation(tmp_path / 'x'), db, 'rar')
 
 
-def test_writes_are_stubbed(db: Database, tmp_path: Path) -> None:
-    """Every mutating operation raises until the direct-update / staged re-sync items land."""
-    write_zip(tmp_path / 'a.zip', [('f', b'x', 0o644)])
-    arc = tier(db, tmp_path / 'a.zip', 'zip')
-    meta = FileMeta(size=1, mtime=1.0)
-    for operation in (lambda: arc.put(P('/g'), io.BytesIO(b'y'), meta=meta),
-                      lambda: arc.set_meta(P('/f'), meta),
+def put(arc: ArchiveTier, path: str, data: bytes, *, mode: int = 0o644, mtime: float = 200.0) -> None:
+    """Store `data` at `path` through the direct-update write path."""
+    arc.put(P(path), io.BytesIO(data), meta=FileMeta(size=len(data), mtime=mtime, mode=mode))
+
+
+def raw_names(path: Path, fmt: str) -> list[str]:
+    """The member names physically present in the archive (to prove compaction has no duplicates)."""
+    if fmt == 'zip':
+        with zipfile.ZipFile(path) as archive:
+            return archive.namelist()
+    with tarfile.open(path, mode='r:') as archive:
+        return archive.getnames()
+
+
+def test_put_creates_archive_and_reads_back(db: Database, tmp_path: Path) -> None:
+    """A put against a non-existent archive creates it atomically; content and metadata read back."""
+    path = tmp_path / 'a.zip'
+    arc = tier(db, path, 'zip')
+    put(arc, '/data/a.txt', b'alpha', mode=0o640, mtime=200.0)
+    assert path.exists()
+    assert arc.read(P('/data/a.txt')) == b'alpha'
+    assert arc.stat(P('/data/a.txt')).mode == 0o640
+    assert arc.stat(P('/data')).kind == 'dir'            # ancestor synthesized after the re-pack
+    assert arc.usage() == TierUsage(bytes=5, files=1)
+
+
+def test_put_replaces_and_stays_compact(db: Database, tmp_path: Path) -> None:
+    """Re-putting a member supersedes it with no physical duplicate — the re-pack is implicitly compact."""
+    path = tmp_path / 'a.zip'
+    arc = tier(db, path, 'zip')
+    put(arc, '/f', b'v1')
+    put(arc, '/f', b'v2-longer')
+    assert arc.read(P('/f')) == b'v2-longer'
+    assert raw_names(path, 'zip') == ['f']               # exactly one physical entry, not two
+    assert arc.usage() == TierUsage(bytes=9, files=1)
+
+
+def test_put_leaves_no_temp_and_survives_new_instance(db: Database, tmp_path: Path) -> None:
+    """A committed put leaves no orphan temp; a fresh tier loads the updated index from the cache."""
+    path = tmp_path / 'a.zip'
+    put(tier(db, path, 'zip'), '/keep.txt', b'kept')
+    assert [p.name for p in tmp_path.iterdir() if p.name.endswith('.tmp')] == []  # no orphan temp left behind
+    assert tier(db, path, 'zip').read(P('/keep.txt')) == b'kept'
+
+
+def test_delete_removes_and_is_idempotent(db: Database, tmp_path: Path) -> None:
+    """delete drops the member from the archive; re-deleting an absent one is a no-op; a dir raises."""
+    path = tmp_path / 'a.zip'
+    arc = tier(db, path, 'zip')
+    put(arc, '/a', b'1')
+    put(arc, '/b', b'2')
+    arc.delete(P('/a'))
+    assert arc.stat(P('/a')) is None
+    assert raw_names(path, 'zip') == ['b']
+    arc.delete(P('/a'))                                  # idempotent
+    arc.mkdir(P('/d'))
+    with raises(IsADirectoryError):
+        arc.delete(P('/d'))
+
+
+def test_mkdir_and_rmdir(db: Database, tmp_path: Path) -> None:
+    """mkdir needs an existing parent and a free name; rmdir needs an existing, empty directory."""
+    path = tmp_path / 'a.tar'
+    arc = tier(db, path, 'tar')
+    arc.mkdir(P('/sub'))
+    assert arc.stat(P('/sub')).kind == 'dir'
+    with raises(FileNotFoundError):
+        arc.mkdir(P('/missing/child'))
+    with raises(FileExistsError):
+        arc.mkdir(P('/sub'))
+    put(arc, '/sub/file', b'data')
+    with raises(OSError):
+        arc.rmdir(P('/sub'))                            # not empty
+    arc.delete(P('/sub/file'))
+    arc.rmdir(P('/sub'))
+    assert arc.stat(P('/sub')) is None
+
+
+def test_rename_file_and_subtree(db: Database, tmp_path: Path) -> None:
+    """rename moves a file (replacing any target) and moves a directory's whole subtree."""
+    path = tmp_path / 'a.zip'
+    arc = tier(db, path, 'zip')
+    put(arc, '/old', b'payload')
+    put(arc, '/existing', b'stale')
+    arc.rename(P('/old'), P('/existing'))
+    assert arc.stat(P('/old')) is None
+    assert arc.read(P('/existing')) == b'payload'
+
+    arc.mkdir(P('/src'))
+    put(arc, '/src/a', b'1')
+    put(arc, '/src/deep/b', b'2')
+    arc.rename(P('/src'), P('/dst'))
+    assert arc.stat(P('/src')) is None
+    assert arc.read(P('/dst/a')) == b'1'
+    assert arc.read(P('/dst/deep/b')) == b'2'
+    with raises(OSError):
+        arc.rename(P('/dst'), P('/dst/inside'))          # into own subtree
+
+
+def test_set_meta_preserves_content(db: Database, tmp_path: Path) -> None:
+    """set_meta rewrites mode/mtime while preserving bytes; a missing member raises."""
+    path = tmp_path / 'a.tar'
+    arc = tier(db, path, 'tar')
+    put(arc, '/f', b'payload', mode=0o644, mtime=200.0)
+    arc.set_meta(P('/f'), FileMeta(size=0, mtime=4242.0, mode=0o600))
+    assert arc.read(P('/f')) == b'payload'
+    hit = arc.stat(P('/f'))
+    assert (hit.mode, hit.mtime) == (0o600, 4242.0)
+    with raises(FileNotFoundError):
+        arc.set_meta(P('/nope'), FileMeta(size=0, mtime=1.0, mode=0o644))
+
+
+def test_tar_direct_update_round_trip(db: Database, tmp_path: Path) -> None:
+    """Uncompressed TAR is a direct-update tier: put/replace/delete round-trip through the archive."""
+    path = tmp_path / 'a.tar'
+    arc = tier(db, path, 'tar')
+    put(arc, '/x', b'one')
+    put(arc, '/y', b'two')
+    put(arc, '/x', b'one-updated')
+    arc.delete(P('/y'))
+    assert arc.read(P('/x')) == b'one-updated'
+    assert arc.stat(P('/y')) is None
+    assert raw_names(path, 'tar') == ['x']
+
+
+def test_targz_writes_are_deferred(db: Database, tmp_path: Path) -> None:
+    """tar.gz is staged re-sync, not direct-update — its mutating ops raise until that item lands."""
+    write_tar(tmp_path / 'a.tar.gz', [('file', 'f', b'x', 0o644)], compress=True)
+    arc = tier(db, tmp_path / 'a.tar.gz', 'tar.gz')
+    assert arc.read(P('/f')) == b'x'                    # reads still work
+    for operation in (lambda: put(arc, '/g', b'y'),
                       lambda: arc.delete(P('/f')),
                       lambda: arc.mkdir(P('/d')),
-                      lambda: arc.rmdir(P('/d')),
                       lambda: arc.rename(P('/f'), P('/g'))):
         with raises(NotImplementedError):
             operation()
+
+
+def test_write_refuses_internal(db: Database, tmp_path: Path) -> None:
+    """The managed '.sosfs' tree refuses mutation like every other tier."""
+    arc = tier(db, tmp_path / 'a.zip', 'zip')
+    put(arc, '/visible', b'x')
+    with raises(PermissionError):
+        put(arc, '/.sosfs/evil', b'x')
+    with raises(PermissionError):
+        arc.rename(P('/visible'), P('/.sosfs/marker'))
