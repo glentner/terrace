@@ -210,7 +210,7 @@ fixed the replay-at-historical-paths crash class and left a documented residual 
 - [x] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
       offline-commit path): correct source-path resolution for deferred removals and
       renames — no orphaned source objects, no invalid moves
-- [ ] Drop the `_pending` skip-guard in `tests/engine/test_model.py` and raise its
+- [x] Drop the `_pending` skip-guard in `tests/engine/test_model.py` and raise its
       exploration (max_examples / step count); source must equal the oracle after quiesce
       + flush across the full op mix, over many seeds
 - [ ] Retire the residual-gap caveat in PLAN.md → Risks and note the resolved semantics in

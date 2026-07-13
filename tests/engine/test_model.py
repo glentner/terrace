@@ -57,13 +57,11 @@ class OverlayMachine(RuleBasedStateMachine):
     on bytes, and after quiesce + flush the source tree must equal the oracle
     (PLAN.md -> Testing strategy).
 
-    KNOWN LIMITATION (see PLAN.md -> Write-back hardening): structurally mutating
-    an entry that still carries *unflushed* deferred source ops (e.g. unlinking a
-    file whose pending rename has not yet committed) can diverge from the oracle —
-    a systemic gap in the deferred-op replay that is scheduled for a dedicated
-    hardening pass. Until then the structural rules skip that narrow window via
-    `_pending`; every other interaction (including rename chains, which replay at
-    historical paths) is exercised in full.
+    The full op mix runs unrestricted, including structural mutations of entries
+    that still carry unflushed deferred source ops (unlink/rmdir/rename over a
+    pending rename) — the committed-source-path replay (PLAN.md -> Write-back ->
+    Deferred-op replay) resolves those against where the source physically holds
+    the data, so the source reconstructs the oracle exactly.
     """
 
     def __init__(self) -> None:
@@ -95,10 +93,6 @@ class OverlayMachine(RuleBasedStateMachine):
         assert (engine_error is None) == (oracle_error is None), \
             f'diverged: engine={engine_error!r} oracle={oracle_error!r}'
         return result if engine_error is None else None
-
-    def _pending(self, path: str) -> bool:
-        """Whether `path` carries unflushed deferred source ops (the write-back-hardening window to skip)."""
-        return bool(self.engine.journal.queued_for(path))
 
     # -- operations ---------------------------------------------------------------------------------------------
 
@@ -170,20 +164,14 @@ class OverlayMachine(RuleBasedStateMachine):
 
     @rule(path=DIR_PATHS)
     def rmdir(self, path: str) -> None:
-        if self._pending(path):
-            return                                          # known write-back-hardening gap; see class docstring
         self.parity(lambda: self.engine.rmdir(path), lambda: os.rmdir(self.real(path)))
 
     @rule(path=FILE_PATHS)
     def unlink(self, path: str) -> None:
-        if self._pending(path):
-            return                                          # known write-back-hardening gap; see class docstring
         self.parity(lambda: self.engine.unlink(path), lambda: os.unlink(self.real(path)))
 
     @rule(old=PATHS, new=PATHS)
     def rename(self, old: str, new: str) -> None:
-        if self._pending(old) or self._pending(new):
-            return                                          # known write-back-hardening gap; see class docstring
         self.parity(lambda: self.engine.rename(old, new),
                     lambda: os.rename(self.real(old), self.real(new)))
 
@@ -215,5 +203,5 @@ class OverlayMachine(RuleBasedStateMachine):
 
 TestOverlayModel = OverlayMachine.TestCase
 TestOverlayModel.settings = settings(
-    max_examples=15, stateful_step_count=30, deadline=None,
+    max_examples=100, stateful_step_count=50, deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.filter_too_much])
