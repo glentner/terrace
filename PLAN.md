@@ -171,6 +171,28 @@ queue, not the residency dirty bit. Ownership is best-effort (an unprivileged mo
 `chown`): the catalog stays the authority and each tier applies what its privileges allow,
 mirroring `put`'s metadata handling.
 
+**Deferred-op replay.** Namespace ops are entry-keyed and deferred: the catalog moves the
+moment the call returns, the source follows when the queued op commits. Because the source
+lags, the physical location of an entry's source copy can differ from its current catalog path
+during the window a rename is queued but not yet committed upstream. The engine records that
+physical location explicitly — each entry carries a *committed source path* (durable catalog
+state: the path at which the source tier holds its bytes, `NULL` until the source holds a copy
+at all). Adoption sets it to the entry's path; a deferred rename leaves it untouched (the
+source has not moved); committing a rename upstream moves the source object from the committed
+source path to the new path and advances it, rewriting the prefix for every descendant of a
+renamed directory since one source rename relocates the whole subtree; a removal targets it.
+Deferred removals and renames therefore resolve against where the source physically holds the
+data, not where the catalog now says the entry lives — so removing or superseding an entry that
+still carries an uncommitted rename deletes or moves the real source object instead of orphaning it
+at the pre-rename path (the divergence class characterized in `tests/engine/test_replay.py`). The
+committed source path is authoritative over the op log, superseding the earlier
+historical-path-in-`detail` shim for removals and renames. Both write-ordering invariants hold
+unchanged: the source-path update commits in the same transaction as the op it records
+(metadata before acknowledgment), and every source mutation stays bracketed intent → act →
+confirm. Full catalog↔source reconciliation is deliberately *not* adopted on the flush path —
+it remains the audit's job (Phase 10), which reuses the committed source path to move rather
+than re-copy a relocated clean source object.
+
 **Eviction.** Per-tier quota on bytes and file count, with high/low watermarks (default
 95%/85%) to avoid thrash. When the high watermark is crossed, the eviction manager removes
 least-recently-used *clean* copies until below the low watermark; dirty copies are committed
@@ -487,12 +509,14 @@ Risks and mitigations
   op's `detail`), so rename chains that reuse names reconstruct the source tree correctly. A
   residual gap remains: structurally removing an entry (`unlink`/`rmdir`) that still holds an
   *uncommitted* deferred rename can orphan its source copy at the pre-rename path, because the
-  physical source location is encoded only in the (then-cancelled) rename op. A dedicated
-  hardening pass — likely reconciling the source to the catalog at flush rather than replaying
-  a fragile op log, and tracking each entry's committed source path — is scheduled as **Phase 8**,
-  ahead of the archive tiers and offline `commit`/`audit` work that build on this path. The
-  hypothesis model test skips this narrow deferred-op window (see `tests/engine/test_model.py`)
-  until it lands.
+  physical source location is encoded only in the (then-cancelled) rename op. The **Phase 8**
+  hardening (decided; see Write-back → Deferred-op replay) closes this by recording each
+  entry's committed source path and resolving deferred removals/renames against it, keeping the
+  op log as ordering-and-intent metadata and leaving full catalog↔source reconciliation to the
+  audit; it lands ahead of the archive tiers and offline `commit`/`audit` work that build on
+  this path. Until the fix lands, the hypothesis model test skips this narrow deferred-op
+  window (see `tests/engine/test_model.py`) and the divergence classes are pinned as
+  `xfail(strict)` regressions in `tests/engine/test_replay.py`.
 
 
 Phase outline

@@ -202,10 +202,11 @@ fixed the replay-at-historical-paths crash class and left a documented residual 
       (`unlink`/`rmdir`) an entry that still holds an uncommitted deferred rename orphans
       its source copy at the pre-rename path; enumerate siblings (rename over a pending
       target, double-rename-then-remove)
-- [ ] Design decision (record in PLAN.md → Write-back): replay vs. reconcile — track each
+- [x] Design decision (record in PLAN.md → Write-back): replay vs. reconcile — track each
       entry's committed source path so deferred removals/renames target where the source
       physically holds it, or reconcile the source tree to the catalog at flush; keep
       metadata-before-ack and intent → act → confirm intact
+      **[decided: replay + committed-source-path tracking; reconcile stays the audit's job]**
 - [ ] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
       offline-commit path): correct source-path resolution for deferred removals and
       renames — no orphaned source objects, no invalid moves
