@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath as P
 from pytest import fixture, mark, raises, approx
 
 # Internal libs
+from sosfs.core.units import parse_rate
 from sosfs.state.db import Database
 from sosfs.state.registry import TierRegistry
 from sosfs.tier.protocol import Tier, FileMeta, TierUsage
@@ -120,23 +121,15 @@ def test_tar_index_and_read(db: Database, tmp_path: Path) -> None:
     assert arc.read(P('/top.txt')) == b'top'
 
 
-def test_tar_offset_is_header_block(db: Database, tmp_path: Path) -> None:
-    """The cached offset for a TAR member is its header-block offset; the first member sits at zero."""
+def test_tar_offset_is_data_block(db: Database, tmp_path: Path) -> None:
+    """The cached offset for a TAR member is its data-block offset (past the 512-byte header)."""
     write_tar(tmp_path / 'a.tar', [('file', 'first', b'1', 0o644), ('file', 'second', b'2', 0o644)])
     arc = tier(db, tmp_path / 'a.tar', 'tar')
     arc.index()
     rows = {row['member']: row['offset'] for row in
             db.execute(t'SELECT member, offset FROM archive_index WHERE tier = {"arc"}')}
-    assert rows['/first'] == 0
-    assert rows['/second'] > 0
-
-
-def test_targz_sequential_read(db: Database, tmp_path: Path) -> None:
-    """A tar.gz indexes and reads (sequential decompress); the format flag drives the codec."""
-    write_tar(tmp_path / 'a.tar.gz', [('file', 'a.txt', b'compressed payload', 0o644)], compress=True)
-    arc = tier(db, tmp_path / 'a.tar.gz', 'tar.gz')
-    assert arc.read(P('/a.txt')) == b'compressed payload'
-    assert arc.stat(P('/a.txt')).size == len(b'compressed payload')
+    assert rows['/first'] >= 512                          # data follows the first member's (>=512-byte) header
+    assert rows['/second'] > rows['/first']
 
 
 def test_synthetic_ancestor_dirs(db: Database, tmp_path: Path) -> None:
@@ -360,17 +353,65 @@ def test_tar_direct_update_round_trip(db: Database, tmp_path: Path) -> None:
     assert raw_names(path, 'tar') == ['x']
 
 
-def test_targz_writes_are_deferred(db: Database, tmp_path: Path) -> None:
-    """tar.gz is staged re-sync, not direct-update — its mutating ops raise until that item lands."""
-    write_tar(tmp_path / 'a.tar.gz', [('file', 'f', b'x', 0o644)], compress=True)
-    arc = tier(db, tmp_path / 'a.tar.gz', 'tar.gz')
-    assert arc.read(P('/f')) == b'x'                    # reads still work
-    for operation in (lambda: put(arc, '/g', b'y'),
-                      lambda: arc.delete(P('/f')),
-                      lambda: arc.mkdir(P('/d')),
-                      lambda: arc.rename(P('/f'), P('/g'))):
-        with raises(NotImplementedError):
-            operation()
+def staged(db: Database, source: Path, work: Path, *, max_frequency=None, name: str = 'arc') -> ArchiveTier:
+    """A staged-resync (tar.gz) ArchiveTier over an S3-like inner source with a durable working `.tar`."""
+    TierRegistry(db).register(name, position=0, type='tar.gz', role='source', scope='shared')
+    return ArchiveTier(name, PosixInnerLocation(source), db, 'tar.gz', staging=work, max_frequency=max_frequency)
+
+
+def test_staged_requires_staging(db: Database, tmp_path: Path) -> None:
+    """A tar.gz archive is staged re-sync and refuses construction without a working path."""
+    with raises(ValueError):
+        ArchiveTier('arc', PosixInnerLocation(tmp_path / 'a.tar.gz'), db, 'tar.gz')
+
+
+def test_staged_populate_and_offset_read(db: Database, tmp_path: Path) -> None:
+    """First access pulls + decompresses the source into the staging `.tar`; members read back by offset."""
+    source = tmp_path / 'src.tar.gz'
+    work = tmp_path / 'work.tar'
+    write_tar(source, [('file', 'a.txt', b'compressed payload', 0o644), ('dir', 'sub'),
+                       ('file', 'sub/b.txt', b'nested', 0o640)], compress=True)
+    arc = staged(db, source, work)
+    assert arc.read(P('/a.txt')) == b'compressed payload'
+    assert work.exists()                                 # decompressed working copy materialized on demand
+    assert arc.read(P('/sub/b.txt')) == b'nested'
+    assert arc.stat(P('/sub')).kind == 'dir'
+
+
+def test_staged_write_defers_source_until_resync(db: Database, tmp_path: Path) -> None:
+    """Writes land in the staging `.tar`; the compressed source is untouched until resync pushes it."""
+    source = tmp_path / 'src.tar.gz'
+    work = tmp_path / 'work.tar'
+    write_tar(source, [('file', 'keep.txt', b'orig', 0o644)], compress=True)
+    arc = staged(db, source, work)
+    before = source.stat().st_mtime_ns
+    put(arc, '/added.txt', b'new content')
+    assert arc.read(P('/added.txt')) == b'new content'   # visible in the working copy immediately
+    assert source.stat().st_mtime_ns == before           # source not rewritten by the write
+
+    assert arc.resync(now=100.0) is True                 # explicit push reconstructs + recompresses + swaps
+    with tarfile.open(source, mode='r:gz') as pushed:     # the source .tar.gz now carries both members
+        assert set(pushed.getnames()) == {'added.txt', 'keep.txt'}
+        assert pushed.extractfile('added.txt').read() == b'new content'
+        assert pushed.extractfile('keep.txt').read() == b'orig'
+
+
+def test_resync_rate_limited(db: Database, tmp_path: Path) -> None:
+    """max_frequency bounds pushes: a second push inside the interval is skipped unless forced."""
+    source = tmp_path / 'src.tar.gz'
+    write_tar(source, [('file', 'f', b'x', 0o644)], compress=True)
+    arc = staged(db, source, tmp_path / 'work.tar', max_frequency=parse_rate('1/60s'))
+    assert arc.resync(now=100.0) is True                 # first push always allowed
+    assert arc.resync(now=130.0) is False                # 30s < 60s min interval — rate-limited
+    assert arc.resync(now=130.0, force=True) is True     # force bypasses the limiter (drain/commit)
+    assert arc.resync(now=200.0) is True                 # 100s >= 60s since the forced push
+
+
+def test_resync_noop_for_direct_update(db: Database, tmp_path: Path) -> None:
+    """A direct-update tier has nothing to push — resync is a no-op."""
+    arc = tier(db, tmp_path / 'a.zip', 'zip')
+    put(arc, '/f', b'x')
+    assert arc.resync(now=100.0) is False
 
 
 def test_write_refuses_internal(db: Database, tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Archive tier (ZIP/TAR) over an inner location: member indexing plus direct-update re-pack."""
+"""Archive tier (ZIP/TAR): direct-update re-pack, and staged re-sync for compressed sources."""
 
 # Type annotations
 from __future__ import annotations
@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, BinaryIO, Iterator, Optional, Protocol, Final,
 # Standard libs
 import io
 import os
+import gzip
 import json
 import stat
 import time
 import errno
+import shutil
 import tarfile
 import zipfile
 from uuid import uuid4
@@ -23,6 +25,7 @@ from contextlib import contextmanager, AbstractContextManager
 
 # Internal libs
 from sosfs.core.logging import Logger
+from sosfs.core.units import Rate
 from sosfs.state.lifecycle import MARKER_DIR
 from sosfs.tier.protocol import TierStat, TierEntry, TierUsage, FileMeta
 
@@ -38,7 +41,7 @@ log = Logger.with_name(__name__)
 
 ROOT = PurePosixPath('/')
 FORMATS: Final[frozenset] = frozenset({'zip', 'tar', 'tar.gz'})
-DIRECT_UPDATE: Final[frozenset] = frozenset({'zip', 'tar'})   # tar.gz is staged re-sync (a later item)
+STAGED: Final[frozenset] = frozenset({'tar.gz'})   # compressed/remote: staged re-sync, not in-place re-pack
 TAR_MODES: Final[dict] = {'tar': 'r:', 'tar.gz': 'r:gz'}
 SYNTHETIC: Final[int] = -1                       # offset sentinel: a directory the archive never stored a header for
 ZIP_EPOCH: Final[int] = 315532800                # 1980-01-01 UTC — ZIP cannot represent timestamps before this
@@ -51,8 +54,8 @@ class InnerLocation(Protocol):
 
     An archive is one file at an inner location — a POSIX path first, an S3 object next.
     The tier reads the whole blob (to index and to extract members), tells whether it
-    exists and has changed via `signature`, and atomically replaces it with a re-packed
-    archive via `atomic_write` (temp + fsync + rename on POSIX, temp-key PUT on S3).
+    exists and has changed via `signature`, and atomically replaces it via `atomic_write`
+    (temp + fsync + rename on POSIX, temp-key PUT on S3).
     """
 
     identity: str
@@ -109,7 +112,7 @@ class ArchiveMember:
 
     member: str                                  # overlay-absolute path within the archive ('/x/y')
     kind: str                                    # 'file' | 'dir' | 'symlink'
-    offset: int                                  # TAR: header block offset; ZIP: local header offset; SYNTHETIC for dirs
+    offset: int                                  # TAR: data-block offset (in-place reads); ZIP: local header; SYNTHETIC dirs
     size: int
     mtime: float
     mode: Optional[int]
@@ -147,33 +150,47 @@ class ArchiveTier:
     """
     Tier over a ZIP or TAR archive at an inner location (PLAN.md -> ArchiveTier).
 
-    The archive is indexed once — ZIP from the central directory, TAR by a single
-    sequential scan — and the member map is cached in `archive_index` keyed by tier
-    name, so a remount reuses it with no eager rescan. Ancestor directories the archive
-    omitted are synthesized so `stat`/`list` see a complete tree. Reads extract a whole
-    member through the stdlib; offset-seeked/streaming reads and indexed random access
-    into compressed archives are future work (PLAN.md -> Future work).
+    Two operating modes, chosen by format:
 
-    Writes use **direct-update** for `zip` and uncompressed `tar`: every mutation
-    re-packs the archive in place — the live member set (with the change applied and
-    deleted members dropped) is written to a sibling temp, fsynced, and renamed over
-    the original — so the temp+rename atomicity invariant holds and the archive stays
-    compact (compaction is implicit; no superseded entries or tombstones accumulate).
-    A re-pack is O(archive); the archive source's low, batched write frequency (one
-    re-pack per commit/flush — PLAN.md -> Deferred commit) makes this the right trade.
-    `tar.gz` is staged re-sync, so its writes raise until that item lands. The index
-    cache is FK-bound to the tier registry, so the tier must be registered (the engine's
-    attach step) before it is indexed.
+    * **Direct-update** (`zip`, uncompressed `tar`): the archive at the inner location is the
+      tier. Every mutation re-packs it in place — the live member set (change applied, deletes
+      dropped) is written to a sibling temp, fsynced, and renamed over the original — so the
+      temp+rename atomicity invariant holds and the archive stays compact (compaction implicit;
+      no tombstones).
+
+    * **Staged re-sync** (`tar.gz`): the working copy is an uncompressed `.tar` on a durable
+      staging path (the tier below the source). On first access the source archive is pulled
+      and decompressed once into that `.tar`; all member ops then run against it exactly as in
+      direct-update, and `resync` reconstructs the archive by recompressing the working `.tar`
+      and atomically pushing it to the source, rate-limited by `max_frequency` (forced at
+      drain/commit). This bounds source I/O to periodic pushes rather than per-write uploads.
+
+    Either way the member index is cached in `archive_index` (keyed by tier name), so a remount
+    reuses it; TAR members carry their data-block offset for in-place seek reads; ancestor
+    directories the archive omitted are synthesized. Streaming reads and indexed random access
+    into compressed archives are future work (PLAN.md -> Future work). The cache is FK-bound to
+    the tier registry, so the tier must be registered (the engine's attach step) before indexing.
     """
 
-    def __init__(self, name: str, inner: InnerLocation, db: Database, fmt: str) -> None:
-        """Initialize over `inner` with member cache in `db`; `fmt` is one of zip/tar/tar.gz."""
+    def __init__(self, name: str, inner: InnerLocation, db: Database, fmt: str, *,
+                 staging: Optional[str | Path] = None, max_frequency: Optional[Rate] = None) -> None:
+        """Initialize over `inner`; `tar.gz` is staged re-sync and requires a `staging` working path."""
         if fmt not in FORMATS:
             raise ValueError(f'Unsupported archive format: {fmt!r} (expected one of {", ".join(sorted(FORMATS))})')
+        if fmt in STAGED and staging is None:
+            raise ValueError(f'A {fmt} (staged re-sync) archive requires a `staging` working path')
         self.name = name
         self.inner = inner
         self.db = db
         self.fmt = fmt
+        self.staging = Path(staging) if staging is not None else None
+        self.max_frequency = max_frequency
+        self._staged = fmt in STAGED
+        # Member ops act on the working location: the source itself for direct-update, or the
+        # uncompressed staging `.tar` for staged re-sync (source touched only on populate/resync).
+        self._loc: InnerLocation = PosixInnerLocation(self.staging) if self._staged else inner
+        self._loc_fmt = 'tar' if self._staged else fmt
+        self._last_resync: Optional[float] = None
         self._members: Optional[dict[str, ArchiveMember]] = None
         self._children: Optional[dict[str, list[str]]] = None
 
@@ -211,22 +228,23 @@ class ArchiveTier:
     # -- indexing ---------------------------------------------------------------------------------------------------
 
     def index(self) -> None:
-        """Ensure the member map is loaded: from the cache when present, otherwise scan and persist."""
+        """Ensure the member map is loaded: populate a staged working copy, then load or build the index."""
         if self._members is not None:
             return
-        cached = self._load_cache()
+        created = self._populate() if self._staged else False
+        cached = [] if created else self._load_cache()
         if not cached:
             cached = self._scan()
             self._persist(cached)
-            log.debug(f'Indexed archive {self.inner.identity} ({len(cached)} members, tier={self.name})')
+            log.debug(f'Indexed archive {self._loc.identity} ({len(cached)} members, tier={self.name})')
         self._build_maps(cached)
 
     def reindex(self) -> None:
-        """Rescan the archive and replace the cache — used after a re-pack, re-sync, or compaction."""
+        """Rescan the working archive and replace the cache — used after a re-pack or a re-populate."""
         members = self._scan()
         self._persist(members)
         self._build_maps(members)
-        log.debug(f'Reindexed archive {self.inner.identity} ({len(members)} members, tier={self.name})')
+        log.debug(f'Reindexed archive {self._loc.identity} ({len(members)} members, tier={self.name})')
 
     def _build_maps(self, members: list[ArchiveMember]) -> None:
         """Populate the in-memory member and children maps from an index."""
@@ -255,11 +273,11 @@ class ArchiveTier:
                     t'        {member.mtime}, {member.mode}, {json.dumps(member.extra)})')
 
     def _scan(self) -> list[ArchiveMember]:
-        """Read every member from the archive; an absent archive indexes as empty."""
-        if self.inner.signature() is None:
+        """Read every member from the working archive; an absent archive indexes as empty."""
+        if self._loc.signature() is None:
             return []
-        with self.inner.open_read() as handle:
-            raw = self._scan_zip(handle) if self.fmt == 'zip' else self._scan_tar(handle)
+        with self._loc.open_read() as handle:
+            raw = self._scan_zip(handle) if self._loc_fmt == 'zip' else self._scan_tar(handle)
         return self._with_ancestors(raw)
 
     def _scan_zip(self, handle: BinaryIO) -> list[ArchiveMember]:
@@ -285,9 +303,9 @@ class ArchiveTier:
         return members
 
     def _scan_tar(self, handle: BinaryIO) -> list[ArchiveMember]:
-        """Index a TAR by one sequential scan (offset is each member's header-block offset)."""
+        """Index a TAR by one sequential scan (offset is each member's data-block offset, for in-place reads)."""
         members: list[ArchiveMember] = []
-        with tarfile.open(fileobj=handle, mode=TAR_MODES[self.fmt]) as archive:
+        with tarfile.open(fileobj=handle, mode=TAR_MODES[self._loc_fmt]) as archive:
             for info in archive.getmembers():
                 pure = self._member_path(info.name)
                 if pure is None:
@@ -302,7 +320,7 @@ class ArchiveTier:
                     kind, size = 'file', info.size
                 else:
                     continue                     # devices, fifos, hard links: out of scope for v1
-                members.append(ArchiveMember(member=str(pure), kind=kind, offset=info.offset,
+                members.append(ArchiveMember(member=str(pure), kind=kind, offset=info.offset_data,
                                              size=size, mtime=float(info.mtime), mode=stat.S_IMODE(info.mode),
                                              extra=extra))
         return members
@@ -322,18 +340,55 @@ class ArchiveTier:
         return members + synthetic
 
     def _extract(self, member: ArchiveMember) -> bytes:
-        """Read a file member's whole content from the archive (streaming/seek is future work)."""
-        name = member.extra['name']
-        with self.inner.open_read() as handle:
-            if self.fmt == 'zip':
+        """Read a file member's whole content: seek to the data offset for TAR, by name for ZIP."""
+        if self._loc_fmt == 'zip':
+            with self._loc.open_read() as handle:
                 with zipfile.ZipFile(handle) as archive:
-                    return archive.read(name)
-            with tarfile.open(fileobj=handle, mode=TAR_MODES[self.fmt]) as archive:
-                extracted = archive.extractfile(name)
-                if extracted is None:
-                    return b''
-                with extracted:
-                    return extracted.read()
+                    return archive.read(member.extra['name'])
+        with self._loc.open_read() as handle:                # uncompressed TAR: in-place offset read
+            handle.seek(member.offset)
+            return handle.read(member.size)
+
+    # -- staged re-sync ---------------------------------------------------------------------------------------------
+
+    def _populate(self) -> bool:
+        """Pull and decompress the source into the staging `.tar` if it is absent; True when (re)created."""
+        if self._loc.signature() is not None:
+            return False                                     # working copy already present
+        if self.inner.signature() is None:
+            return False                                     # no source yet; working starts empty on first write
+        with self.inner.open_read() as compressed:
+            with gzip.GzipFile(fileobj=compressed, mode='rb') as decompressed:
+                with self._loc.atomic_write() as out:
+                    shutil.copyfileobj(decompressed, out)
+        log.debug(f'Populated staging {self._loc.identity} from {self.inner.identity} (tier={self.name})')
+        return True
+
+    def resync(self, now: float, *, force: bool = False) -> bool:
+        """
+        Reconstruct the source from the staging working copy: recompress and atomically push it.
+
+        No-op for a direct-update tier (writes already hit the source). For a staged tier the
+        push is rate-limited by `max_frequency` unless `force` (drain/commit finalization). The
+        working `.tar` is kept current by member ops, so it is the reconstruction; returns
+        whether a push happened.
+        """
+        if not self._staged:
+            return False
+        self.index()
+        if self._loc.signature() is None:
+            return False                                     # nothing staged to push
+        if not force and self.max_frequency is not None and self._last_resync is not None \
+                and now - self._last_resync < self.max_frequency.min_interval:
+            log.trace(f'Resync rate-limited (tier={self.name}, since={now - self._last_resync:.0f}s)')
+            return False
+        with self._loc.open_read() as tar_in:
+            with self.inner.atomic_write() as out:
+                with gzip.GzipFile(fileobj=out, mode='wb', mtime=0) as compressed:
+                    shutil.copyfileobj(tar_in, compressed)
+        self._last_resync = now
+        log.debug(f'Resynced {self.inner.identity} from staging (tier={self.name})')
+        return True
 
     # -- read-only Tier contract ------------------------------------------------------------------------------------
 
@@ -399,12 +454,7 @@ class ArchiveTier:
                 count += 1
         return TierUsage(bytes=total, files=count)
 
-    # -- direct-update write contract (atomic re-pack) --------------------------------------------------------------
-
-    def _reject_staged(self) -> None:
-        """Direct-update covers zip and uncompressed tar; tar.gz writes are staged re-sync (a later item)."""
-        if self.fmt not in DIRECT_UPDATE:
-            raise NotImplementedError(f'{self.fmt} uses staged re-sync (a later item), not direct-update writes')
+    # -- write contract (atomic re-pack of the working archive) -----------------------------------------------------
 
     def _current_specs(self) -> list[_WriteSpec]:
         """Write specs for the current live members (synthetic ancestor dirs are re-derived on reindex)."""
@@ -418,10 +468,10 @@ class ArchiveTier:
 
     def _repack(self, specs: list[_WriteSpec]) -> None:
         """Write `specs` to a fresh archive atomically (copying unchanged bytes from the current one), then reindex."""
-        read_handle = self.inner.open_read() if self.inner.signature() is not None else None
+        read_handle = self._loc.open_read() if self._loc.signature() is not None else None
         try:
-            with self.inner.atomic_write() as out:
-                (self._write_zip if self.fmt == 'zip' else self._write_tar)(out, specs, read_handle)
+            with self._loc.atomic_write() as out:
+                (self._write_zip if self._loc_fmt == 'zip' else self._write_tar)(out, specs, read_handle)
         finally:
             if read_handle is not None:
                 read_handle.close()
@@ -473,8 +523,7 @@ class ArchiveTier:
                 source.close()
 
     def put(self, path: PurePosixPath, source: BinaryIO | Path, *, meta: FileMeta) -> None:
-        """Store content at `path` (create or replace) by re-packing the archive atomically."""
-        self._reject_staged()
+        """Store content at `path` (create or replace) by re-packing the working archive atomically."""
         self.index()
         pure = self._pure(path)
         self._guard(pure)
@@ -487,7 +536,6 @@ class ArchiveTier:
 
     def set_meta(self, path: PurePosixPath, meta: FileMeta) -> None:
         """Apply mode/mtime to the existing member at `path` (content preserved); ownership is not retained."""
-        self._reject_staged()
         self.index()
         pure = self._pure(path)
         self._guard(pure)
@@ -502,7 +550,6 @@ class ArchiveTier:
 
     def delete(self, path: PurePosixPath) -> None:
         """Remove the file at `path`; idempotent (a committed unlink re-run never fails)."""
-        self._reject_staged()
         self.index()
         pure = self._pure(path)
         self._guard(pure)
@@ -516,7 +563,6 @@ class ArchiveTier:
 
     def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
         """Create the directory at `path`; the parent must exist."""
-        self._reject_staged()
         self.index()
         pure = self._pure(path)
         self._guard(pure)
@@ -536,7 +582,6 @@ class ArchiveTier:
 
     def rmdir(self, path: PurePosixPath) -> None:
         """Remove the directory at `path`; it must exist and be empty."""
-        self._reject_staged()
         self.index()
         pure = self._pure(path)
         self._guard(pure)
@@ -552,7 +597,6 @@ class ArchiveTier:
 
     def rename(self, old: PurePosixPath, new: PurePosixPath) -> None:
         """Move `old` to `new` (subtree for directories), replacing anything at `new`."""
-        self._reject_staged()
         self.index()
         pure_old, pure_new = self._pure(old), self._pure(new)
         self._guard(pure_old)

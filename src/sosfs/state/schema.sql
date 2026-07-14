@@ -136,7 +136,7 @@ CREATE TABLE archive_index (
     tier   TEXT    NOT NULL REFERENCES tier (name),
     member TEXT    NOT NULL,                     -- path within the archive
     kind   TEXT    NOT NULL CHECK (kind IN ('file', 'dir', 'symlink')),
-    offset INTEGER NOT NULL,                     -- byte offset (TAR: header; ZIP: local header)
+    offset INTEGER NOT NULL,                     -- data byte offset (TAR: offset_data, for in-place reads; ZIP: local header)
     size   INTEGER NOT NULL,
     mtime  REAL    NOT NULL,
     mode   INTEGER,

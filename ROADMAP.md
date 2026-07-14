@@ -2,7 +2,7 @@
 status: in-progress
 current_phase: 9
 phases_completed: ["1", "2", "3", "4", "5", "6", "7", "8"]
-last_updated: 2026-07-13
+last_updated: 2026-07-14
 plan_ref: "PLAN.md"
 ---
 
@@ -232,7 +232,7 @@ TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
       holds — compaction is implicit, no tombstones; `InnerLocation.atomic_write` (POSIX).
       **[reconciled to atomic re-pack; append-supersede was in tension with the sacred
       temp+rename invariant — PLAN.md → ArchiveTier]**
-- [ ] Staged re-sync mode (single archive source): lazy pull + decompress `.tar.gz` to an
+- [x] Staged re-sync mode (single archive source): lazy pull + decompress `.tar.gz` to an
       uncompressed `.tar` on the durable next tier; index **data** offsets into `archive_index`
       (switch from header to data offset) + full metadata into the catalog so `find`/`stat`
       run from SQLite alone; member reads seek to the data offset. Write-back reconstructs the
