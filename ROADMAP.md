@@ -232,14 +232,21 @@ TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
       holds — compaction is implicit, no tombstones; `InnerLocation.atomic_write` (POSIX).
       **[reconciled to atomic re-pack; append-supersede was in tension with the sacred
       temp+rename invariant — PLAN.md → ArchiveTier]**
-- [ ] Staged re-sync mode: extracted staging area + full re-pack to a staging archive +
-      atomic push to the inner location; `max_frequency` rate limiting
-- [ ] Drain/commit integration: one batched re-pack and one re-sync/upload at
-      finalization, never per-file operations
+- [ ] Staged re-sync mode (single archive source): lazy pull + decompress `.tar.gz` to an
+      uncompressed `.tar` on the durable next tier; index **data** offsets into `archive_index`
+      (switch from header to data offset) + full metadata into the catalog so `find`/`stat`
+      run from SQLite alone; member reads seek to the data offset. Write-back reconstructs the
+      full archive on the durable tier, recompresses, and atomically pushes to the source via
+      `InnerLocation.atomic_write`, rate-limited by `max_frequency` (injectable clock; forced at
+      drain/commit), journaled `resync`
+- [ ] S3 inner-location backing: `S3InnerLocation` (get / atomic-put via obstore) so an archive
+      source can live on S3; select the `InnerLocation` from the spec `location`
+- [ ] Drain/commit integration: one batched re-pack (direct-update) and one
+      reconstruct+push (staged) at finalization, never per-file operations
 - [ ] Tests: both modes over POSIX; tar.gz over S3 (moto); index persistence across
-      remounts; compaction correctness
-- [ ] **Commit (logical):** "Phase 9 — archive tiers: ZIP/TAR direct-update with
-      compaction, staged re-sync with rate limiting"
+      remounts; compaction/reconstruction correctness
+- [ ] **Commit (logical):** "Phase 9 — archive tiers: ZIP/TAR direct-update, tar.gz staged
+      re-sync with rate limiting, S3 inner backing"
 
 
 ## Phase 10 — Control + operations
@@ -287,3 +294,26 @@ Prove the invariants, measure honestly, document, ship v0.1.0.
       verified, version to `0.1.0`
 - [ ] **Commit (logical):** "Phase 11 — hardening, benchmarks, documentation; release
       v0.1.0" (then ship via `/release minor bump with tag`)
+
+
+## Phase 12 — Extended archive sources (post-v0.1.0)
+
+Larger archive-source capabilities deferred past the v0.1.0 release (PLAN.md → ArchiveTier,
+Future work). The design is captured now; implementation is scheduled after Phase 11 ships.
+
+- [ ] SFTP inner-location backing (`SFTPInnerLocation`: get / atomic-put) for HPSS/tape and
+      other get/put endpoints, over the `InnerLocation` protocol
+- [ ] Globus inner-location backing: a synchronous get/put shim over Globus transfer
+      (submit + wait), top source only
+- [ ] Sharded archive sources (`prefix/*.tar.gz`): each shard ⇄ one top-level subtree
+      (single-top-level-dir-matching-stem invariant, reject the mount otherwise; root holds
+      only shard directories, root-level files refused); dynamic shard set (glob at mount;
+      top-level create/delete = shard create/delete; new shards in the source default format);
+      lazy per-shard pull/index (nothing pulled at mount but the glob listing; index persists
+      across remounts); per-shard reconstruction+push touches only the dirty shard
+- [ ] TransferPool priority lane: priority scheduling so on-demand pulls preempt background
+      work — enables optional low-priority shard warming without regressing on-demand latency
+- [ ] Non-conforming-archive wrapping: present an archive/shard lacking the single top-level
+      directory through a synthetic subtree instead of rejecting the mount
+- [ ] **Commit (logical):** "Phase 12 — extended archive sources: SFTP/Globus backings,
+      sharded sources, transfer priority lane"

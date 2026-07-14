@@ -134,11 +134,27 @@ Adapters:
      entries or tombstones accumulate; compaction is implicit in the re-pack). This suits the
      low, batched write frequency of an archive source (one re-pack per commit/flush, never
      per-file — PLAN.md → Deferred commit); the member index is rebuilt from the new archive.
-  2. **Staged re-sync** (tar.gz and any compressed/remote archive): a full archive file is
-     periodically re-created in a staging location and pushed to its final location (e.g.,
-     `/scratch/some.tar.gz` → `s3://…/some.tar.gz`), rate-limited to at most N refreshes per
-     period. Member reads decompress sequentially up to the member (indexed once; acceptable
-     for a reference implementation — noted under Future work).
+  2. **Staged re-sync** (tar.gz and any compressed/remote archive): on first access the whole
+     archive is pulled to the durable tier just below the source and decompressed once to an
+     uncompressed `.tar` there; every member is indexed into SQLite (data offsets in
+     `archive_index`, full metadata in the catalog) so `find`/`stat`/`readdir` are served from
+     the state store alone, and a member read seeks to its data offset in that `.tar` (no
+     repeated decompression). Write-back reconstructs the full archive into a staging file on
+     the same durable tier, recompresses it, and atomically pushes it to the source (temp-key
+     PUT + rename for S3-like, temp+rename for POSIX), rate-limited by `max_frequency` and
+     forced at drain/commit. The pull/decompress/reconstruct is O(whole archive); sharded
+     sources (below) bound that cost to the touched shard.
+
+  **Sharded sources** (`prefix/*.tar.gz`, planned post-v0.1.0) split a dataset into independent
+  per-subtree archives so a write reconstructs only its shard. Each shard maps to one top-level
+  directory whose name matches the shard's stem — strictly enforced: the mount is rejected if a
+  shard lacks that single top-level directory, and for a sharded source the mount root holds
+  only shard directories (root-level files are refused). The shard set is dynamic (glob at
+  mount; a top-level create/delete adds/removes a shard, new shards in the source's default
+  format). Shards are pulled and indexed lazily, one at a time, only when their subtree is first
+  entered, and the index persists across remounts — so an unread shard among thousands costs
+  nothing but the initial listing. (A lone, non-sharded archive presents its contents at the
+  mount root and carries no single-top-level-dir requirement.)
 
 ### Overlay engine
 
@@ -421,6 +437,16 @@ staging  = "/scratch/space.tar.gz"
 sync     = { max_frequency = "4/day" }
 ```
 
+```toml
+[[tier]]                                  # sharded source: one archive per top-level subtree (post-v0.1.0)
+name    = "imagenet"
+type    = "tar.gz"
+role    = "source"
+sharded = true
+location = { type = "s3", url = "s3://bucket/imagenet/*.tar.gz" }
+sync     = { max_frequency = "4/day" }
+```
+
 
 CLI surface
 -----------
@@ -451,7 +477,7 @@ Decided 2026-07-01 with rationale; alternatives noted.
 | S3 SDK | **obstore** | Rust-backed; API maps 1:1 onto the protocol; strong async/throughput story. Free-threaded (cp315t) wheels absent (verified Phase 7); CI compiles obstore from source on 3.15t (see Risks). Rejected: boto3 (pure Python, but clunky/slow). |
 | Staging granularity | **Whole-file + size bypass, range-ready protocol** | Simple and predictable for v1; `bypass_size` handles files larger than a tier; range ops in the protocol keep chunk-level staging a non-breaking future phase. |
 | State store | **stdlib `sqlite3`** (WAL, plain SQL schema) | Zero deps, transparent, free-threading-friendly. Rejected: SQLAlchemy (house style, but heavyweight for a small embedded schema). |
-| Archives | **stdlib `zipfile`/`tarfile`** | ZIP/uncompressed-TAR direct-update via atomic in-place re-pack (temp+fsync+rename; compaction implicit, no tombstones); tar.gz always staged re-sync. Optimization path (true append-supersede, indexed gzip random access) is future work. |
+| Archives | **stdlib `zipfile`/`tarfile`** | ZIP/uncompressed-TAR direct-update via atomic in-place re-pack (temp+fsync+rename; compaction implicit, no tombstones). tar.gz/remote: staged re-sync — decompress once to a durable `.tar`, offset-read, reconstruct+recompress+atomic-push, rate-limited. Sharded sources (`*.tar.gz`) and SFTP/Globus inner backings are post-v0.1.0 (Phase 12). Optimization path (true append-supersede, indexed gzip random access) is future work. |
 | S3 testing | **moto-server** (unit, pure Python, real S3 HTTP → works with obstore) + **MinIO** container behind `@mark.integration` | Matches the unit/integration marker split. |
 | CLI / config / logging / style | cmdkit `ApplicationGroup`; layered TOML + `SOSFS_*`; hypershell `Logger` w/ `TRACE`; `src/` layout, SPDX Apache-2.0 headers, 120-char lines, `from __future__ import annotations`, FSM + `Thread` idioms | House style per hypershell. hatchling + uv; Sphinx/furo docs; Keep-a-Changelog + SemVer. |
 | Package / entry point | **`sosfs`** | Per GOAL.md; repo name is a placeholder and unimportant. |
@@ -540,13 +566,18 @@ Expanded with discrete checklist steps in ROADMAP.md; summarized here:
 8. **Write-back namespace-replay hardening** — correct deferred rename/remove replay under
    path mutation (source-path tracking or flush-time reconciliation); drop the model-test
    guard added in Phase 7.
-9. **Archive tiers** — ZIP/TAR direct-update, tar.gz staged re-sync with rate limiting,
-   archive indexing.
+9. **Archive tiers** — ZIP/TAR direct-update (atomic re-pack), tar.gz staged re-sync
+   (decompress-once + offset reads + reconstruct/recompress/push, rate-limited), S3 inner-
+   location backing, drain/commit batching, archive indexing.
 10. **Control + operations** — control socket, status/flush commands, `sosfs audit`
     (auto-at-mount, standalone), `sosfs commit` (offline finalize, `--direct`, `--forfeit`),
     observability polish.
 11. **Hardening & release** — crash-recovery and concurrency stress tests, free-threaded CI,
     benchmark harness, Sphinx docs, packaging, v0.1.0.
+12. **Extended archive sources** (post-v0.1.0) — SFTP and Globus inner-location backings
+    (get/put; Globus submit-wait shim on the top source), sharded archive sources
+    (`prefix/*.tar.gz`, per-shard lazy pull/index and reconstruction), TransferPool priority
+    lane (on-demand pulls preempt background warming).
 
 
 Future work (explicitly deferred)
@@ -555,6 +586,8 @@ Future work (explicitly deferred)
 * Chunk-level partial staging (protocol already range-ready).
 * File pinning (`sosfs pin <path> --tier <name>`), per-path policy overrides.
 * Indexed random access into compressed archives (ratarmount-style gzip indexes).
+* Wrapping a non-conforming archive/shard (no single top-level directory matching the stem)
+  into a synthetic subtree instead of rejecting the mount (Phase 12 refinement).
 * pyfuse3 (or kernel passthrough) adapter for performance-critical deployments.
 * Prometheus metrics endpoint; structured event log.
 * Multi-client coordination (lease/lock service) — a research project of its own.
