@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from sosfs.tier.spec import S3Spec
 
 # Public interface
-__all__ = ['S3Tier']
+__all__ = ['S3Tier', 's3_store_options']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -49,6 +49,20 @@ def _s3_errors(pure: PurePosixPath) -> Iterator[None]:
         raise FileExistsError(errno.EEXIST, 'File exists', str(pure)) from None
     except BaseError as error:
         raise TierError(f'S3 backend error at {pure}: {error}') from error
+
+
+def s3_store_options(spec: S3Spec) -> dict:
+    """Translate an `S3Spec`'s connection settings into obstore `S3Store` keyword options."""
+    options = {'region': spec.region, 'endpoint': spec.endpoint, 'access_key_id': spec.access_key_id,
+               'secret_access_key': spec.secret_access_key, 'session_token': spec.session_token}
+    options = {key: value for key, value in options.items() if value is not None}
+    if spec.anonymous:
+        options['skip_signature'] = True
+    if spec.virtual_hosted:
+        options['virtual_hosted_style_request'] = True
+    if spec.allow_http:
+        options['client_options'] = {'allow_http': True}
+    return options
 
 
 class S3Tier:
@@ -78,16 +92,7 @@ class S3Tier:
     @classmethod
     def from_spec(cls, name: str, spec: S3Spec) -> S3Tier:
         """Build an `S3Store` from a parsed `S3Spec` and wrap it as a tier."""
-        options = {'region': spec.region, 'endpoint': spec.endpoint, 'access_key_id': spec.access_key_id,
-                   'secret_access_key': spec.secret_access_key, 'session_token': spec.session_token}
-        options = {key: value for key, value in options.items() if value is not None}
-        if spec.anonymous:
-            options['skip_signature'] = True
-        if spec.virtual_hosted:
-            options['virtual_hosted_style_request'] = True
-        if spec.allow_http:
-            options['client_options'] = {'allow_http': True}
-        store = S3Store(spec.bucket, prefix=spec.prefix or None, **options)
+        store = S3Store(spec.bucket, prefix=spec.prefix or None, **s3_store_options(spec))
         return cls(name, store)
 
     @staticmethod

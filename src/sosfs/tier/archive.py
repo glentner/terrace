@@ -30,10 +30,13 @@ from sosfs.state.lifecycle import MARKER_DIR
 from sosfs.tier.protocol import TierStat, TierEntry, TierUsage, FileMeta
 
 if TYPE_CHECKING:
+    from obstore.store import S3Store
     from sosfs.state.db import Database
+    from sosfs.tier.spec import S3Spec, LocationSpec
 
 # Public interface
-__all__ = ['ArchiveTier', 'ArchiveMember', 'InnerLocation', 'PosixInnerLocation']
+__all__ = ['ArchiveTier', 'ArchiveMember', 'InnerLocation', 'PosixInnerLocation', 'S3InnerLocation',
+           'inner_location']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -55,7 +58,8 @@ class InnerLocation(Protocol):
     An archive is one file at an inner location — a POSIX path first, an S3 object next.
     The tier reads the whole blob (to index and to extract members), tells whether it
     exists and has changed via `signature`, and atomically replaces it via `atomic_write`
-    (temp + fsync + rename on POSIX, temp-key PUT on S3).
+    (temp + fsync + rename on POSIX; a single PUT on S3, which is atomic per key — no
+    temp-key dance, matching `S3Tier`, PLAN.md -> Tier protocol).
     """
 
     identity: str
@@ -104,6 +108,62 @@ class PosixInnerLocation:
         except BaseException:
             temp.unlink(missing_ok=True)
             raise
+
+
+class S3InnerLocation:
+    """
+    An inner location backed by a single S3 object via obstore (PLAN.md -> ArchiveTier).
+
+    The whole archive blob is one object addressed by `key` in a ready obstore `store`.
+    `open_read` buffers the object whole (streaming is future work, as on `S3Tier`);
+    `atomic_write` replaces it with one PUT on clean exit — an S3 key is never partially
+    visible, so a single PUT *is* the atomic replacement (no temp-key dance). obstore is
+    imported lazily so `archive.py` stays importable on hosts without it.
+    """
+
+    def __init__(self, store: S3Store, key: str, *, identity: Optional[str] = None) -> None:
+        """Initialize over object `key` in a ready obstore `store`; `identity` defaults to the key."""
+        self.store = store
+        self.key = key
+        self.identity = identity if identity is not None else key
+
+    @classmethod
+    def from_spec(cls, spec: S3Spec) -> S3InnerLocation:
+        """Build a bucket-scoped `S3Store` and address the archive object by key (the spec's `prefix`)."""
+        from obstore.store import S3Store
+        from sosfs.tier.s3 import s3_store_options
+        store = S3Store(spec.bucket, **s3_store_options(spec))
+        return cls(store, spec.prefix, identity=f's3://{spec.bucket}/{spec.prefix}')
+
+    def signature(self) -> Optional[tuple[int, float]]:
+        """Object size and last-modified time, or None when the object does not exist."""
+        import obstore
+        from obstore.exceptions import NotFoundError
+        try:
+            meta = obstore.head(self.store, self.key)
+        except (FileNotFoundError, NotFoundError):
+            return None
+        return meta['size'], meta['last_modified'].timestamp()
+
+    def open_read(self) -> BinaryIO:
+        """A seekable handle over the whole object (buffered whole; streaming is future work)."""
+        import obstore
+        return io.BytesIO(bytes(obstore.get(self.store, self.key).bytes()))
+
+    @contextmanager
+    def atomic_write(self) -> Iterator[BinaryIO]:
+        """Buffer writes; on clean exit replace the object with one atomic PUT (nothing lands on failure)."""
+        import obstore
+        buffer = io.BytesIO()
+        yield buffer
+        obstore.put(self.store, self.key, buffer.getvalue())
+
+
+def inner_location(location: LocationSpec) -> InnerLocation:
+    """Select and build the `InnerLocation` an archive tier layers over from a parsed `location` spec."""
+    if location.type == 's3':
+        return S3InnerLocation.from_spec(location.s3)
+    return PosixInnerLocation(location.path)
 
 
 @dataclass(frozen=True)

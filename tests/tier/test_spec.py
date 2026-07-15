@@ -13,7 +13,7 @@ from pathlib import Path
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, SpecError
+from sosfs.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, LocationSpec, SpecError
 
 
 pytestmark = mark.unit
@@ -306,3 +306,52 @@ def test_load_from_file(tmp_path: Path) -> None:
     assert OverlaySpec.load(spec_file).name == 'tiny'
     with raises(FileNotFoundError):
         OverlaySpec.load(tmp_path / 'absent.toml')
+
+
+# -- LocationSpec: the inner location an archive tier layers over ------------------------------------------------
+
+def test_location_posix() -> None:
+    """A posix location parses and absolutizes its path."""
+    loc = LocationSpec.from_data({'type': 'posix', 'path': '~/some.zip'}, 'tier "arc"')
+    assert loc.type == 'posix' and loc.s3 is None
+    assert loc.path == str(Path('~/some.zip').expanduser())
+
+
+def test_location_s3() -> None:
+    """An s3 location parses its url into a bucket + object key (the S3Spec prefix) with connection knobs."""
+    loc = LocationSpec.from_data(
+        {'type': 's3', 'url': 's3://cold/space.tar.gz', 's3': {'region': 'us-east-1', 'allow_http': True}},
+        'tier "cold"')
+    assert loc.type == 's3' and loc.path is None
+    assert loc.url == 's3://cold/space.tar.gz'
+    assert loc.s3 == S3Spec(bucket='cold', prefix='space.tar.gz', region='us-east-1', allow_http=True)
+
+
+def test_location_type_required() -> None:
+    """The location type must be posix or s3."""
+    with raises(SpecError, match='Invalid location type'):
+        LocationSpec.from_data({'path': '/x.zip'}, 'tier "arc"')
+    with raises(SpecError, match='Invalid location type'):
+        LocationSpec.from_data({'type': 'nfs', 'path': '/x.zip'}, 'tier "arc"')
+
+
+def test_location_posix_requires_path() -> None:
+    """A posix location without a path is malformed."""
+    with raises(SpecError, match='requires a path'):
+        LocationSpec.from_data({'type': 'posix'}, 'tier "arc"')
+
+
+def test_location_s3_requires_url() -> None:
+    """An s3 location without a url is malformed."""
+    with raises(SpecError, match='requires a url'):
+        LocationSpec.from_data({'type': 's3'}, 'tier "cold"')
+
+
+def test_location_rejects_crossed_settings() -> None:
+    """path on s3 and url/s3 on posix are mix-ups; unknown keys never pass silently."""
+    with raises(SpecError, match='uses url'):
+        LocationSpec.from_data({'type': 's3', 'path': '/x.zip'}, 'tier "cold"')
+    with raises(SpecError, match='only valid for s3'):
+        LocationSpec.from_data({'type': 'posix', 'path': '/x.zip', 'url': 's3://b/k'}, 'tier "arc"')
+    with raises(SpecError, match='Unknown key'):
+        LocationSpec.from_data({'type': 'posix', 'path': '/x.zip', 'staging': '/w'}, 'tier "arc"')

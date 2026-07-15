@@ -18,7 +18,7 @@ from sosfs.core.exceptions import SOSFSError
 from sosfs.core.units import parse_bytes, parse_duration
 
 # Public interface
-__all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'S3Spec', 'SpecError',
+__all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'S3Spec', 'LocationSpec', 'SpecError',
            'TIER_TYPES', 'SUPPORTED_TYPES']
 
 TIER_TYPES: Final[frozenset] = frozenset({'posix', 's3', 'zip', 'tar', 'tar.gz'})
@@ -30,6 +30,7 @@ QUOTA_KEYS: Final[frozenset] = frozenset({'size', 'files', 'bypass_size'})
 WRITEBACK_KEYS: Final[frozenset] = frozenset({'mode', 'delay', 'max_interval'})
 S3_KEYS: Final[frozenset] = frozenset({'region', 'endpoint', 'access_key_id', 'secret_access_key',
                                        'session_token', 'allow_http', 'anonymous', 'virtual_hosted'})
+LOCATION_KEYS: Final[frozenset] = frozenset({'type', 'path', 'url', 's3'})
 
 DEFAULT_DRAIN_TIMEOUT: Final[str] = '5m'
 DEFAULT_DELAY: Final[str] = '60s'
@@ -144,6 +145,39 @@ class S3Spec:
                 raise SpecError(f'Invalid value for {where}.s3.{name}: {value!r}')
             strings[name] = value
         return cls(bucket=bucket, prefix=prefix.strip('/'), **flags, **strings)
+
+
+@dataclass(frozen=True)
+class LocationSpec:
+    """The inner location an archive tier layers over: a POSIX path or a single S3 object (PLAN.md -> ArchiveTier)."""
+
+    type: str                                    # 'posix' | 's3'
+    path: Optional[str] = None                   # absolute POSIX path to the archive file
+    url: Optional[str] = None                    # s3://bucket/key for an S3-backed archive object
+    s3: Optional[S3Spec] = None                  # parsed connection settings when type == 's3' (key is s3.prefix)
+
+    @classmethod
+    def from_data(cls, data: dict, where: str) -> LocationSpec:
+        """Build from a `location = {...}` table; reuses `S3Spec` for the connection knobs of an S3 object."""
+        if not isinstance(data, dict):
+            raise SpecError(f'{where}.location must be a table')
+        _reject_unknown(data, LOCATION_KEYS, f'{where}.location')
+        kind = data.get('type')
+        if kind not in ('posix', 's3'):
+            raise SpecError(f'Invalid location type for {where}: {kind!r} (expected "posix" or "s3")')
+        if kind == 's3':
+            if 'path' in data:
+                raise SpecError(f'S3 {where}.location uses url = "s3://bucket/key", not path')
+            url = data.get('url')
+            if not isinstance(url, str) or not url:
+                raise SpecError(f'S3 {where}.location requires a url')
+            return cls(type='s3', url=url, s3=S3Spec.from_data(url, data.get('s3', {}), f'{where}.location'))
+        if 'url' in data or 's3' in data:
+            raise SpecError(f'The url/s3 settings are only valid for s3 locations ({where}.location)')
+        path = data.get('path')
+        if not isinstance(path, str) or not path:
+            raise SpecError(f'Posix {where}.location requires a path')
+        return cls(type='posix', path=os.path.abspath(os.path.expanduser(path)))
 
 
 @dataclass(frozen=True)

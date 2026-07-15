@@ -140,10 +140,10 @@ Adapters:
      `archive_index`, full metadata in the catalog) so `find`/`stat`/`readdir` are served from
      the state store alone, and a member read seeks to its data offset in that `.tar` (no
      repeated decompression). Write-back reconstructs the full archive into a staging file on
-     the same durable tier, recompresses it, and atomically pushes it to the source (temp-key
-     PUT + rename for S3-like, temp+rename for POSIX), rate-limited by `max_frequency` and
-     forced at drain/commit. The pull/decompress/reconstruct is O(whole archive); sharded
-     sources (below) bound that cost to the touched shard.
+     the same durable tier, recompresses it, and atomically pushes it to the source (a single
+     atomic PUT for S3 — a key is never partially visible; temp+rename for POSIX), rate-limited
+     by `max_frequency` and forced at drain/commit. The pull/decompress/reconstruct is O(whole
+     archive); sharded sources (below) bound that cost to the touched shard.
 
   **Sharded sources** (`prefix/*.tar.gz`, planned post-v0.1.0) split a dataset into independent
   per-subtree archives so a write reconstructs only its shard. Each shard maps to one top-level
@@ -244,8 +244,9 @@ Two write-ordering invariants make the database authoritative after any process 
   (kernel panic, power loss) also evaporate the volatile tiers, which the audit handles anyway.
 * **Intent journaling.** Every mutation of a managed location — promotion, commit, eviction,
   compaction, archive re-sync — is journaled as *intent → act → confirm*, with the act made
-  atomic via write-to-temp-name + fsync + rename (temp-key upload for S3). A crash at any
-  point leaves either a resolvable intent row or an orphan temp the audit can discard.
+  atomic via write-to-temp-name + fsync + rename (a single atomic PUT for S3, which is atomic
+  per key). A crash at any point leaves either a resolvable intent row or an orphan temp the
+  audit can discard.
 
 Managed locations are marked: each tier root carries a `.sosfs/marker` file recording the
 overlay UUID, tier name, and a generation counter. A missing or mismatched marker tells the

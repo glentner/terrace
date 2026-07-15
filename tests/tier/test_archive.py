@@ -12,6 +12,7 @@ import io
 import stat
 import tarfile
 import zipfile
+from dataclasses import replace
 from pathlib import Path, PurePosixPath as P
 
 # External libs
@@ -22,7 +23,9 @@ from sosfs.core.units import parse_rate
 from sosfs.state.db import Database
 from sosfs.state.registry import TierRegistry
 from sosfs.tier.protocol import Tier, FileMeta, TierUsage
-from sosfs.tier.archive import ArchiveTier, PosixInnerLocation, _zip_mtime
+from sosfs.tier.spec import S3Spec, LocationSpec
+from sosfs.tier.archive import (ArchiveTier, InnerLocation, PosixInnerLocation, S3InnerLocation,
+                                inner_location, _zip_mtime)
 
 
 pytestmark = mark.unit
@@ -422,3 +425,120 @@ def test_write_refuses_internal(db: Database, tmp_path: Path) -> None:
         put(arc, '/.sosfs/evil', b'x')
     with raises(PermissionError):
         arc.rename(P('/visible'), P('/.sosfs/marker'))
+
+
+# -- S3 inner-location backing (moto): an archive source that lives on S3 ----------------------------------------
+
+def s3_inner(s3_spec: S3Spec, key: str) -> S3InnerLocation:
+    """An S3InnerLocation over the per-test moto bucket, addressing object `key`."""
+    return S3InnerLocation.from_spec(replace(s3_spec, prefix=key))
+
+
+def gzip_tar(members: list[tuple]) -> bytes:
+    """Serialize a list of ('file', name, data) members into an in-memory .tar.gz blob."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        for _, name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime = len(data), 111.0
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def test_s3_inner_satisfies_protocol(s3_spec: S3Spec) -> None:
+    """S3InnerLocation implements the InnerLocation protocol."""
+    assert isinstance(s3_inner(s3_spec, 'a.zip'), InnerLocation)
+
+
+def test_s3_inner_absent_signature_is_none(s3_spec: S3Spec) -> None:
+    """A missing object has no signature."""
+    assert s3_inner(s3_spec, 'missing.tar').signature() is None
+
+
+def test_s3_inner_write_read_and_replace(s3_spec: S3Spec) -> None:
+    """atomic_write lands one PUT on clean exit; a second write replaces it whole."""
+    inner = s3_inner(s3_spec, 'blob.bin')
+    with inner.atomic_write() as out:
+        out.write(b'archive bytes')
+    assert inner.signature()[0] == len(b'archive bytes')
+    with inner.open_read() as handle:
+        assert handle.read() == b'archive bytes'
+    with inner.atomic_write() as out:
+        out.write(b'second, longer payload')
+    with inner.open_read() as handle:
+        assert handle.read() == b'second, longer payload'
+
+
+def test_s3_inner_write_skips_put_on_error(s3_spec: S3Spec) -> None:
+    """A body that raises leaves the object untouched — nothing is put on failure."""
+    inner = s3_inner(s3_spec, 'blob.bin')
+    with inner.atomic_write() as out:
+        out.write(b'original')
+    with raises(RuntimeError):
+        with inner.atomic_write() as out:
+            out.write(b'partial')
+            raise RuntimeError('boom')
+    with inner.open_read() as handle:
+        assert handle.read() == b'original'
+
+
+def test_zip_direct_update_over_s3(db: Database, s3_spec: S3Spec) -> None:
+    """A ZIP whose backing object lives on S3 round-trips put/replace/delete through single-PUT re-packs."""
+    TierRegistry(db).register('arc', position=0, type='zip', role='source', scope='shared')
+    arc = ArchiveTier('arc', s3_inner(s3_spec, 'store.zip'), db, 'zip')
+    put(arc, '/x', b'one')
+    put(arc, '/y', b'two')
+    put(arc, '/x', b'one-updated')
+    arc.delete(P('/y'))
+    assert arc.read(P('/x')) == b'one-updated'
+    assert arc.stat(P('/y')) is None
+    assert raw_names_s3(s3_inner(s3_spec, 'store.zip')) == ['x']    # re-pack stays compact on S3 too
+
+
+def raw_names_s3(inner: S3InnerLocation) -> list[str]:
+    """The ZIP member names physically present in the S3-backed archive object."""
+    with inner.open_read() as handle:
+        with zipfile.ZipFile(handle) as archive:
+            return archive.namelist()
+
+
+def test_staged_source_on_s3(db: Database, s3_spec: S3Spec, tmp_path: Path) -> None:
+    """A tar.gz source on S3: populate pulls + decompresses to a local .tar; resync recompresses + pushes back."""
+    source = s3_inner(s3_spec, 'space.tar.gz')
+    with source.atomic_write() as out:
+        out.write(gzip_tar([('file', 'keep.txt', b'orig')]))
+    work = tmp_path / 'work.tar'
+    TierRegistry(db).register('arc', position=0, type='tar.gz', role='source', scope='shared')
+    arc = ArchiveTier('arc', source, db, 'tar.gz', staging=work)
+    assert arc.read(P('/keep.txt')) == b'orig'           # populate pulled + decompressed from S3
+    assert work.exists()                                 # the working .tar materialized on the local durable tier
+
+    put(arc, '/added.txt', b'new content')
+    signature_before = source.signature()
+    assert arc.read(P('/added.txt')) == b'new content'   # visible in the working copy immediately
+    assert source.signature() == signature_before        # the S3 source is untouched until resync
+
+    assert arc.resync(now=100.0) is True                 # recompress + push the reconstructed archive to S3
+    with source.open_read() as pushed:
+        with tarfile.open(fileobj=pushed, mode='r:gz') as archive:
+            assert set(archive.getnames()) == {'added.txt', 'keep.txt'}
+            assert archive.extractfile('added.txt').read() == b'new content'
+            assert archive.extractfile('keep.txt').read() == b'orig'
+
+
+def test_inner_location_factory_selects_backing(s3_spec: S3Spec, tmp_path: Path) -> None:
+    """inner_location dispatches a parsed location spec to the right InnerLocation, both usable end-to-end."""
+    posix = inner_location(LocationSpec(type='posix', path=str(tmp_path / 'a.zip')))
+    assert isinstance(posix, PosixInnerLocation)
+
+    location = LocationSpec.from_data(
+        {'type': 's3', 'url': f's3://{s3_spec.bucket}/space.tar.gz',
+         's3': {'region': s3_spec.region, 'endpoint': s3_spec.endpoint,
+                'access_key_id': 'test', 'secret_access_key': 'test', 'allow_http': True}},
+        'tier "cold"')
+    cloud = inner_location(location)
+    assert isinstance(cloud, S3InnerLocation)
+    with cloud.atomic_write() as out:
+        out.write(b'hello from the factory')
+    with cloud.open_read() as handle:
+        assert handle.read() == b'hello from the factory'

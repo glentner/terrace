@@ -2,7 +2,7 @@
 status: in-progress
 current_phase: 9
 phases_completed: ["1", "2", "3", "4", "5", "6", "7", "8"]
-last_updated: 2026-07-14
+last_updated: 2026-07-15
 plan_ref: "PLAN.md"
 ---
 
@@ -239,7 +239,7 @@ TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
       full archive on the durable tier, recompresses, and atomically pushes to the source via
       `InnerLocation.atomic_write`, rate-limited by `max_frequency` (injectable clock; forced at
       drain/commit), journaled `resync`
-- [ ] S3 inner-location backing: `S3InnerLocation` (get / atomic-put via obstore) so an archive
+- [x] S3 inner-location backing: `S3InnerLocation` (get / atomic-put via obstore) so an archive
       source can live on S3; select the `InnerLocation` from the spec `location`
 - [ ] Drain/commit integration: one batched re-pack (direct-update) and one
       reconstruct+push (staged) at finalization, never per-file operations
