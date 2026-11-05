@@ -1,319 +1,370 @@
+# Roadmap
+
+The ordered index of future cycles, in the order they should be taken. One entry per
+`issues/{slug}.md`; each **Seed** points at the pre-shaped deferral that holds the evidence.
+`code terrace feature` promotes one into a `spec/{slug}/GOAL.md`, and that promotion is where
+appetite, non-goals and the R-IDs get negotiated. An entry here is a candidate, not a commitment.
+When the cycle lands on `main`, `code terrace roadmap` retires the seed and removes its entry.
+
+The software factory that runs these cycles — its skills, templates and method — lives in the
+operator's KB, not in this repository. The repository commits only its own records: `AGENTS.md`
+§ *Factory* and § *Invariants*, this file, `issues/`, and `spec/{slug}/` for work in flight.
+
+Entries carry no numbers, and a cross-reference names the slug rather than a position. Retiring an
+entry shifts everything below it, and an ordinal reference survives that shift still grammatical and
+now pointing at the wrong cycle.
+
+This file replaces the flat phase checklist that drove the project through Phase 8. Phases 1–8 are
+complete and their content is in git history; what was left of Phases 9–12 is decomposed below into
+cycles sized to one appetite each. Roughly the first third of this list is not from that checklist
+at all: it is the output of the invariant audit run while porting the software factory, which
+reproduced several defects the suite does not cover. Those are recorded in
+[`AGENTS.md`](AGENTS.md) § *Invariants* § *Known open violations* and carried here as their own
+cycles. The order is the triage of 2026-11-04, which also added the toolchain, sharding,
+priority-lane and deployment entries.
+
+Unremediated security findings are indexed separately in `.security/ROADMAP.md`, which is gitignored.
+See [`AGENTS.md`](AGENTS.md) for why.
+
 ---
-status: in-progress
-current_phase: 9
-phases_completed: ["1", "2", "3", "4", "5", "6", "7", "8"]
-last_updated: 2026-07-15
-plan_ref: "PLAN.md"
----
 
-Roadmap — Simple Overlay Service (`sosfs`)
-==========================================
+## Queued
 
-Tactical implementation checklist derived from [PLAN.md](PLAN.md) — the canonical design;
-read it first. AGENTS.md holds conventions and commands.
+### Repair the toolchain so the verify gate runs
 
-How to work this document: read `current_phase` from the frontmatter, find the first
-unchecked item in that phase, implement it, check it off, and advance `current_phase` /
-`phases_completed` only when every item in the phase is checked. One item ≈ one `WIP:`
-commit on the `wip` branch. The `/continue` skill automates this loop; `/release` ships
-`wip` to `main`.
+**Seed:** [`issues/toolchain-repair.md`](issues/toolchain-repair.md) · `fix` · appetite small
 
+First because every cycle's `verify` depends on it. Measured on 2026-11-04: the locked dev
+environment does not install on Python 3.15 final — `moto[server]` pulls in `pydantic-core` 2.46.4,
+which has no cp315 wheel and fails its source build — so `uv run pytest` cannot run on a fresh
+machine, and CI's 3.15 jobs presumably fail the same way, though nobody has read a run to confirm it.
+The committed workflow was last proven on 3.15.0a3. Two test defects travel with it: every tier test
+errors at collection without the moto server extra, because `tests/tier/conftest.py` imports it at
+module scope, and one POSIX test asserts Linux group semantics that fail under BSD group inheritance
+and in setgid directories, which is how HPC project spaces are usually laid out. With the server
+extra replaced by hand the suite is 404 passed and that 1 failed. A small cycle, and until it lands
+every other cycle grades against a substitute gate.
 
-## Phase 1 — Scaffolding
+### Rename `sosfs` to Terrace
 
-Establish the package, tooling, and CI so every later phase lands in a working harness.
-After this phase `uv run sosfs --help` shows the full subcommand surface (all stubs) and
-CI is green on Linux 3.15 and 3.15t.
+**Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
-- [x] `pyproject.toml` (hatchling; `requires-python = ">=3.15"`; deps: `cmdkit[toml]`,
-      `mfusepy`, `obstore`, `rich`; dev group: `pytest`, `pytest-xdist`, `hypothesis`,
-      `moto[server]`; docs group: `sphinx`, `furo`; `[project.scripts] sosfs = "sosfs:main"`),
-      `.python-version` (3.15 via uv), `.gitignore`, `LICENSE` (Apache-2.0), minimal
-      `README.md`, `CHANGELOG.md` (Keep a Changelog, `0.1.0-dev` unreleased section)
-- [x] `src/sosfs/core/`: `logging.py` (Logger with TRACE, `Logger.with_name`, rich console
-      formatting), `config.py` (cmdkit layered config: CLI > `SOSFS_*` env > `.sosfs.toml` >
-      `~/.config/sosfs/config.toml` > `/etc/sosfs/config.toml` > defaults), `platform.py`
-      (path conventions), `exceptions.py`
-- [x] `src/sosfs/core/units.py`: size (`"10TB"`, `"512GiB"` — SI and binary suffixes),
-      duration (`"60s"`, `"15m"`), and rate (`"4/day"`) parsing with unit tests
-- [x] `src/sosfs/__init__.py`: `SOSFSApp(ApplicationGroup)` + `main()`; stub Application
-      subclasses for `mount`, `umount`, `status`, `flush`, `commit`, `audit`, `config`;
-      version via `importlib.metadata`; FUSE-touching imports kept lazy so the engine
-      imports cleanly on hosts without libfuse
-- [x] `tests/` skeleton: `conftest.py` with isolated `temp_site` fixture (scrub `SOSFS_*`
-      env, tmp state dir), test helpers (`main(argv)` shell-out, `assert_output`) — strict
-      `unit`/`integration` markers already wired in `pyproject.toml` (landed with units)
-- [x] CI (GitHub Actions): uv-based; Linux matrix {3.15, 3.15t} running unit tests;
-      macOS job running engine-only unit tests; lint/build check
-- [x] **Commit (logical):** "Phase 1 — project scaffolding: package, core modules, CLI
-      skeleton, test harness, CI"
+Immediately after the toolchain repair, because the cost grows with every later cycle: 498
+occurrences across 83 files at `6419966`, before this harness added its own, and every entry below
+writes more of them. The mechanical two-thirds — distribution name, package directory,
+imports, class names, test modules, CI, prose — is a rename. The other third is not: the `SOSFS_*`
+environment prefix, the `user.sosfs.*` xattr namespace, the `.sosfs/marker` and `.sosfs/partial`
+directories in every managed tier root, and the default state path are **on-disk and user-visible
+contracts**, and changing the marker directory without a decision about existing overlays turns every
+managed location into an evaporated tier on the next mount. `PLAN.md` also records `sosfs` as a
+technology decision rather than an accident, so under the plan-drift rule this cycle reconciles
+`PLAN.md` before it touches code. The shipped-artifact question — whether anything is out there to
+migrate — is what makes it cheap now and expensive after v0.1.0.
 
+### Reconcile `PLAN.md` against the implementation
 
-## Phase 2 — State store
+**Seed:** [`issues/plan-md-reconciliation.md`](issues/plan-md-reconciliation.md) · `docs` · appetite small
 
-The SQLite layer and the invariants that make it authoritative (PLAN.md → State store).
-After this phase the database can represent an overlay's full state and survive `kill -9`.
+Small, cheap, and it comes early because `code terrace review` grades a cycle against a contract shaped
+from `PLAN.md`, so every inaccuracy left standing is a chance to grade correct code as wrong. The
+audit found `PLAN.md` internally inconsistent in one place (its summary lists an `fsck` command its
+own CLI table calls `audit`) and behind the code in several others: `umount` takes a spec file rather
+than a mountpoint, and the implementation is the better design; `rich` and `frozendict` are named as
+technology decisions and used nowhere; four of the eight testing-strategy bullets describe coverage
+that does not exist. This cycle holds only the residue — the inaccuracies no other queued cycle will
+touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
+diff, which is what the same-commit rule requires.
 
-- [x] `src/sosfs/state/schema.sql`: `entry`, `residency` (incl. recorded size/mtime,
-      optional checksum, per-tier atime), `writeback`, `intent`, `tier_usage`,
-      `archive_index`, `overlay` (UUID, generation, `shutdown_state`, mounting host)
-      — plus a `tier` registry table (stack identity, marker generations, spec-drift
-      detection) split from the hot `tier_usage` counters
-- [x] `src/sosfs/state/db.py`: connection management (per-thread, WAL,
-      `synchronous=NORMAL`, foreign keys), schema init, exclusive-lock acquisition for
-      offline commands
-- [x] `src/sosfs/state/catalog.py`: entry CRUD, path resolution, residency queries,
-      LRU atime updates — plus `state/sql.py`: PEP 750 t-string SQL rendering
-      (parameter binding, `:id` identifier splicing, fragment composition)
-- [x] `shutdown_state` transitions (`mounted` ↔ `clean`/`detached`) and mounting-host
-      recording; managed-location markers (`.sosfs/marker`: overlay UUID, tier name,
-      generation) — write, verify, mismatch detection (`state/lifecycle.py`)
-- [x] Invariant primitives: dirty-transition transaction helper (metadata-before-ack)
-      and intent journal helpers (create/resolve/roll-back, temp-name conventions)
-- [x] Unit tests: schema round-trips, WAL survival across simulated process death
-      (subprocess `kill -9`), marker verification, intent resolution
-- [x] **Commit (logical):** "Phase 2 — SQLite state store: schema, catalog,
-      shutdown-state flag, markers, metadata-before-ack and intent-journal primitives"
+### A commit before a queued rename orphans the source object
 
+**Seed:** [`issues/deferred-rename-source-orphan.md`](issues/deferred-rename-source-orphan.md) · `fix` · appetite big
 
-## Phase 3 — Tier protocol + POSIX tier
+Reproduced. `_commit_hop` writes the destination at the entry's *logical* path and then advances
+`source_path` without moving or removing the object still sitting at the old one; the queued rename
+later runs with both sides equal and does nothing. The stale object survives, and the next mount
+re-adopts it as live data — the exact divergence class `PLAN.md` declares closed in Phase 8. Reachable
+from three production paths: `fsync_policy = "commit"`, the eviction manager committing a dirty copy
+before the rename is due, and any write-back poll where the data row's deadline precedes the rename
+row's, which is the normal case when the write preceded the rename. `flush` and `drain` mask it
+because both run namespace ops first, and the hypothesis model test never sees it because its only
+convergence checkpoint is `flush()`. Two smaller siblings share the cause: `truncate` without a
+handle and the live-stat path both resolve against the logical path, giving `ENOENT` on a file that
+exists and a permanently wrong size in the catalog. Highest-value fix on this list — it is silent
+resurrection of deleted data behind a drain that reports success.
 
-The storage contract and its first implementation (PLAN.md → Tier protocol).
+### A second SIGINT settles `detached` without rescuing
 
-- [x] `src/sosfs/tier/protocol.py`: `Tier` protocol (`stat`, `list`, `read` with
-      offset/size, `open_read`, `put`, `delete`, `mkdir`/`rmdir`/`rename`, `usage`) and
-      types (`TierStat`, `TierEntry`, `TierUsage`, `FileMeta`)
-- [x] `src/sosfs/tier/posix.py`: `PosixTier` + passthrough file handles for resident-copy
-      hot I/O; atomic put via temp-name + fsync + rename
-- [x] Overlay-spec model: parse `[overlay]` and `[[tier]]` TOML into typed configs
-      (posix only for now; `role`, `scope`, `quota` incl. `bypass_size`, `writeback`
-      policies via `core.units`); stack validation (exactly one source, source first,
-      state dir durability/scope checks)
-- [x] Quota accounting: `tier_usage` counters wired to put/delete; marker initialization
-      on first tier attach
-- [x] Unit tests: PosixTier semantics against tmpdirs, spec validation errors, counter
-      correctness under concurrent puts
-- [x] **Commit (logical):** "Phase 3 — Tier protocol, PosixTier, overlay spec parsing,
-      quota accounting"
+**Seed:** [`issues/shutdown-rescue-gaps.md`](issues/shutdown-rescue-gaps.md) · `fix` · appetite big
 
+The second-Ctrl-C downgrade path settles `shutdown_state = detached` and never calls `rescue()`.
+`detached` is a promise — it tells a later `sosfs commit` that metadata is trusted and no audit walk
+is needed — so every dirty file still queued on `/tmp` or `/dev/shm` is stranded behind a state that
+says it is safe, and when the node is reclaimed the data is gone with no record that anything was
+lost. Two related gaps travel with it: `umount --detach` is bounded by `drain_timeout` where
+`PLAN.md` says it completes, because the daemon cannot distinguish it from a scheduler's SIGTERM; and
+an incomplete rescue's stranded count is discarded rather than recorded. Reaching the documented
+semantics needs a distinguishable "complete the rescue" signal, which is a design change and belongs
+in `PLAN.md` first. Sequenced immediately after the orphan fix: both are silent data loss on the
+differentiating lifecycle, and this one has no test that would catch a regression.
 
-## Phase 4 — Overlay engine core
+### Run the integration suite somewhere
 
-The mount-free heart of the system (PLAN.md → Overlay engine). After this phase a
-multi-tier POSIX stack works end-to-end through the engine API, with no FUSE anywhere.
+**Seed:** [`issues/ci-integration-lane.md`](issues/ci-integration-lane.md) · `ci` · appetite big
 
-- [x] `src/sosfs/engine/locks.py`: per-file lock registry
-- [x] `src/sosfs/engine/transfer.py`: `TransferPool` (thread executor) with
-      intent-journaled copies (intent → temp+rename act → confirm)
-- [x] `src/sosfs/engine/overlay.py` (part 1): namespace — lazy catalog population from
-      the source tier, `getattr`/`readdir`, `mkdir`/`rmdir`, `create`/`unlink`/`rename`
-      journaled as namespace ops in the write-back queue
-- [x] `src/sosfs/engine/overlay.py` (part 2): data path — open with synchronous
-      promote-on-open (whole-file, `bypass_size` rule), read/write through passthrough
-      handles, truncate, dirty transitions via metadata-before-ack, `fsync`
-      (`fsync_policy = "resident" | "commit"`), release
-- [x] Engine test suite: multi-tier POSIX stacks (2–4 tiers), promotion, residency, and
-      metadata assertions
-- [x] Hypothesis stateful model tests: random op sequences vs. plain-directory oracle,
-      equivalence after quiesce + flush
-- [x] **Commit (logical):** "Phase 4 — overlay engine: namespace, promotion,
-      read/write paths, transfer pool, model-based tests"
+Ten tests — the entire drain, detach, force-umount, xattr and metadata-propagation surface, plus the
+only real-S3 round trip — execute on no automated machine. CI has no integration job and nothing
+starts MinIO. Worse, the obvious gate is a trap: `uv run pytest -m integration` exits 0 when every
+test skipped, so a criterion verified that way proves nothing, and the two data-loss defects above
+sat in exactly the region this lane covers. Placed after them rather than before because the lane is
+most valuable once it has regressions to protect, and both fixes should land with integration
+coverage that this cycle then makes run. Needs a Linux runner with `/dev/fuse` and a MinIO service
+container, and a decision about whether the lane blocks a PR or reports.
 
+### The default mount fails on a first-ever mount
 
-## Phase 5 — Policies
+**Seed:** [`issues/daemonized-mount-first-run.md`](issues/daemonized-mount-first-run.md) · `fix` · appetite small
 
-Write-back, eviction, drain, and rescue (PLAN.md → Write-back / Eviction / Lifecycle).
-All policy logic is driven by an injectable clock so tests are deterministic.
+`_daemonize_and_serve` redirects its streams before `start()` runs, and the redirection opens
+`mount.log` inside the state directory — which nothing has created yet, because the exclusive lock
+and the engine create it. Measured: against a fresh `state =` path the documented happy-path command
+exits 1 with `FileNotFoundError`; `mkdir -p` the directory first and the identical command mounts.
+`-f` is unaffected, and every unit and integration test uses foreground mode or calls
+`start()`/`shutdown()` directly, so nothing in the suite covers the daemonized branch at all. Small
+fix, and the first thing a new user hits.
 
-- [x] `src/sosfs/engine/writeback.py`: `WritebackScheduler` FSM thread — per-boundary
-      `delay` / `max_interval` / `passthrough` cascade, injectable clock
-- [x] `src/sosfs/engine/evict.py`: `EvictionManager` FSM thread — high/low watermarks
-      (default 95%/85%), LRU on per-tier atime, commit-before-evict, never evict the
-      most-upstream dirty holder, `bypass_size` respected
-- [x] Drain mode: collapse policy clocks, waive re-sync rate limits, loss-risk ordering
-      (most-volatile dirty first, then upstream hop by hop)
-- [x] Rescue mode: dirty data on `scope = "node"` tiers one hop to the nearest shared
-      durable tier, bounded by a time budget; shared ordering logic with drain
-- [x] Virtual-clock policy tests: grace expiry, max-interval under constant writes,
-      passthrough, watermark hysteresis, drain/rescue ordering under constrained budgets
-- [x] **Commit (logical):** "Phase 5 — write-back scheduler, LRU eviction, drain and
-      rescue with loss-risk ordering"
+### Non-`OSError` exceptions escape the VFS API
 
+**Seed:** [`issues/engine-error-mapping.md`](issues/engine-error-mapping.md) · `fix` · appetite small
 
-## Phase 6 — FUSE adapter
+The engine promises `OSError` subclasses so the adapter can map errno directly. Two paths break it:
+`_serve` raises `EngineError` when no resident copy exists, and writing through a handle to a file
+that has been unlinked raises `LookupError` out of `mark_dirty`. The second is the ordinary
+`tempfile` pattern — create, open, unlink, write — which POSIX requires to succeed, and the adapter
+maps neither, so it reaches libfuse as an unhandled exception. The existing test covers only the read
+case.
 
-The thin layer that makes it a filesystem (PLAN.md → FUSE adapter, Lifecycle → Shutdown).
+### Nothing notices when a policy pump dies
 
-- [x] `src/sosfs/fuse/adapter.py`: mfusepy `Operations` mapping FUSE callbacks to engine
-      calls; `statfs` from source capacity (or configured quota for unbounded sources);
-      read-only xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`)
-- [x] Metadata-mutation tier support: add `set_meta` to the `Tier` protocol
-      (`tier/protocol.py`) and implement it in `PosixTier` (mode and mtime always, ownership
-      best-effort under privilege — reuse `put`'s metadata-application path); unit tests
-- [x] Engine setattr path (`engine/overlay.py`): `chmod`/`chown`/`utimens` record to the
-      catalog via `update_meta` (metadata-before-ack), apply to the fastest resident copy, and
-      enqueue a `meta` write-back op carrying only the changed attributes; wire the `meta`
-      branch in `_execute_namespace` to apply upstream via `Tier.set_meta`; a `meta` op never
-      dirties content (it rides the namespace-op queue, not the residency dirty bit);
-      flush/drain carry it like other namespace ops; engine + write-back-clock unit tests
-- [x] FUSE adapter (`fuse/adapter.py`): override `chmod`/`chown`/`utimens` to the engine
-      setattr path (replacing the current unimplemented/`ENOSYS` behavior), returning 0 on
-      success; adapter unit tests
-- [x] `src/sosfs/fuse/mount.py` + `mount` command: foreground (`-f`) and daemonized
-      (default) modes, pidfile in the state directory, `shutdown_state = mounted` on
-      start, state-dir validation
-- [x] Signal handling: SIGINT → drain → `clean`; second SIGINT → downgrade to detach;
-      SIGTERM → detach with `drain_timeout` rescue budget → `detached`
-- [x] `umount` command: resolve daemon via pidfile; drain (SIGINT) by default,
-      `--detach` (SIGTERM), `--force` (plain unmount, skips even the rescue)
-- [x] FUSE integration tests (`@mark.integration`, Linux): POSIX tooling against a real
-      mount, xattr residency assertions, metadata propagation (`chmod`/`chown`/`touch`
-      reflected at the source after flush), mount/umount/detach lifecycle
-- [x] **Commit (logical):** "Phase 6 — mfusepy adapter, metadata-mutation propagation,
-      mount/umount commands, signal lifecycle (drain, detach, rescue budget)"
+**Seed:** [`issues/pump-liveness-and-loss-windows.md`](issues/pump-liveness-and-loss-windows.md) · `fix` · appetite big
 
+A `StateThread` that raises stores the exception and exits its loop; the exception surfaces only on
+`join`, and nothing monitors liveness — the mount watches the FUSE thread alone. A write-back
+scheduler that dies on a transient tier error leaves the filesystem fully functional and accepting
+writes while nothing ever commits upstream, which converts every bounded loss window into an
+unbounded one, and the only evidence is one log line. Two configuration gaps belong with it because
+they are the same failure seen from the operator's side: `max_interval` defaults to `None`, so writes
+closer together than `delay` defer the commit forever, and the eviction watermarks `PLAN.md`
+documents as defaults are hardcoded with no configuration key at all.
 
-## Phase 7 — S3 tier
+### Small gaps behind inaccurate invariants
 
-Object storage as a tier (PLAN.md → Tier protocol, Technology decisions).
+**Seed:** [`issues/invariant-audit-gaps.md`](issues/invariant-audit-gaps.md) · `fix` · appetite small
 
-- [x] Risk gate: verify obstore free-threaded (cp315t) wheels; if absent, wire
-      source-build in CI and record the outcome in PLAN.md (Risks)
-- [x] `src/sosfs/tier/s3.py`: `S3Tier` via obstore (`get`/`get_range`/`put`/`list`/`head`);
-      note: S3 PUT is atomic per key, so the intent journal's act step is a single PUT
-      (multipart for large objects) — no temp-key dance
-- [x] Credentials and endpoint config (env, profile, explicit endpoint for
-      moto/MinIO/on-prem)
-- [x] moto-server pytest fixture + unit tests for S3Tier semantics
-- [x] MinIO integration tests (`@mark.integration`); end-to-end: S3 source with POSIX
-      staging stack through the engine
-- [x] **Commit (logical):** "Phase 7 — S3 tier via obstore with moto-server unit tests
-      and MinIO integration tests"
+Six independent findings from the same audit, each too small for its own cycle and each a place where
+an asserted property is not the one the code has. `residency.checksum` is never written though the
+spec parses `checksum = true`, so `audit --full` would have nothing to verify against.
+`tier.generation` never advances in production, so a generation mismatch can only come from external
+tampering. `intent.temp_name` is dead — no call site passes it — and the archive's sibling `.tmp`
+falls outside the orphan-recognition convention entirely. `statfs` reports an entirely full
+filesystem for an unquota'd non-POSIX source, so `df` shows 100% and tools that pre-check free space
+refuse to write to a working mount. There is no directory `fsync` anywhere, so a rename's *name* is
+not durable even though its data is — a repo-wide omission, and changing it is a design decision
+rather than a drive-by fix. And `S3Tier.rename`'s docstring claims an atomicity S3 does not have.
 
+### Make archive tiers reachable from a spec file
 
-## Phase 8 — Write-back namespace-replay hardening
+**Seed:** [`issues/archive-spec-plumbing.md`](issues/archive-spec-plumbing.md) · `feature` · appetite big
 
-Close the systemic deferred-op gap the hypothesis model test surfaced during Phase 7,
-before the archive tiers and offline commit/audit build on the same path (PLAN.md →
-Risks, Write-back). The write-back queue is entry-keyed and replayed at flush; Phase 7
-fixed the replay-at-historical-paths crash class and left a documented residual gap.
+`ArchiveTier` is adapter-complete and covered by 36 unit tests, and no user can configure it: the
+spec parser admits only `posix` and `s3`, and the archive keys `location`, `staging` and `sync` are
+rejected as unknown, so the three worked examples in `PLAN.md` all fail at parse time. `LocationSpec`
+and `inner_location()` are implemented and reachable only from tests, and the engine's tier
+construction has no archive branch. A shipped-but-unreachable adapter is worse than an unwritten one
+because it reads as done — three Phase 9 checkboxes were true at the unit level and misleading at the
+product level. This is the prerequisite for everything else archive-shaped.
 
-- [x] Characterize the divergence classes with focused engine regression tests: removing
-      (`unlink`/`rmdir`) an entry that still holds an uncommitted deferred rename orphans
-      its source copy at the pre-rename path; enumerate siblings (rename over a pending
-      target, double-rename-then-remove)
-- [x] Design decision (record in PLAN.md → Write-back): replay vs. reconcile — track each
-      entry's committed source path so deferred removals/renames target where the source
-      physically holds it, or reconcile the source tree to the catalog at flush; keep
-      metadata-before-ack and intent → act → confirm intact
-      **[decided: replay + committed-source-path tracking; reconcile stays the audit's job]**
-- [x] Implement the chosen model in `_execute_namespace` / `_remove` (and the shared
-      offline-commit path): correct source-path resolution for deferred removals and
-      renames — no orphaned source objects, no invalid moves
-- [x] Drop the `_pending` skip-guard in `tests/engine/test_model.py` and raise its
-      exploration (max_examples / step count); source must equal the oracle after quiesce
-      + flush across the full op mix, over many seeds
-- [x] Retire the residual-gap caveat in PLAN.md → Risks and note the resolved semantics in
-      the Write-back design section
-- [x] **Commit (logical):** "Phase 8 — write-back namespace-replay hardening: correct
-      deferred rename/remove replay, drop the model-test guard"
+### Bring archive mutations under the journal and a lock
 
+**Seed:** [`issues/archive-journaling-and-locking.md`](issues/archive-journaling-and-locking.md) · `fix` · appetite big
 
-## Phase 9 — Archive tiers
+Re-pack and re-sync mutate a managed location — the source archive, which for an archive source is
+the whole dataset — outside any intent bracket. `'compact'` and `'resync'` exist in the journal's
+action vocabulary with no producer, and the ROADMAP recorded the journaling as done. Alongside it,
+`ArchiveTier` has no tier-wide lock while `engine/locks.py` is path-keyed, so two concurrent puts to
+different paths in the same archive both snapshot the member set, both re-pack, and the second rename
+wins — a member vanishes with both calls returning success. Two more in the same region: a stale
+staging copy silently wins over a newer source because `_populate` returns early on the staging file
+merely existing, and the archive index cache is trusted unconditionally, so a stale offset returns
+arbitrary in-range bytes with no error. Sequenced before the finalization work because that work adds
+callers to exactly these paths.
 
-TAR and ZIP as tiers, in both operating modes (PLAN.md → ArchiveTier).
+### Batch archive finalization at drain and commit
 
-- [x] `src/sosfs/tier/archive.py`: `ArchiveTier` skeleton over an inner location
-      (POSIX path first, S3 object next); member indexing (ZIP central directory, TAR
-      single sequential scan) cached in `archive_index`
-- [x] Direct-update mode (ZIP, uncompressed TAR): every mutation re-packs the archive in
-      place via temp+fsync+rename (live member set written, changed member applied, deleted
-      members dropped) so the archive stays compact and the temp+rename atomicity invariant
-      holds — compaction is implicit, no tombstones; `InnerLocation.atomic_write` (POSIX).
-      **[reconciled to atomic re-pack; append-supersede was in tension with the sacred
-      temp+rename invariant — PLAN.md → ArchiveTier]**
-- [x] Staged re-sync mode (single archive source): lazy pull + decompress `.tar.gz` to an
-      uncompressed `.tar` on the durable next tier; index **data** offsets into `archive_index`
-      (switch from header to data offset) + full metadata into the catalog so `find`/`stat`
-      run from SQLite alone; member reads seek to the data offset. Write-back reconstructs the
-      full archive on the durable tier, recompresses, and atomically pushes to the source via
-      `InnerLocation.atomic_write`, rate-limited by `max_frequency` (injectable clock; forced at
-      drain/commit), journaled `resync`
-- [x] S3 inner-location backing: `S3InnerLocation` (get / atomic-put via obstore) so an archive
-      source can live on S3; select the `InnerLocation` from the spec `location`
-- [ ] Drain/commit integration: one batched re-pack (direct-update) and one
-      reconstruct+push (staged) at finalization, never per-file operations
-- [ ] Tests: both modes over POSIX; tar.gz over S3 (moto); index persistence across
-      remounts; compaction/reconstruction correctness
-- [ ] **Commit (logical):** "Phase 9 — archive tiers: ZIP/TAR direct-update, tar.gz staged
-      re-sync with rate limiting, S3 inner backing"
+**Seed:** [`issues/archive-finalization-integration.md`](issues/archive-finalization-integration.md) · `feature` · appetite big
 
+The last unchecked code item of Phase 9. `PLAN.md` requires one re-pack per commit or flush and never
+per file; the adapter re-packs on every `put`, `set_meta`, `delete`, `mkdir`, `rmdir` and `rename`,
+and nothing batches. Staged re-sync's rate limit is waived at drain in the design and unreachable in
+the code, because no engine module calls `resync` at all. This is where the drain and commit paths
+learn that an archive source is finalized once, at the end, rather than continuously — and it is not
+a small addition.
 
-## Phase 10 — Control + operations
+### Archive coverage at the engine and mount level
 
-The operational surface (PLAN.md → Control channel, Audit, Deferred commit).
+**Seed:** [`issues/archive-tier-test-coverage.md`](issues/archive-tier-test-coverage.md) · `test` · appetite small
 
-- [ ] `src/sosfs/control/`: Unix-domain-socket server (line-oriented JSON) wired into the
-      mount daemon; client library
-- [ ] `status` command: live via socket (per-tier usage vs. quota, dirty counts, transfer
-      activity; rich rendering); offline via direct DB read
-- [ ] `flush` command via socket (whole overlay or subtree)
-- [ ] `config` command: `get`/`set`/`which`/`edit` over the layered application config
-      (hypershell pattern, on the `core.config` primitives)
-- [ ] `audit` command — reconcile walk (fastest tier upstream): marker check with
-      tier-evaporation attribution; residency reconcile (clean copies verified, dirty
-      trusted, missing rolled back with loss report, orphans quarantined); intent
-      resolution; counter rebuild; report + exit codes (0/1/2); `--fast`/`--full`/
-      `--dry-run`/`--forfeit` (hostname-aware for unreachable node-scope tiers)
-- [ ] Auto-audit wiring in `mount` when `shutdown_state != clean|detached`
-      (`--no-audit`, `--audit=full`)
-- [ ] `commit` command — offline finalize: exclusive lock, direct after detach,
-      auto-audit after crash, loss-risk ordering, checksum-match skip, batched archive
-      finalization, `--direct` hop collapse with stale-copy invalidation
-- [ ] **Commit (logical):** "Phase 10 — control socket, status/flush, audit and offline
-      commit commands"
+The adapter is well covered in isolation; nothing exercises an archive source *through the engine*,
+because until the two cycles above land nothing can. This closes Phase 9 immediately after the code
+that makes the tests possible, while the design is still in the author's head: both modes over POSIX,
+tar.gz over S3 against moto, index persistence across remounts, and reconstruction correctness after
+a batched finalization. Re-scope rather than transcribe the old checklist item — the unit-level half
+it describes is substantially already done.
 
+### Sharded archive sources
 
-## Phase 11 — Hardening & release
+**Seed:** [`issues/sharded-archive-sources.md`](issues/sharded-archive-sources.md) · `feature` · appetite big
 
-Prove the invariants, measure honestly, document, ship v0.1.0.
+The flagship use case, in the owner's words of 2026-11-04: a center refuses a 100-million-inode quota
+request and the researcher's dataset lives instead as ten thousand `.tar.gz` shards of ten thousand
+images each, cascading down the tier stack just in time — a staged copy of a shard on durable storage
+below the archive tier, a metadata parse on first crawl with the index persisted, the shard unpacked
+only when its subtree is used, and one file pulled to the fastest tier on its first read. Placed
+directly after the archive chain because it extends all three of those cycles and their test
+fixtures, and ahead of the operations surface because it is what the project is for. That placement
+contradicts `PLAN.md`, which schedules sharding post-v0.1.0, so under the plan-drift rule the cycle
+reconciles `PLAN.md` first. A streaming or ranged read in `InnerLocation` is a prerequisite rather
+than an optimization: archive I/O is whole-blob in memory today, and a shard of that size cannot
+pass through RAM.
 
-- [ ] Fault-injection crash suite: kill points between intent/act/confirm of every
-      mutation type, mid-drain, mid-rescue, mid-re-sync; audit + remount convergence and
-      loss-report accuracy
-- [ ] Tier-evaporation and detach/commit tests: wiped staging tier attribution;
-      commit from a simulated second host (node-scope paths absent); `--direct` vs.
-      cascade byte-identical sources
-- [ ] Concurrency stress on free-threaded 3.15: parallel FUSE callbacks + transfers +
-      eviction; race hunting with the sampling profiler
-- [ ] Benchmark harness: throughput/latency vs. direct tier access, published numbers in
-      docs (honest overhead accounting)
-- [ ] Sphinx docs (furo): quickstart, overlay-spec reference, architecture (from
-      PLAN.md), operations guide (job-script detach/commit pattern), CLI reference
-- [ ] Release readiness: CHANGELOG for 0.1.0, README polish, `uv build` artifacts
-      verified, version to `0.1.0`
-- [ ] **Commit (logical):** "Phase 11 — hardening, benchmarks, documentation; release
-      v0.1.0" (then ship via `/release minor bump with tag`)
+### A priority lane in the transfer pool
 
+**Seed:** [`issues/transfer-priority-lane.md`](issues/transfer-priority-lane.md) · `feature` · appetite small
 
-## Phase 12 — Extended archive sources (post-v0.1.0)
+`TransferPool` is one flat FIFO executor, so an on-demand promote can wait behind every queued
+background copy. Split out of the extended-archive-sources seed on 2026-11-04, as that seed's own
+notes recommended: the lane benefits a plain POSIX stack exactly as much as an archive one, and
+filed in an archive bucket it kept losing to work that was visible. Placed directly after sharding,
+whose per-shard pulls are the heaviest on-demand transfers the product will make. Shaping starts by
+establishing which on-demand path actually queues, because the synchronous promote-on-open runs on
+the calling thread and never enters the pool.
 
-Larger archive-source capabilities deferred past the v0.1.0 release (PLAN.md → ArchiveTier,
-Future work). The design is captured now; implementation is scheduled after Phase 11 ships.
+### `sosfs audit` — reconcile the state database against the tiers
 
-- [ ] SFTP inner-location backing (`SFTPInnerLocation`: get / atomic-put) for HPSS/tape and
-      other get/put endpoints, over the `InnerLocation` protocol
-- [ ] Globus inner-location backing: a synchronous get/put shim over Globus transfer
-      (submit + wait), top source only
-- [ ] Sharded archive sources (`prefix/*.tar.gz`): each shard ⇄ one top-level subtree
-      (single-top-level-dir-matching-stem invariant, reject the mount otherwise; root holds
-      only shard directories, root-level files refused); dynamic shard set (glob at mount;
-      top-level create/delete = shard create/delete; new shards in the source default format);
-      lazy per-shard pull/index (nothing pulled at mount but the glob listing; index persists
-      across remounts); per-shard reconstruction+push touches only the dirty shard
-- [ ] TransferPool priority lane: priority scheduling so on-demand pulls preempt background
-      work — enables optional low-priority shard warming without regressing on-demand latency
-- [ ] Non-conforming-archive wrapping: present an archive/shard lacking the single top-level
-      directory through a synthetic subtree instead of rejecting the mount
-- [ ] **Commit (logical):** "Phase 12 — extended archive sources: SFTP/Globus backings,
-      sharded sources, transfer priority lane"
+**Seed:** [`issues/audit-command.md`](issues/audit-command.md) · `feature` · appetite big
+
+The only *live operational* gap on this list rather than unbuilt feature work: the recovery half of a
+sacred invariant is unimplemented. `journal.pending()` has no consumer anywhere in `src/`,
+`begin_mount` raises `CrashDetected` and nothing catches it — so after a crash the next mount fails
+instead of recovering — and intents accumulate resolvable only by hand. The five-step walk is fully
+specified in `PLAN.md`: marker check, residency reconcile, intent resolution, counter rebuild, report
+with exit codes 0/1/2. It also defines what "converged" means for the fault-injection suite and
+unblocks the commit cycle. It is high-blast-radius as a whole, being the only component licensed to
+delete residency rows and quarantine files on its own reading of the world.
+
+### `sosfs commit` — finalize the source offline
+
+**Seed:** [`issues/offline-commit-command.md`](issues/offline-commit-command.md) · `feature` · appetite big
+
+The project's differentiating feature and the thing the detach lifecycle was built for: drain the
+queued write-back state to the source from any host that sees the shared tiers, off the expensive
+allocation. Exclusive lock, direct after a detach, audit first after a crash, loss-risk ordering,
+checksum-match skip, batched archive finalization, `--direct` hop collapse with stale-copy
+invalidation, and `--forfeit` for data stranded on an unreachable node-scope tier. Directly
+downstream of the audit.
+
+### Control channel, `status` and `flush`
+
+**Seed:** [`issues/control-channel-and-status.md`](issues/control-channel-and-status.md) · `feature` · appetite small
+
+`src/sosfs/control/` does not exist. A unix-domain socket in the state directory serving
+line-oriented JSON, wired into the mount daemon, with a client library; `status` reading it live and
+falling back to a direct database read when no mount is running; `flush` forcing an upstream commit
+for the whole overlay or a subtree. The first cheap entry after two big ones, and it reuses the
+offline read path the audit cycle introduces rather than building it twice.
+
+### `sosfs config`
+
+**Seed:** [`issues/config-command.md`](issues/config-command.md) · `feature` · appetite small
+
+`get`/`set`/`which`/`edit` over the layered application config, on the existing `core.config`
+primitives, following the hypershell pattern. The smallest remaining cycle and pure assembly. Placed
+here because it completes the CLI surface, so the documentation cycle has nothing stubbed left to
+describe.
+
+### Deploy on an HPC cluster
+
+**Seed:** [`issues/hpc-deployment.md`](issues/hpc-deployment.md) · `feature` · appetite big
+
+The goal is a researcher who runs `module load terrace`, mounts at the top of a batch script, and
+finds that it works — free, and maintained by the center. Every question that decides how is
+unverified: whether compute nodes expose `/dev/fuse` and a setuid `fusermount3` to ordinary users,
+how a Python 3.15 runtime is delivered, how a modulefile ships, and what the job-script pattern is.
+The one with an R-ID of its own is the batch scheduler's time-limit sequence — SIGTERM, then SIGKILL
+after a site grace period — mapped onto the existing SIGTERM rescue-and-detach lifecycle, because
+that mapping is the product's differentiator and today it is inferred from the signal handlers
+rather than demonstrated. Placed after the operations surface closes, since the pattern ends in
+`sosfs commit` and leans on the rescue and first-mount fixes above.
+
+### Fault injection around every crash point
+
+**Seed:** [`issues/crash-fault-injection-suite.md`](issues/crash-fault-injection-suite.md) · `test` · appetite big
+
+The proof obligation for the audit and commit cycles, and the largest gap between the testing strategy
+`PLAN.md` describes and the one that exists. Today there are three survival tests with two SIGKILL
+points, no audit, no remount and no tier evaporation — and one of them performs the audit's job by
+hand in a comment. What is needed: kill points between intent, act and confirm of every mutation
+type, mid-drain, mid-rescue and mid-re-sync, each followed by audit and remount, asserting
+convergence and loss-report accuracy; plus tier-evaporation cases that wipe a staging tier wholesale
+and assert the marker attributes it correctly. Placed right after the operations surface closes,
+so a defect it finds still has a natural home.
+
+### Concurrency stress on the free-threaded build
+
+**Seed:** [`issues/freethreaded-concurrency-stress.md`](issues/freethreaded-concurrency-stress.md) · `test` · appetite small
+
+The 3.15t job runs the same suite as every other job; there are no targeted stress tests despite
+free-threading being a first-class target. Parallel FUSE callbacks against transfers against eviction,
+race hunting with the sampling profiler, and the specific unguarded state the audit named: the handle
+fields written from callback threads, and the non-atomic check-then-set in logging initialization.
+Needs a surface that has stopped moving, which is why it sits here — everything above it moves the
+engine.
+
+### Benchmark harness and honest overhead numbers
+
+**Seed:** [`issues/benchmark-harness.md`](issues/benchmark-harness.md) · `feature` · appetite small
+
+Throughput and latency against direct tier access, published in the docs. `PLAN.md` commits to honest
+overhead accounting for a Python FUSE implementation, and the passthrough-handle design exists
+precisely to make the number defensible. Measures a system believed correct; measuring earlier means
+measuring twice.
+
+### Documentation and v0.1.0
+
+**Seed:** [`issues/documentation-and-v0.1.0.md`](issues/documentation-and-v0.1.0.md) · `feature` · appetite big
+
+Sphinx and furo: quickstart, overlay-spec reference, architecture from `PLAN.md`, an operations guide
+built around the job-script detach-then-commit pattern, and a CLI reference. Then release readiness —
+`CHANGELOG.md` for 0.1.0, `README.md`, verified build artifacts, and the version. Consumes the
+benchmark numbers and documents a surface with nothing stubbed in it. Last before the tag. Whether the
+docs build joins CI as a fourth job is a question for shaping.
+
+### Extended archive sources
+
+**Seed:** [`issues/extended-archive-sources.md`](issues/extended-archive-sources.md) · `feature` · appetite big
+
+Post-v0.1.0 by design in both `PLAN.md` and the original phase outline. Two capabilities remain behind
+one entry: SFTP and Globus inner locations over the existing three-method protocol, and
+synthetic-subtree wrapping for a non-conforming archive. Sharded sources and the `TransferPool`
+priority lane were split out on 2026-11-04 and sit above, sharding because the owner named it the
+flagship use case and the lane because it was never an archive feature. What is left has no user
+asking for it yet, and an honest SFTP backing wants the ranged read the sharding cycle has to build
+first.
+
+## Terminal records
+
+Deferrals considered and closed **without** shipping — `declined` and `accepted-behaviour`. Listed
+apart from the ordered cycles so the index above stays an index of *work*. Read one before re-filing
+the thing it describes. Work that shipped leaves no entry here: the code refutes a re-filing on its
+own, and `spec/{slug}/` holds the account.
+
+*(none yet)*

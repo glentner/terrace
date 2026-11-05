@@ -27,3 +27,14 @@ docs/_build/
 
 # Agent-local references (never committed)
 .agents/local/
+.local/
+
+# A local copy of the software factory. The factory lives in the operator's KB; this
+# repository commits only its own records (AGENTS.md, ROADMAP.md, issues/, spec/).
+.agents/
+.claude
+
+# The security lane: unremediated findings and their ordered index. Gitignored on
+# purpose — a public roadmap of live weaknesses is an attacker's work plan. The
+# fixes land as ordinary public commits; only the standing inventory stays private.
+.security/
