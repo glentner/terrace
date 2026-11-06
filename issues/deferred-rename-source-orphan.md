@@ -86,6 +86,47 @@ committing. It never self-heals, because `_ensure` returns the cached entry — 
 database corrects it. `ls -l`, `mmap` and every archiver reads the lie for the life of the overlay,
 and the residency figure feeds the quota counters eviction trusts absolutely.
 
+## Reproduced by CI on Linux and macOS, and on the development Mac (2026-11-05)
+
+`tests/engine/test_model.py::TestOverlayModel::runTest` fails in every unit job of both CI runs read
+under the factory:
+
+- 42023846602 at `6a046b4` (`main`): `Unit (Linux, 3.15)` and `Unit (Linux, 3.15t)` failed on it
+  alone (448 passed, 1 failed in each). `Unit (macOS, engine-only)` failed on it too (`1 failed,
+  404 passed, 3 errors`), with failure 2 below; the 3 errors were `tests/fuse` collection errors
+  (`Unable to find libfuse`), so the job's red did not point at this test alone.
+- 42059324110 at `0ab60a6` (`fix/toolchain-repair`): all three unit jobs failed on it alone, with
+  both failures below (Linux `1 failed, 448 passed`; macOS `1 failed, 404 passed, 44 skipped`).
+
+On the development Mac it fails on every run under `CI=true`, Hypothesis's CI profile with its fixed
+seed: the profile's `verify` shows both failures below, and `test_model.py` run alone shows failure
+2. With random seeds and no example database it failed 2 of 12 runs of `test_model.py` alone, and
+one full-suite run found five distinct failures. A local run that passes is luck: set `CI=true` to
+reproduce.
+
+Hypothesis shrank two distinct failures from the same prefix:
+
+```
+state.mkdir(path='/d1')
+state.mkdir(path='/d2')
+state.rename(new='/d1/s1', old='/d2')
+state.rename(new='/d2', old='/d1/s1')
+state.rmdir(path='/d1')
+state.teardown()                     # flush(), then source == snapshot(oracle)
+```
+
+1. With a later `create_with_content('/b.dat')` and `rename('/b.dat' → '/d1')`, `flush()` raises
+   `PermissionError: [Errno 13]` from `PosixTier.rename` (`os.replace` of `project/d2` →
+   `project/d1/s1`) inside `_execute_namespace` (`src/sosfs/engine/overlay.py:928`).
+2. Without them, `flush()` completes and the source keeps a `d1` directory the oracle removed.
+
+Neither is specific to Linux. Both are the replay running each queued op at its historical path
+after later ops changed what lives there, the class this seed is about, so they are in scope for
+this cycle. Until this cycle lands, `toolchain-repair` tolerates this one test as the only failure:
+in a CI unit job (R9) and in the profile's `verify` on a Mac (R2, R8). Its GOAL records the rulings,
+and this cycle must leave `verify` fully green. The `@reproduce_failure` blobs are in both runs' job
+logs.
+
 ## Why it was deferred
 
 Found by the invariant audit run during the software-factory port, which was a harness change and

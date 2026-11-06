@@ -83,7 +83,11 @@ uv run sosfs mount spec.toml /mnt/space -f       # foreground mount (debug: -d)
 **Supported Python is 3.15+** (`requires-python = ">=3.15"`), and the **free-threaded build is a
 first-class target** — CI runs `3.15` and `3.15t`. obstore ships no free-threaded wheel, so the
 `3.15t` job installs a Rust toolchain and compiles it from source, then asserts the GIL is genuinely
-disabled (an extension without free-threaded support silently re-enables it).
+disabled (an extension without free-threaded support silently re-enables it). The Linux jobs assert
+that libfuse loads before the tests run, so `tests/fuse` runs there in full; the macOS job has no
+libfuse and reports those tests skipped with a reason naming libfuse. `-rfEs` adds one
+`SKIPPED [n] file:line: reason` line per skip location to the short summary, `n` counting the tests
+folded into it; no two `tests/fuse` tests share a location today, so each gets its own line.
 
 **CI does not run the integration suite.** There is no integration job and nothing starts MinIO, so
 ten tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, plus the
@@ -542,8 +546,9 @@ Violations are HIGH, not auto-CRITICAL.
   diff does not show. It never narrates the diff or lists the files touched. Two or three lines is a
   normal body; past about fifteen, the commit should have been two commits. The *Prose and comments*
   rules below apply here too.
-- **Keep the `Co-Authored-By: Claude <Model>` trailer** on commits. This repo records it. PR bodies
-  end with the Claude Code generation line.
+- **Keep the `Co-Authored-By: Claude <Model>` trailer** on commits that land on `main` (a cycle's
+  landing squash commit; § Factory's `branch commits` row leaves cycle-branch commits without one).
+  This repo records it. PR bodies end with the Claude Code generation line.
 - **Version is single-sourced** at `version = ` in `pyproject.toml`; `sosfs.__version__` reads it
   through `importlib.metadata`. No literal version string exists anywhere in `src/` or `tests/`; `tools/lint.sh`
   asserts both halves.
@@ -735,9 +740,9 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | base | `main`, the branch every cycle starts from and lands on |
 | branches | `{kind}/{slug}`: `feature/`, `fix/`, `refactor/`, `docs/`, `test/`, `ci/`, the prefix per GOAL `kind`; the set is open |
 | commit categories | `[feature] [fix] [refactor] [docs] [test] [ci] [build] [release] [factory]`, where `[factory]` is a change to § Factory or § Invariants (the old `[harness]` category is retired). Branch commits take the GOAL's `kind` verbatim (an open set); landing subjects use these categories, and the set is open |
-| branch commits | `[{kind}] Build {slug} P<n>`, with the `Co-Authored-By` trailer this repo records (§ Conventions) |
+| branch commits | `[{kind}] Build {slug} P<n>`, with no trailer; the landing (squash) commit carries the `Co-Authored-By` trailer this repo records (§ Conventions) |
 | landing | `squash-local`: squash onto `origin/main` in the cycle worktree, one `[category] what changed` |
-| ci | none as a landing gate. `.github/workflows/ci.yml` runs on every push to `main`, and the foreman reads `gh run list` after each push |
+| ci | none as a landing gate. `.github/workflows/ci.yml` runs on every push to `main` and to every cycle branch, and the foreman reads `gh run list` after each push |
 | setup | `uv sync`: dependency refresh, run before any verify |
 | verify | `tools/lint.sh && uv run pytest -n auto -m unit`: the full gate. Assert the reported pass count, not the exit code: exit 0 is necessary but not sufficient (§ Verification), and `uv run pytest -m integration` exits 0 when every test skipped. Phases narrow it; publish and release run all of it |
 | throwaway environment | `tools/temp_site.sh <cmd…>` (contract below) |

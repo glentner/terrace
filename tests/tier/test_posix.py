@@ -51,12 +51,15 @@ def test_stat_missing_is_none(tier: PosixTier) -> None:
 
 
 def test_put_and_stat_applies_meta(tier: PosixTier) -> None:
-    """Content lands whole; mode and mtime from FileMeta are applied to the real file."""
+    """Content lands whole; mode and mtime from FileMeta are applied, and ownership is what a plain create gets."""
+    reference = tier.root / 'reference'
+    reference.touch()
     put(tier, '/data.h5', b'hello world', mode=0o640, mtime=1234.0)
     result = tier.stat(PurePosixPath('/data.h5'))
     assert result is not None
     assert (result.kind, result.size, result.mode, result.mtime) == ('file', 11, 0o640, 1234.0)
-    assert (result.uid, result.gid) == (os.getuid(), os.getgid())
+    # A new file takes its directory's group on BSD and under set-gid, so the process's gid is not the expectation.
+    assert (result.uid, result.gid) == (os.getuid(), reference.stat().st_gid)
 
 
 def test_put_replaces(tier: PosixTier) -> None:

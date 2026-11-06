@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, wip]
+    # main plus every {kind}/{slug} cycle branch, so a cycle's CI result can be read before it lands
+    branches: [main, '*/**']
   pull_request:
   workflow_dispatch:
 
@@ -35,13 +36,19 @@ jobs:
         if: ${{ endsWith(matrix.python, 't') }}
         uses: dtolnay/rust-toolchain@stable
       - name: Install project
-        run: uv sync
+        run: uv sync --locked
+      # tests/fuse skips itself where libfuse cannot be loaded; this step keeps a runner that lost
+      # libfuse from turning those tests into silent skips
+      - name: Assert libfuse loads
+        run: uv run python -c "import mfusepy"
       - name: Assert free-threading is active
         if: ${{ endsWith(matrix.python, 't') }}
         # An extension that doesn't declare free-threaded support silently re-enables the GIL
         run: uv run python -c "import sys, sosfs, obstore; assert not sys._is_gil_enabled(), 'GIL re-enabled'"
+      # -rfEs keeps pytest's default FAILED and ERROR lines and adds one `SKIPPED [n] file:line: reason`
+      # line per skip location, folding the n tests skipped there
       - name: Unit tests
-        run: uv run pytest -n auto -m unit
+        run: uv run pytest -n auto -m unit -rfEs
 
   unit-macos:
     name: Unit (macOS, engine-only)
@@ -53,9 +60,9 @@ jobs:
         with:
           enable-cache: true
       - name: Install project
-        run: uv sync
+        run: uv sync --locked
       - name: Unit tests
-        run: uv run pytest -n auto -m unit
+        run: uv run pytest -n auto -m unit -rfEs
 
   checks:
     name: Lint & build

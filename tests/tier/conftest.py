@@ -11,10 +11,16 @@ from typing import Iterator
 from uuid import uuid4
 
 # External libs
-import boto3
-from pytest import fixture
-from moto.server import ThreadedMotoServer
+from pytest import fixture, skip
 from obstore.store import S3Store
+
+# Without these the S3 tests skip by name, and the modules that need no server still run.
+try:
+    import boto3
+    from moto.server import ThreadedMotoServer
+    S3_UNAVAILABLE = None
+except ImportError as error:
+    S3_UNAVAILABLE = f'S3 tier tests need {error.name}: {error}'
 
 # Internal libs
 from sosfs.tier.s3 import S3Tier
@@ -28,6 +34,8 @@ REGION = 'us-east-1'
 @fixture(scope='session')
 def moto_endpoint() -> Iterator[str]:
     """A moto S3 server for the whole session (pure-Python, real S3 HTTP for obstore)."""
+    if S3_UNAVAILABLE:
+        skip(S3_UNAVAILABLE)
     server = ThreadedMotoServer(ip_address='127.0.0.1', port=0)
     server.start()
     _, port = server.get_host_and_port()

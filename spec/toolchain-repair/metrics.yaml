@@ -1,0 +1,29 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: toolchain-repair
+escaped_from: pre-factory
+planned: {date: '2026-11-05', phases: 5}
+landed: {date: '2026-11-05', phases: 5, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-05T07:03:23-05:00', stop: '2026-11-05T07:06:51-05:00', seconds: 208, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-05T07:07:12-05:00', stop: '2026-11-05T08:25:33-05:00', seconds: 4701, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-05T10:33:21-05:00', stop: '2026-11-05T10:35:39-05:00', seconds: 138, end: done, agent: null}
+- {step: 'build:P2', start: '2026-11-05T10:35:47-05:00', stop: '2026-11-05T10:38:42-05:00', seconds: 175, end: done, agent: null}
+- {step: 'build:P3', start: '2026-11-05T10:38:42-05:00', stop: '2026-11-05T10:42:54-05:00', seconds: 252, end: done, agent: null}
+- {step: 'build:P4', start: '2026-11-05T10:42:54-05:00', stop: '2026-11-05T10:45:37-05:00', seconds: 163, end: done, agent: null}
+- {step: 'build:P5', start: '2026-11-05T10:45:37-05:00', stop: '2026-11-05T10:52:39-05:00', seconds: 422, end: done, agent: null}
+- {step: 'build:P5', start: '2026-11-05T11:06:55-05:00', stop: '2026-11-05T11:08:37-05:00', seconds: 102, end: done, agent: null}
+- {step: review, start: '2026-11-05T11:08:43-05:00', stop: '2026-11-05T11:29:15-05:00', seconds: 1232, end: gate, agent: null}
+- {step: 'build:remediation-1', start: '2026-11-05T20:28:01-05:00', stop: '2026-11-05T20:58:06-05:00', seconds: 1805, end: done, agent: null}
+- {step: review, start: '2026-11-05T21:09:22-05:00', stop: '2026-11-05T21:36:43-05:00', seconds: 1641, end: done, agent: null}
+reviews:
+- cycle: 1
+  date: '2026-11-05'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 2, low: 0}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-05'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

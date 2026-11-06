@@ -45,11 +45,38 @@ and in setgid directories, which is how HPC project spaces are usually laid out.
 extra replaced by hand the suite is 404 passed and that 1 failed. A small cycle, and until it lands
 every other cycle grades against a substitute gate.
 
+### A commit before a queued rename orphans the source object
+
+**Seed:** [`issues/deferred-rename-source-orphan.md`](issues/deferred-rename-source-orphan.md) · `fix` · appetite big
+
+Reproduced. `_commit_hop` writes the destination at the entry's *logical* path and then advances
+`source_path` without moving or removing the object still sitting at the old one; the queued rename
+later runs with both sides equal and does nothing. The stale object survives, and the next mount
+re-adopts it as live data — the exact divergence class `PLAN.md` declares closed in Phase 8. Reachable
+from three production paths: `fsync_policy = "commit"`, the eviction manager committing a dirty copy
+before the rename is due, and any write-back poll where the data row's deadline precedes the rename
+row's, which is the normal case when the write preceded the rename. `flush` and `drain` mask it
+because both run namespace ops first, and the hypothesis model test never sees it because its only
+convergence checkpoint is `flush()`. Two smaller siblings share the cause: `truncate` without a
+handle and the live-stat path both resolve against the logical path, giving `ENOENT` on a file that
+exists and a permanently wrong size in the catalog. Highest-value fix on this list — it is silent
+resurrection of deleted data behind a drain that reports success.
+
+Moved up to follow the toolchain repair on 2026-11-05 (Geoffrey, at the toolchain-repair plan gate).
+The first CI run read under the factory, 42023846602 at `6a046b4`, failed both Linux unit jobs on
+`test_model.py` alone: a directory renamed into a sibling and back, then the sibling removed, makes
+`flush()` raise `EACCES` from `_execute_namespace`'s rename replay and leaves a stray directory on the
+source. It shows on macOS too: that run's macOS job failed the same test beside its `tests/fuse`
+collection errors, every unit job of the cycle-branch run 42059324110 failed on it alone, and the
+development Mac fails it on every run under `CI=true` and on some random seeds. Same replay family,
+now reproduced by the model itself, so this cycle takes it too. Until it lands, the toolchain repair
+accepts that one test as the only failure, in CI (R9) and in the Mac's `verify` (R2, R8).
+
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
-Immediately after the toolchain repair, because the cost grows with every later cycle: 498
+Immediately after the namespace-replay fix, because the cost grows with every later cycle: 498
 occurrences across 83 files at `6419966`, before this harness added its own, and every entry below
 writes more of them. The mechanical two-thirds — distribution name, package directory,
 imports, class names, test modules, CI, prose — is a rename. The other third is not: the `SOSFS_*`
@@ -74,23 +101,6 @@ technology decisions and used nowhere; four of the eight testing-strategy bullet
 that does not exist. This cycle holds only the residue — the inaccuracies no other queued cycle will
 touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
 diff, which is what the same-commit rule requires.
-
-### A commit before a queued rename orphans the source object
-
-**Seed:** [`issues/deferred-rename-source-orphan.md`](issues/deferred-rename-source-orphan.md) · `fix` · appetite big
-
-Reproduced. `_commit_hop` writes the destination at the entry's *logical* path and then advances
-`source_path` without moving or removing the object still sitting at the old one; the queued rename
-later runs with both sides equal and does nothing. The stale object survives, and the next mount
-re-adopts it as live data — the exact divergence class `PLAN.md` declares closed in Phase 8. Reachable
-from three production paths: `fsync_policy = "commit"`, the eviction manager committing a dirty copy
-before the rename is due, and any write-back poll where the data row's deadline precedes the rename
-row's, which is the normal case when the write preceded the rename. `flush` and `drain` mask it
-because both run namespace ops first, and the hypothesis model test never sees it because its only
-convergence checkpoint is `flush()`. Two smaller siblings share the cause: `truncate` without a
-handle and the live-stat path both resolve against the logical path, giving `ENOENT` on a file that
-exists and a permanently wrong size in the catalog. Highest-value fix on this list — it is silent
-resurrection of deleted data behind a drain that reports success.
 
 ### A second SIGINT settles `detached` without rescuing
 

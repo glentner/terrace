@@ -17,10 +17,15 @@ from pytest import mark, raises
 
 # Internal libs
 from sosfs.engine.overlay import OverlayEngine
-from sosfs.fuse.adapter import OverlayOperations, XATTR_TIERS, XATTR_DIRTY, XATTRS, BLOCK_SIZE
 from sosfs.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
-from mfusepy import ENOATTR
 from tests.engine.conftest import Clock, build_spec, seed
+
+# Without libfuse these names stay unbound and tests/fuse/conftest.py skips every test here by name.
+try:
+    from sosfs.fuse.adapter import OverlayOperations, XATTR_TIERS, XATTR_DIRTY, XATTRS, BLOCK_SIZE
+    from mfusepy import ENOATTR
+except OSError:
+    pass
 
 
 pytestmark = mark.unit
