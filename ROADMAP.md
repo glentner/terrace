@@ -30,21 +30,6 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### Repair the toolchain so the verify gate runs
-
-**Seed:** [`issues/toolchain-repair.md`](issues/toolchain-repair.md) · `fix` · appetite small
-
-First because every cycle's `verify` depends on it. Measured on 2026-11-04: the locked dev
-environment does not install on Python 3.15 final — `moto[server]` pulls in `pydantic-core` 2.46.4,
-which has no cp315 wheel and fails its source build — so `uv run pytest` cannot run on a fresh
-machine, and CI's 3.15 jobs presumably fail the same way, though nobody has read a run to confirm it.
-The committed workflow was last proven on 3.15.0a3. Two test defects travel with it: every tier test
-errors at collection without the moto server extra, because `tests/tier/conftest.py` imports it at
-module scope, and one POSIX test asserts Linux group semantics that fail under BSD group inheritance
-and in setgid directories, which is how HPC project spaces are usually laid out. With the server
-extra replaced by hand the suite is 404 passed and that 1 failed. A small cycle, and until it lands
-every other cycle grades against a substitute gate.
-
 ### A commit before a queued rename orphans the source object
 
 **Seed:** [`issues/deferred-rename-source-orphan.md`](issues/deferred-rename-source-orphan.md) · `fix` · appetite big
@@ -69,8 +54,9 @@ The first CI run read under the factory, 42023846602 at `6a046b4`, failed both L
 source. It shows on macOS too: that run's macOS job failed the same test beside its `tests/fuse`
 collection errors, every unit job of the cycle-branch run 42059324110 failed on it alone, and the
 development Mac fails it on every run under `CI=true` and on some random seeds. Same replay family,
-now reproduced by the model itself, so this cycle takes it too. Until it lands, the toolchain repair
-accepts that one test as the only failure, in CI (R9) and in the Mac's `verify` (R2, R8).
+now reproduced by the model itself, so this cycle takes it too. Until it lands, that one test is the
+only failure the landed toolchain repair accepts, in CI (R9) and in the Mac's `verify` (R2, R8); see
+`spec/toolchain-repair/GOAL.md`.
 
 ### Rename `sosfs` to Terrace
 

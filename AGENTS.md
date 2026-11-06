@@ -11,7 +11,7 @@ with the code, **the code is ground truth — fix this file.**
 > addresses this repository by the destination name (`code terrace feature` and the other verbs in the
 > operator's KB); the code does not. Everything in this file describes the tree as it is — the package
 > is `src/sosfs/`, the entry point is `sosfs`, the environment prefix is `SOSFS_`. The rename is the
-> first queued cycle after the toolchain repair (`issues/rename-to-terrace.md`), and because `PLAN.md`
+> queued right after the namespace-replay fix (`issues/rename-to-terrace.md`), and because `PLAN.md`
 > records `sosfs` as a decision rather than an accident, that cycle reconciles `PLAN.md` before it
 > touches code.
 

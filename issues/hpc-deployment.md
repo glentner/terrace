@@ -109,8 +109,8 @@ or a faithful stand-in; none is checkable in CI as it stands.
 - Open question — **where the state directory lives.** It must survive the job for `sosfs commit` to
   run later, so it cannot sit on node-local storage alone, and `begin_mount` records the host so a
   crash report can name the node (`AGENTS.md` § *Invariants* § 8).
-- Related: [`issues/toolchain-repair.md`](toolchain-repair.md) — setgid project directories, the
-  normal layout of HPC shared spaces, break one test today;
+- Related: the toolchain repair (landed 2026-11-05, `spec/toolchain-repair/`) — setgid project
+  directories, the normal layout of HPC shared spaces, broke one test before it;
   [`issues/sharded-archive-sources.md`](sharded-archive-sources.md) is the use case that brings the
   researcher here; [`issues/offline-commit-command.md`](offline-commit-command.md),
   [`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md) and

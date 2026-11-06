@@ -122,7 +122,8 @@ state.teardown()                     # flush(), then source == snapshot(oracle)
 
 Neither is specific to Linux. Both are the replay running each queued op at its historical path
 after later ops changed what lives there, the class this seed is about, so they are in scope for
-this cycle. Until this cycle lands, `toolchain-repair` tolerates this one test as the only failure:
+this cycle. Until this cycle lands, the landed toolchain repair (`spec/toolchain-repair/`) tolerates
+this one test as the only failure:
 in a CI unit job (R9) and in the profile's `verify` on a Mac (R2, R8). Its GOAL records the rulings,
 and this cycle must leave `verify` fully green. The `@reproduce_failure` blobs are in both runs' job
 logs.
