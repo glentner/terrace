@@ -31,16 +31,19 @@ What sits behind the marker is the differentiating behaviour of the product. Sev
 metadata propagation to the source are all covered here and nowhere else — the whole lifecycle
 `PLAN.md` presents as the reason the project exists.
 
-The two reproduced data-loss defects on this roadmap live in exactly that region.
-`issues/deferred-rename-source-orphan.md` is a commit-before-a-queued-rename orphaning the source
-object; `issues/shutdown-rescue-gaps.md` is a second SIGINT settling `detached` without rescuing. The
+The two reproduced data-loss defects the audit found live in exactly that region. One, a
+commit-before-a-queued-rename orphaning the source object, was fixed by the
+`deferred-rename-source-orphan` cycle (landed 2026-11-06, `spec/deferred-rename-source-orphan/`) with
+engine-level coverage only; its GOAL sends the mount-level case here. The other,
+`issues/shutdown-rescue-gaps.md`, is a second SIGINT settling `detached` without rescuing. The
 tests nearest each of them are `test_rename_and_unlink_commit_to_minio` and
 `test_detach_rescues_node_local_dirty`, and neither would have caught its defect even if it ran: the
 rename test flushes between mutations, and `flush` runs namespace ops before data, which is precisely
 what masks the orphan; the detach test drives `Shutdown.DETACH`, the SIGTERM path that does call
 `rescue()`, not the second-SIGINT downgrade that skips it. So the lane is necessary and not
-sufficient — it makes the region observable, and each fix cycle still owes the case that pins its own
-defect.
+sufficient — it makes the region observable, and each defect still needs the case that pins it. The
+rescue cycle owes its own; the orphan's mount-level case, which its cycle left at engine level, is
+this cycle's (R7).
 
 `PLAN.md:497` states that the FUSE integration tests run in "Linux CI". They run nowhere. That claim
 is the reason a reader of the design believes this surface is covered.
@@ -54,6 +57,9 @@ count:
 ```
 docker compose up -d --wait && uv run pytest -m integration -q 2>&1 | grep -qE '[0-9]+ passed'
 ```
+- 2026-11-06: re-measured on macOS at `fe26962`, after `deferred-rename-source-orphan` added unit
+  tests: `10 skipped, 474 deselected in 0.38s`, exit 0. The 449 above and in R2 matches the 449 unit
+  tests at `141aa86` (that cycle's GOAL, R9).
 
 The skips are decided at import time, in `pytestmark`, not per test. `tests/fuse/test_integration.py:30`
 defines `_linux_fuse()`, which requires `platform.system() == 'Linux'`, an existing `/dev/fuse`, and an
@@ -81,8 +87,8 @@ today is taken on trust. Recorded in `AGENTS.md` § *Invariants* § *Known open 
 § *Conventions*' "an `-m integration` gate exits 0 when nothing ran".
 
 Placed after the two data-loss fixes rather than before them: the lane is worth most once it has
-regressions to protect, and both fixes should land carrying integration coverage that this cycle then
-causes to run.
+regressions to protect. The rescue fix should land carrying integration coverage that this cycle then
+causes to run; the orphan fix landed without any, so its mount-level case is this cycle's (R7).
 
 ## Outcome / vision
 
@@ -116,11 +122,18 @@ Draft R-IDs, to be firmed up at promotion.
 - **R6** — When the integration job fails, its output shall distinguish a test failure from an
   unavailable substrate (no `/dev/fuse`, MinIO unhealthy), because the two need different responses and
   the skip predicates make them look alike.
+- **R7** *(added 2026-11-06, retiring `deferred-rename-source-orphan`)* — Where the FUSE half runs,
+  the lane shall include a mount-level case that commits a file to the source while its rename is
+  still queued, with no `flush` between the rename and the commit (for example `fsync` under
+  `fsync_policy = "commit"`), and shall assert after the queue drains that the source holds the file
+  only at its new path, with the committed bytes. That cycle's GOAL deferred this case here; its
+  engine-level regressions are in `tests/engine/test_replay.py`.
 
 ## Notes
 
-- Related: `issues/deferred-rename-source-orphan.md` and `issues/shutdown-rescue-gaps.md` (both defects
-  live in the surface this lane covers, and each owes the case its own tests do not yet contain);
+- Related: `spec/deferred-rename-source-orphan/` (landed; its mount-level case is R7 here) and
+  `issues/shutdown-rescue-gaps.md` (its defect lives in the surface this lane covers, and it owes the
+  case its own tests do not yet contain);
   `issues/archive-tier-test-coverage.md` and `issues/crash-fault-injection-suite.md` (both add tests
   that need a machine to run on); `issues/daemonized-mount-first-run.md` (the daemonized branch has no
   test anywhere, and a test for it likely needs a real mount); `issues/plan-md-reconciliation.md`

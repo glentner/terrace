@@ -137,8 +137,9 @@ the KB's EARS notes).
 
 ## Notes
 
-- Related: [`deferred-rename-source-orphan.md`](deferred-rename-source-orphan.md) — the other
-  reproduced silent-data-loss defect, sequenced immediately before this one.
+- Related: the other reproduced silent-data-loss defect, a commit before a queued rename orphaning
+  the source object, fixed by the `deferred-rename-source-orphan` cycle (landed 2026-11-06,
+  `spec/deferred-rename-source-orphan/`).
   [`offline-commit-command.md`](offline-commit-command.md) — `sosfs commit` is the consumer of
   `shutdown_state` and the reason a wrong settle costs anything; whatever R2 and R3 record has to be
   something that cycle can read, so the two want a shared shape.

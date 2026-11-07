@@ -10,10 +10,10 @@ with the code, **the code is ground truth — fix this file.**
 > **Pending rename.** This project is being renamed `sosfs` → **Terrace**. The factory already
 > addresses this repository by the destination name (`code terrace feature` and the other verbs in the
 > operator's KB); the code does not. Everything in this file describes the tree as it is — the package
-> is `src/sosfs/`, the entry point is `sosfs`, the environment prefix is `SOSFS_`. The rename is the
-> queued right after the namespace-replay fix (`issues/rename-to-terrace.md`), and because `PLAN.md`
-> records `sosfs` as a decision rather than an accident, that cycle reconciles `PLAN.md` before it
-> touches code.
+> is `src/sosfs/`, the entry point is `sosfs`, the environment prefix is `SOSFS_`. The rename is
+> queued early (`issues/rename-to-terrace.md`); the namespace-replay fix it waited on has landed.
+> Because `PLAN.md` records `sosfs` as a decision rather than an accident, that cycle reconciles
+> `PLAN.md` before it touches code.
 
 ---
 

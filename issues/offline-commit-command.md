@@ -34,6 +34,8 @@ namespace ops first and then dirty files; `dirty_copies()` (`drain.py:50-71`) co
 ordering — most volatile holder first, scope dominating position — and is shared with the rescue path
 so the two cannot drift; `commit_upstream` (`src/sosfs/engine/overlay.py:811`) does the hop. What is
 missing is everything around them:
+- 2026-11-06: `overlay.py:811` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+  `commit_upstream` is at `src/sosfs/engine/overlay.py:867`.
 
 * **The exclusive lock and the offline construction path.** `ExclusiveLock`
   (`src/sosfs/state/db.py:157`) records the holder as `host:pid` in the lockfile (`db.py:192`), and
@@ -44,6 +46,8 @@ missing is everything around them:
   merely being finalized, and a crash during the commit would be indistinguishable from a crashed
   mount. Commit needs the tier attach without the lifecycle transition — the same offline path
   `issues/audit-command.md` introduces.
+  - 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan`
+    tree the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
 * **The audit hand-off.** After a detach, commit proceeds directly: metadata is trusted, no walk.
   After a crash it runs the audit first, automatically. Neither branch can be written before the
   audit exists, and the branch condition is the `shutdown_state` value `fuse/mount.py` settles —
@@ -74,6 +78,8 @@ the system runs on the calling thread through `TransferPool.copy`, and `drain()`
 unambiguously safe and valuable — no mount, no FUSE callbacks, an exclusive lock, and a worklist known
 up front — so this cycle either adopts the pool for it or `PLAN.md` stops promising it. Under the
 plan-drift rule that decision is made in `PLAN.md` before the code.
+- 2026-11-06: `transfer.py:112-115` above holds at `141aa86`; on the `deferred-rename-source-orphan`
+  tree `submit` is at `src/sosfs/engine/transfer.py:122-125`, and it still has no caller under `src/`.
 
 ## Why it was deferred
 
@@ -162,9 +168,10 @@ Draft R-IDs, to be firmed up at promotion.
     residency state the audit has to understand — which means coordinating with
     `issues/audit-command.md` and possibly a `SCHEMA_VERSION` bump (`db.py:34`), for which there is no
     migration machinery.
-  - What does commit do about a queued rename whose source object was orphaned by an earlier commit?
-    That defect is `issues/deferred-rename-source-orphan.md` and is scheduled ahead of this cycle; if
-    it has not landed, commit inherits it and finalizes a source containing resurrected data.
+  - Settled: what commit does about a queued rename whose source object an earlier commit orphaned.
+    The `deferred-rename-source-orphan` cycle fixed that defect ahead of this one (landed 2026-11-06,
+    `spec/deferred-rename-source-orphan/`), so commit no longer inherits it. An orphan an older engine
+    already left on a source is the audit's (`issues/audit-command.md`).
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work topic (dossier 5) for the command surface, and the state-invariants topic for the
   offline construction constraint and the checksum gap.

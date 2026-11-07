@@ -210,3 +210,9 @@ Draft R-IDs, to be firmed up at promotion.
   the counter delta together. The cycle's GOAL sends these sizes here and to
   [`issues/source-path-truncate-and-stat.md`](source-path-truncate-and-stat.md), whose R4 either
   performs the correction with its own evidence or hands it to this seed.
+- *Added 2026-11-06, retiring `deferred-rename-source-orphan`:* **orphans already on a source.**
+  Before that cycle, a data commit to the source during a queued rename left the pre-rename object
+  behind, and the next mount adopted it as live data. The fix prevents new orphans; its GOAL and
+  `PLAN.md` § Risks leave recovering the ones already on a source to this cycle. A mount adopts such
+  an object as an ordinary entry (the GOAL's reproduction), so shaping decides whether the audit can
+  tell one apart from user data at all, or records it as out of reach.

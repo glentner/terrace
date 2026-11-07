@@ -30,46 +30,19 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### A commit before a queued rename orphans the source object
-
-**Seed:** [`issues/deferred-rename-source-orphan.md`](issues/deferred-rename-source-orphan.md) · `fix` · appetite big
-
-Reproduced. `_commit_hop` writes the destination at the entry's *logical* path and then advances
-`source_path` without moving or removing the object still sitting at the old one; the queued rename
-later runs with both sides equal and does nothing. The stale object survives, and the next mount
-re-adopts it as live data — the exact divergence class `PLAN.md` declares closed in Phase 8. Reachable
-from three production paths: `fsync_policy = "commit"`, the eviction manager committing a dirty copy
-before the rename is due, and any write-back poll where the data row's deadline precedes the rename
-row's, which is the normal case when the write preceded the rename. `flush` and `drain` mask it
-because both run namespace ops first, and the hypothesis model test never sees it because its only
-convergence checkpoint is `flush()`. Two smaller siblings share the cause: `truncate` without a
-handle and the live-stat path both resolve against the logical path, giving `ENOENT` on a file that
-exists and a permanently wrong size in the catalog. Highest-value fix on this list — it is silent
-resurrection of deleted data behind a drain that reports success.
-
-Moved up to follow the toolchain repair on 2026-11-05 (Geoffrey, at the toolchain-repair plan gate).
-The first CI run read under the factory, 42023846602 at `6a046b4`, failed both Linux unit jobs on
-`test_model.py` alone: a directory renamed into a sibling and back, then the sibling removed, makes
-`flush()` raise `EACCES` from `_execute_namespace`'s rename replay and leaves a stray directory on the
-source. It shows on macOS too: that run's macOS job failed the same test beside its `tests/fuse`
-collection errors, every unit job of the cycle-branch run 42059324110 failed on it alone, and the
-development Mac fails it on every run under `CI=true` and on some random seeds. Same replay family,
-now reproduced by the model itself, so this cycle takes it too. Until it lands, that one test is the
-only failure the landed toolchain repair accepts, in CI (R9) and in the Mac's `verify` (R2, R8); see
-`spec/toolchain-repair/GOAL.md`.
-
 ### `truncate` and the live stat resolve a source-served file at its logical path
 
 **Seed:** [`issues/source-path-truncate-and-stat.md`](issues/source-path-truncate-and-stat.md) · `fix` · appetite small
 
-Reproduced. The siblings the namespace-replay fix split out at its GOAL gate (2026-11-05): on a file
+Reproduced. The siblings the namespace-replay fix (landed 2026-11-06,
+`spec/deferred-rename-source-orphan/`) split out at its GOAL gate (2026-11-05): on a file
 served off the source while its rename or an ancestor's is queued, `truncate` without a handle opens
 the logical path and raises `ENOENT` on a file that exists. The wrong-size sibling (`_record` and
 `getattr`'s live stat) was closed in that cycle's first review remediation, which leaves a
 `bypass_size` test to pin it. The fix is small and sits in regions that cycle just opened: resolve
 through `source_path` the way `open` already does. Also owns the sizes existing state databases
-already hold wrong, with the audit as their likely home. Placed directly after the namespace-replay
-fix, while that region is fresh.
+already hold wrong, with the audit as their likely home. Placed to follow the namespace-replay fix,
+which has landed, while that region is fresh.
 
 ### The model rarely reaches the scheduler and eviction commit routes
 
@@ -87,7 +60,8 @@ class.
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
-Immediately after the namespace-replay fix, because the cost grows with every later cycle: 498
+Early, right behind the namespace-replay fix (landed 2026-11-06) and that fix's two small
+follow-ups, because the cost grows with every later cycle: 498
 occurrences across 83 files at `6419966`, before this harness added its own, and every entry below
 writes more of them. The mechanical two-thirds — distribution name, package directory,
 imports, class names, test modules, CI, prose — is a rename. The other third is not: the `SOSFS_*`
@@ -125,7 +99,7 @@ lost. Two related gaps travel with it: `umount --detach` is bounded by `drain_ti
 `PLAN.md` says it completes, because the daemon cannot distinguish it from a scheduler's SIGTERM; and
 an incomplete rescue's stranded count is discarded rather than recorded. Reaching the documented
 semantics needs a distinguishable "complete the rescue" signal, which is a design change and belongs
-in `PLAN.md` first. Sequenced immediately after the orphan fix: both are silent data loss on the
+in `PLAN.md` first. Sequenced to follow the orphan fix, which landed on 2026-11-06: both are silent data loss on the
 differentiating lifecycle, and this one has no test that would catch a regression.
 
 ### Run the integration suite somewhere
@@ -135,10 +109,12 @@ differentiating lifecycle, and this one has no test that would catch a regressio
 Ten tests — the entire drain, detach, force-umount, xattr and metadata-propagation surface, plus the
 only real-S3 round trip — execute on no automated machine. CI has no integration job and nothing
 starts MinIO. Worse, the obvious gate is a trap: `uv run pytest -m integration` exits 0 when every
-test skipped, so a criterion verified that way proves nothing, and the two data-loss defects above
-sat in exactly the region this lane covers. Placed after them rather than before because the lane is
-most valuable once it has regressions to protect, and both fixes should land with integration
-coverage that this cycle then makes run. Needs a Linux runner with `/dev/fuse` and a MinIO service
+test skipped, so a criterion verified that way proves nothing, and the two reproduced data-loss
+defects sat in exactly the region this lane covers: the orphan fix (landed 2026-11-06) and the
+shutdown-rescue gaps above. Placed after them rather than before because the lane is most valuable
+once it has regressions to protect. The orphan fix landed with engine-level coverage only, so this
+cycle owes its mount-level case; the rescue fix should land with integration coverage that this cycle
+then makes run. Needs a Linux runner with `/dev/fuse` and a MinIO service
 container, and a decision about whether the lane blocks a PR or reports.
 
 ### The default mount fails on a first-ever mount

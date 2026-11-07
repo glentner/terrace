@@ -29,6 +29,9 @@ piece of data those two commands need is already queryable: `TierRegistry.usage`
 (`src/sosfs/engine/overlay.py:870`) already pushes everything queued to the source ignoring policy
 clocks, namespace ops first. Nothing in this cycle invents a new engine capability; it exposes the
 ones that exist.
+- 2026-11-06: the `journal.py` and `overlay.py` line numbers above hold at `141aa86`;
+  `deferred-rename-source-orphan` moved the code. On its tree `Journal.queued` is at `journal.py:188`,
+  `Journal.pending` at `journal.py:306` and `OverlayEngine.flush` at `src/sosfs/engine/overlay.py:926`.
 
 The server has a natural home and a defined shape. `Mount.start` (`src/sosfs/fuse/mount.py:205-224`)
 already starts two `StateThread` pumps after the pidfile is written, and a third fits the same slot.
@@ -50,6 +53,8 @@ without `lifecycle.begin_mount`, which `OverlayEngine.start` calls unconditional
 (`overlay.py:108`) and which bumps the generation and sets the crash flag. That path is exactly what
 `issues/audit-command.md` builds. Building it twice is the failure mode this cycle's position in the
 queue is meant to avoid.
+- 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+  the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
 
 ## Why it was deferred
 
@@ -58,8 +63,9 @@ control channel is absent, and the observability xattrs (`user.sosfs.tiers`, `us
 `src/sosfs/fuse/adapter.py:32-33`) cover the per-file case for tests today. It stays queued behind the
 audit and commit cycles because its offline read path is theirs, and because a `flush` command is
 most useful once the write-back defects ahead of it in the queue are fixed — a `flush` that reports
-success while a queued rename orphaned its source object
-(`issues/deferred-rename-source-orphan.md`) is a more convincing lie than no `flush` at all.
+success while a queued rename orphaned its source object (fixed by the
+`deferred-rename-source-orphan` cycle, landed 2026-11-06) is a more convincing lie than no `flush` at
+all.
 
 ## Outcome / vision
 
@@ -107,7 +113,9 @@ Draft R-IDs, to be firmed up at promotion.
   `issues/pump-liveness-and-loss-windows.md` is adjacent in an interesting way — a control channel is
   the natural place to expose "is the write-back scheduler alive", and shaping should decide whether
   that answer belongs in the `status` payload now or waits for that cycle.
-  `issues/deferred-rename-source-orphan.md` determines whether `flush` can be trusted at all.
+  The `deferred-rename-source-orphan` cycle, which this one waited on for a `flush` that can be
+  trusted, has landed (`spec/deferred-rename-source-orphan/`); the parts of that class still open
+  are listed in `PLAN.md` § Risks.
 - `PLAN.md` § *Control channel* is three sentences and the whole specification; § *CLI surface* gives
   the two commands their one-line contracts. Anything this cycle settles about framing, the socket
   location or the payload shape is a design decision and belongs back in `PLAN.md`.
