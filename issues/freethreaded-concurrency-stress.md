@@ -19,6 +19,9 @@ stress tests". They run the same suite and nothing else. `.github/workflows/ci.y
 macOS. The only free-threading-specific content in the `3.15t` job is `ci.yml:39-42`, which asserts
 `sys._is_gil_enabled()` is false after importing `obstore` — a real and necessary check, but it
 proves the GIL is off, not that the code is correct without it.
+- 2026-11-06: the `ci.yml` line numbers above hold at `6a046b4`. Since the toolchain repair
+  (`50a11bd`) added a libfuse step, the free-threading assertion is `ci.yml:44-47` and the unit
+  command is `:51` (Linux) and `:65` (macOS), both now `uv run pytest -n auto -m unit -rfEs`.
 
 The nearest thing to a stress test is `tests/tier/test_concurrency.py`: 110 lines, `THREADS = 8`
 (`:27`), three tests (`:61`, `:74`, `:95`) covering registry counter arithmetic and `PosixTier.put`
@@ -36,6 +39,10 @@ The audit named three pieces of unguarded shared state, none of which any test w
   callback's. This is benign today because `Journal.mark_dirty` is idempotent and a lost write costs
   one redundant journal round trip. It stops being benign the moment a handle field *gates* an action
   instead of caching one, and nothing in the code says which kind a new field is.
+  - 2026-11-06: the `overlay.py` line numbers in this item hold at `141aa86`;
+    `deferred-rename-source-orphan` moved the code. On its tree the slots are at `overlay.py:54`,
+    the writes at `:678-681` (`write`), `:691` (`_mark_handle_dirty`) and `:697-700` (`truncate`),
+    the reads at `:735` (`fsync`) and `:774` (`_record`), and the pump's reset at `:846-849`.
 - **`initialize_logging`'s guard is an unsynchronized load-then-store.**
   `src/sosfs/core/logging.py:216-226`: `_INIT: bool = False`, then `if _INIT: return` and, in the
   `else`, `_INIT = True` before any of the work. Setting the flag first narrows the window to the gap
@@ -51,6 +58,46 @@ The audit named three pieces of unguarded shared state, none of which any test w
 
 None of this was reproduced; it was found by reading, and the citations are the evidence. The
 doubled-log-line race is the one that would be cheapest to demonstrate.
+
+*Added 2026-11-06 by `deferred-rename-source-orphan`:* two more, from that cycle's plan
+(`spec/deferred-rename-source-orphan/PLAN.md` § 2.5 and § 5, research 04 § 1). Line numbers are at
+the tree that cycle landed.
+
+- **The source-namespace mutex is argued, not tested under threads.** `OverlayEngine._source_lock`
+  (`AGENTS.md` § *Invariants* § 10) serializes namespace replay, `_vacate`'s collect-and-replay,
+  `_purge_source`, a `create` onto the source and a data commit to the source. The race it closes is
+  silent loss: a replay reads `source_path = P1`, an eviction or `fsync` commit writes the new bytes
+  at `P2` and records `source_path = P2`, and the replay's `rename(P1, P2)` then replaces them with
+  the old bytes while the residency already reads clean. The suite is single-threaded; the mutex is
+  exercised only by deterministic stale-snapshot regressions in `tests/engine/test_replay.py` and by
+  the model's split of a scheduler poll into the pump's scan and commit. Nothing runs a replay and a
+  data commit for the same entry on two threads.
+- **Path locks do not cover descendants** (pre-existing; that cycle neither widened nor fixed it). A
+  directory `rename` holds `lock(old, new)` only (`src/sosfs/engine/overlay.py:425`), and
+  `Catalog.rename` rewrites every descendant's path (`src/sosfs/state/catalog.py:170`) while another
+  thread may hold `lock(child_old_path)`. The child's `transfer.copy` then fails with `LookupError`
+  (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
+
+*Added 2026-11-06 by `deferred-rename-source-orphan`, review cycle 1:* user removals take no source
+mutex. `unlink` and `rmdir` cancel an entry's queued rows and queue the removal under path locks alone
+(`_remove`, `src/sosfs/engine/overlay.py`), so one can land inside a replay's act. The review found a
+replay then settling the removal's own row, which had taken the cancelled row's id; replay now settles
+with `Journal.settle_current`, pinned by injected interleavings in `tests/engine/test_replay.py`. One
+more race of the same shape stays open:
+
+- **A removal racing a replayed `mkdir`.** The replay places the directory on the source and records
+  its `source_path` only in its confirming transaction. An `rmdir` in between reads `source_path` as
+  `NULL`, so it purges the entry instead of queuing a removal; the purge cascades the replay's intent
+  row, the replay's `confirm` raises `LookupError` out of `commit_row` (on the pump's thread, killing
+  the pump), and the source keeps a directory the catalog no longer has. Reproduced single-threaded by
+  wrapping the source tier's `mkdir` to call `rmdir` after the real one. Pre-existing: `141aa86` ends
+  the same way, raising at its settle. A test needs real threads or that injection; a fix either
+  brings removals under the mutex (they would then wait for a whole source-bound copy, like `create`)
+  or makes the replay tolerate an entry purged under it and remove what it placed.
+- Queue-row identity is by value (id, entry, op, boundary, detail, first-dirty time), because ids are
+  reused and `AUTOINCREMENT` is a schema change with no migration path. A reused entry id carrying an
+  identical row queued at an identical clock reading would pass as the same row. Not reproduced; it
+  needs a clock that repeats a reading.
 
 ## Why it was deferred
 
@@ -88,6 +135,21 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   `uv run pytest -n auto -m unit`, and that step SHALL fail if `sys._is_gil_enabled()` is true.
 - **R6** — THE stress module SHALL bound itself by operation count rather than wall time, and SHALL
   print the seed it used on failure so the case is reproducible.
+- **R7** *(added 2026-11-06, `deferred-rename-source-orphan`)* — WHILE the write-back scheduler
+  replays queued `rename` rows on its own thread, and other threads commit the same entries' data to
+  the source (eviction, `fsync` under `fsync_policy = "commit"`) and run `create`, `mkdir` and
+  `rename` callbacks over those paths, the engine SHALL raise no exception, and once the queue drains
+  the source SHALL hold exactly one object per entry, with the last committed bytes, equal to the
+  overlay view.
+- **R8** *(added 2026-11-06, `deferred-rename-source-orphan`)* — WHEN a directory is renamed while
+  another thread commits or stages a child of it, the child's operation SHALL complete against the
+  child's current path, or fail with an `OSError` the VFS API maps, never `LookupError` or a read of
+  a moved staging file.
+- **R9** *(added 2026-11-06, `deferred-rename-source-orphan` review cycle 1)* — WHEN a user `unlink`
+  or `rmdir` runs on one thread while the write-back scheduler, `flush` or a drain replays a queued
+  op for the same entry on another, the replay SHALL raise no exception, SHALL settle only the row it
+  read, and once the queue drains the source SHALL equal the overlay view (no directory left behind a
+  replayed `mkdir` whose entry was removed).
 
 ## Notes
 
@@ -102,12 +164,17 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   contention under heavy metadata load … measured in the Phase 10 stress suite"),
   § *Technology decisions* (the sampling profiler). `AGENTS.md` § *Invariants* § 10 states the
   handle-field and module-global rules this cycle would test.
+- Related *(added 2026-11-06)*: `spec/deferred-rename-source-orphan/` (PLAN § 2.5, § 5; research
+  04), whose mutex R7 tests; [`issues/source-commit-staged-publish.md`](source-commit-staged-publish.md)
+  narrows that mutex's hold and needs the same threaded driver to show its latency claim.
 - Open question — **the sampling profiler.** PEP 799 is named as a technology decision and appears
   nowhere in `src/` or `tests/`. As a local race-hunting aid it is cheap and useful; wired into CI it
   produces artifacts nobody reads and a second thing to keep green.
 - Open question — **which marker.** Inside `-m unit` the stress module inflates the 3.5 s gate that
   every job and every `verify:` pays. Behind a new marker it needs an entry in
   `pyproject.toml:58-61`, a CI step, and a decision about whether the macOS job runs it too.
+  - 2026-11-06: `pyproject.toml:58-61` holds at `6a046b4`. Since the toolchain repair (`50a11bd`)
+    the `markers` list is `pyproject.toml:61-64`.
 - Open question — **how long is long enough.** A workload that finds a race in 10 s on a 16-core
   runner may find nothing in 10 s on a 2-core one. Bounding by operation count makes the run
   deterministic and makes the coverage machine-dependent instead.

@@ -62,7 +62,8 @@ class TransferPool:
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='sosfs-transfer')
 
     def copy(self, path: str, source: Tier, dest: Tier, *,
-             action: str, now: float, state: str = 'clean', src_path: Optional[str] = None) -> Residency:
+             action: str, now: float, state: str = 'clean', src_path: Optional[str] = None,
+             dest_path: Optional[str] = None, source_path: Optional[str] = None) -> Residency:
         """
         Copy `path` whole from `source` to `dest` under an intent.
 
@@ -70,13 +71,20 @@ class TransferPool:
         `state` is the resulting residency ('clean' for promotion and commit,
         'dirty' for a rescue hop). `src_path` is where `source` physically holds
         the bytes when that lags the logical `path` (a copy promoted off the source
-        during a deferred rename); it defaults to `path`. The caller holds the lock.
+        during a deferred rename); it defaults to `path`. `dest_path` is where
+        `dest` is to hold them, likewise defaulting to `path`: a commit to the
+        source writes where the source already holds the entry. `source_path`,
+        when given, is recorded as the entry's committed source path in the
+        transaction that confirms the copy, so the source never holds the bytes
+        without the catalog saying where. The caller holds the lock.
         """
         path = normalize(path)
         read_path = normalize(src_path) if src_path is not None else path
+        write_path = normalize(dest_path) if dest_path is not None else path
         if self.catalog.get(path, include_deleted=True) is None:
             raise LookupError(f'No such entry: {path}')
-        intent = self.journal.begin(action, dest.name, now=now, path=path)
+        intent = self.journal.begin(action, dest.name, now=now, path=path,
+                                    detail=None if dest_path is None else {'dest_path': write_path})
         try:
             stat = source.stat(PurePosixPath(read_path))
             if stat is None or stat.kind != 'file':
@@ -88,9 +96,9 @@ class TransferPool:
                             mode=entry.mode if entry is not None else stat.mode,
                             uid=entry.uid if entry is not None else stat.uid,
                             gid=entry.gid if entry is not None else stat.gid)
-            materialize_dirs(self.catalog, dest, path)
+            materialize_dirs(self.catalog, dest, write_path)
             with source.open_read(PurePosixPath(read_path)) as stream:
-                dest.put(PurePosixPath(path), stream, meta=meta)
+                dest.put(PurePosixPath(write_path), stream, meta=meta)
         except BaseException:
             self.journal.rollback(intent)
             raise
@@ -105,6 +113,8 @@ class TransferPool:
                                               size=meta.size, mtime=meta.mtime)
                 residency = self.catalog.get_residency(path, dest.name)
                 self.registry.adjust_usage(dest.name, bytes=meta.size - previous.size)
+            if source_path is not None:
+                self.catalog.update_meta(path, source_path=normalize(source_path))
             self.journal.confirm(intent)
         log.trace(f'Copied {path} ({source.name} -> {dest.name}, {meta.size} bytes, {action})')
         return residency

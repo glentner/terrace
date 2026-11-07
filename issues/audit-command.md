@@ -24,6 +24,9 @@ assertion that the list is empty. Intents written by a crashed process accumulat
 table with nothing that reads them, and `Journal.confirm` and `Journal.rollback` are the same
 `DELETE` (`journal.py:268-273`), so nothing in the row records how the act was meant to end. Resolving
 one by hand means deciding, per row, whether the bytes moved.
+- 2026-11-06: the `journal.py` line numbers above hold at `141aa86`; `deferred-rename-source-orphan`
+  moved the code. On its tree `Journal.pending` is at `journal.py:306` and the shared `DELETE`
+  (`_resolve`) at `:299-304`.
 
 The visible consequence is worse than accumulation. `OverlayEngine.start()` calls
 `lifecycle.begin_mount` at `src/sosfs/engine/overlay.py:108`; `begin_mount` raises `CrashDetected`
@@ -33,6 +36,8 @@ overlay is permanently unmountable and unfinalizable.** There is no recovery pat
 mount` fails, and `sosfs commit` — the other way to reach the data — is itself a stub. The state
 database is intact and authoritative, and no shipped command will act on it. `PLAN.md` § *Audit* says
 the opposite: "`sosfs mount` runs the same code automatically whenever `shutdown_state != clean`".
+- 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+  the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
 
 The behavior is pinned as intended by `tests/engine/test_namespace.py:46`, which fakes a death and
 asserts the raise. It is also pinned in a way that shows exactly what is missing:
@@ -63,10 +68,14 @@ What is missing is more than a command:
 * **A whole-tier residency iterator.** Step 2 needs every residency row for tier X. The closest thing
   in `Catalog` is `least_recent` (`catalog.py:249`), which is LRU-ordered, defaults to
   `state='clean'`, and takes `limit=100`. This cycle adds catalog surface.
+  - 2026-11-06: `catalog.py:249` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+    `least_recent` is at `src/sosfs/state/catalog.py:254`.
 * **Checksum recording.** `--full` verifies clean copies against blake2b digests. `residency.checksum`
   exists (`schema.sql:95`), `Catalog.add_residency` accepts it (`catalog.py:195`), `spec.py:287`
   parses `checksum = true`, and **no caller ever passes a digest**. `--full` has nothing to verify
   against until something records one. See `issues/invariant-audit-gaps.md`.
+  - 2026-11-06: `catalog.py:195` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+    `add_residency` is at `src/sosfs/state/catalog.py:200`.
 * **Orphan-versus-temp triage that covers every temp this system actually writes.**
   `is_temp_name` recognizes the journal convention and, by directory, `posix.py:135`'s
   `put-{uuid4().hex}-{name}`. It does not recognize `archive.py:101`'s
@@ -169,6 +178,8 @@ Draft R-IDs, to be firmed up at promotion.
     intent bracket wraps a real byte move, so it is high-blast-radius wherever it goes and inflates
     whichever big cycle adopts it. The third option is to ship `--full` in a later cycle and say so in
     the help text rather than shipping a flag that silently verifies nothing.
+    - 2026-11-06: `transfer.py:78-108` holds at `141aa86`; on the `deferred-rename-source-orphan`
+      tree the intent bracket in `TransferPool.copy` spans `src/sosfs/engine/transfer.py:85-118`.
   - Where do quarantined orphans go? A `.sosfs/quarantine` directory per tier keeps the bytes
     recoverable but consumes the tier's quota and adds a path the eviction scan must learn to ignore.
     A report-only listing is cheap and loses the file on the next sweep, which for a true orphan may
@@ -184,5 +195,18 @@ Draft R-IDs, to be firmed up at promotion.
   - The `ON DELETE CASCADE` from `entry` eats *unresolved* intent rows (`schema.sql:126`). The engine
     guards this at `overlay.py:949` by confirming before any purge; the audit does the same class of
     work and needs the same ordering, which is not expressible in the schema.
+    - 2026-11-06: `overlay.py:949` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
+      the confirm before the purge is at `src/sosfs/engine/overlay.py:1038`.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the state-store
   invariants topic (the intent journal has no consumer) and the remaining-work topic (dossier 4).
+- *Added 2026-11-06 by `deferred-rename-source-orphan` (review cycle 1):* **catalog and residency
+  sizes already wrong.** Until that cycle, `getattr`'s live stat and `_record` read a file served off
+  the source at its logical path while its rename, or an ancestor's, was queued, found nothing, and
+  kept the old size: the seed's probe recorded 1000 bytes in `entry.size` and the source residency's
+  `size` for a 4-byte object, for good. The engine no longer records new wrong sizes there, but state
+  databases written before it can still hold them, and the quota counters eviction trusts are built
+  from residency sizes. The reconcile step is their natural owner: compare each residency's size with
+  the tier's object (on the source, at `entry.source_path`) and correct the entry, the residency and
+  the counter delta together. The cycle's GOAL sends these sizes here and to
+  [`issues/source-path-truncate-and-stat.md`](source-path-truncate-and-stat.md), whose R4 either
+  performs the correction with its own evidence or hands it to this seed.

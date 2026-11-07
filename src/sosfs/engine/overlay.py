@@ -15,6 +15,7 @@ import errno
 import socket
 import sqlite3
 import threading
+import contextlib
 import dataclasses
 from uuid import uuid4
 from pathlib import Path, PurePosixPath
@@ -90,6 +91,14 @@ class OverlayEngine:
         self.started = False
         self._handles: Dict[int, List[Handle]] = {}
         self._handles_mutex = threading.Lock()
+        # Serializes every change to the source's namespace (a replayed op, a vacate's replay, a purge, and a data
+        # commit or a create whose destination is the source, placement through recording), and the stat behind
+        # recording a copy served off the source, so a physical place resolved from the catalog still holds when
+        # the act or the stat lands. Order: path locks, then this, then `_handles_mutex`, then the SQLite write
+        # lock. While holding it, nothing takes a path lock or calls `_ensure`, `getattr` or `readdir` (replay
+        # under a nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It
+        # is re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
+        self._source_lock = threading.RLock()
 
     # -- lifecycle ----------------------------------------------------------------------------------------------
 
@@ -266,7 +275,11 @@ class OverlayEngine:
     # -- namespace ----------------------------------------------------------------------------------------------
 
     def getattr(self, path: str) -> Entry:
-        """Metadata for `path`; size/mtime read live from the serving tier while written handles are open."""
+        """
+        Metadata for `path`; size/mtime read live from the serving tier while written handles are open. The
+        live read takes no lock: if a replay moves the object mid-read it finds nothing, and the catalog's
+        figure stands, which `_record` keeps right.
+        """
         entry = self._ensure(path)
         if entry is None:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', normalize(path))
@@ -274,7 +287,7 @@ class OverlayEngine:
             with self._handles_mutex:
                 open_written = [h for h in self._handles.get(entry.id, []) if h.written]
             if open_written:
-                stat = self.tiers[open_written[-1].tier].stat(_pure(entry.path))
+                stat = self._stat_held(entry, open_written[-1].tier)
                 if stat is not None:
                     entry = dataclasses.replace(entry, size=stat.size, mtime=stat.mtime)
         return entry
@@ -335,27 +348,31 @@ class OverlayEngine:
             self._vacate(path)
             now = self.clock()
             dest = self.eligible_tier(0)
-            intent = self.journal.begin('promote', dest.name, now=now, detail={'path': path, 'op': 'create'})
-            try:
-                materialize_dirs(self.catalog, dest, path)
-                dest.put(_pure(path), io.BytesIO(b''), meta=FileMeta(size=0, mtime=now, mode=mode))
-            except BaseException:
-                self.journal.rollback(intent)
-                raise
             upstream = self.upstream_of(dest.name)
-            with self.db.transaction():
-                # A file created straight onto the source (no upstream) is already there; one staged
-                # upstream of the source has no source copy yet (source_path stays NULL until it commits).
-                entry = self.catalog.add(path, 'file', mode=mode,
-                                         uid=uid if uid is not None else 0, gid=gid if gid is not None else 0,
-                                         mtime=now, ctime=now, atime=now,
-                                         source_path=None if upstream is not None else path)
-                state = 'dirty' if upstream is not None else 'clean'
-                self.catalog.add_residency(path, dest.name, atime=now, size=0, mtime=now, state=state)
-                self.registry.adjust_usage(dest.name, files=1)
-                if upstream is not None:
-                    self.journal.mark_dirty(path, dest.name, to_tier=upstream.name, now=now)
-                self.journal.confirm(intent)
+            # Straight onto the source, the file lands at its target (its parent may still sit at a pre-rename
+            # place), placed and recorded under the source lock like any other change to the source's namespace.
+            with self._source_lock if upstream is None else contextlib.nullcontext():
+                where = path if upstream is not None else self._place_parents(path, now)
+                intent = self.journal.begin('promote', dest.name, now=now, detail={'path': path, 'op': 'create'})
+                try:
+                    materialize_dirs(self.catalog, dest, where)
+                    dest.put(_pure(where), io.BytesIO(b''), meta=FileMeta(size=0, mtime=now, mode=mode))
+                except BaseException:
+                    self.journal.rollback(intent)
+                    raise
+                with self.db.transaction():
+                    # A file created straight onto the source (no upstream) is already there; one staged
+                    # upstream of the source has no source copy yet (source_path stays NULL until it commits).
+                    entry = self.catalog.add(path, 'file', mode=mode,
+                                             uid=uid if uid is not None else 0, gid=gid if gid is not None else 0,
+                                             mtime=now, ctime=now, atime=now,
+                                             source_path=None if upstream is not None else where)
+                    state = 'dirty' if upstream is not None else 'clean'
+                    self.catalog.add_residency(path, dest.name, atime=now, size=0, mtime=now, state=state)
+                    self.registry.adjust_usage(dest.name, files=1)
+                    if upstream is not None:
+                        self.journal.mark_dirty(path, dest.name, to_tier=upstream.name, now=now)
+                    self.journal.confirm(intent)
         log.trace(f'Created {path} (tier={dest.name})')
         return entry
 
@@ -422,7 +439,7 @@ class OverlayEngine:
                 elif entry.kind == 'dir':
                     raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', new)
                 self._remove(target, replaced=True)
-            self._vacate(new)
+            self._vacate(new, mover=entry.id)
             now = self.clock()
             with self.db.transaction():
                 self.catalog.rename(old, new)
@@ -513,19 +530,30 @@ class OverlayEngine:
         """
         Remove `entry`'s source object now (intent-bracketed) at its committed source
         path — used when a rename overwrites the entry, since that physical path may
-        differ from the one the rename reuses. Tolerant of a copy already gone.
+        differ from the one the rename reuses. A directory that is empty in the catalog
+        may still hold children on the source whose removal or move-out is queued; those
+        rows run first, in queue order. Tolerant of a copy already gone.
         """
-        intent = self.journal.begin('commit', self.source.name, now=now, path=entry.path,
-                                    detail={'op': 'rmdir' if entry.kind == 'dir' else 'unlink',
-                                            'source_path': entry.source_path})
-        try:
+        with self._source_lock:
             if entry.kind == 'dir':
-                self.source.rmdir(_pure(entry.source_path))
-            else:
-                self.source.delete(_pure(entry.source_path))
-        except FileNotFoundError:
-            pass
-        self.journal.confirm(intent)
+                rows = self._holder_rows(entry.source_path, below=True, exclude=entry.id)
+                if rows:
+                    self._replay_through(rows)
+                    entry = self.catalog.by_id(entry.id)    # a replayed prefix may have moved it
+            intent = self.journal.begin('commit', self.source.name, now=now, path=entry.path,
+                                        detail={'op': 'rmdir' if entry.kind == 'dir' else 'unlink',
+                                                'source_path': entry.source_path})
+            try:
+                if entry.kind == 'dir':
+                    self.source.rmdir(_pure(entry.source_path))
+                else:
+                    self.source.delete(_pure(entry.source_path))
+            except FileNotFoundError:
+                pass
+            except BaseException:
+                self.journal.rollback(intent)
+                raise
+            self.journal.confirm(intent)
 
     # -- metadata -----------------------------------------------------------------------------------------------
 
@@ -724,24 +752,41 @@ class OverlayEngine:
         Record the serving copy's live size/mtime into the entry and residency
         rows. Residency size is the accounted size: whoever updates it adjusts
         the tier counter by the delta (source counters track pushes, not I/O).
+        A copy served off the source is read where the source holds it, under
+        the source lock, so a replay cannot move it between resolving that
+        place and the stat (which would leave the old size recorded for good).
         """
         entry = self.catalog.by_id(handle.entry_id)
         if entry is None or entry.deleted:
             return None                                     # unlinked while open; nothing to record
         now = self.clock()
-        stat = self.tiers[handle.tier].stat(_pure(entry.path))
-        if stat is None:
-            return entry
+        on_source = handle.tier == self.source.name
         with self.locks.hold(entry.path):
-            previous = self.catalog.get_residency(entry.path, handle.tier)
-            with self.db.transaction():
-                if handle.written:
-                    self.catalog.update_meta(entry.path, size=stat.size, mtime=stat.mtime)
-                self.catalog.update_residency(entry.path, handle.tier,
-                                              size=stat.size, mtime=stat.mtime, atime=now)
-                if previous is not None and handle.tier != self.source.name:
-                    self.registry.adjust_usage(handle.tier, bytes=stat.size - previous.size)
+            with self._source_lock if on_source else contextlib.nullcontext():
+                entry = self.catalog.by_id(handle.entry_id)
+                if entry is None or entry.deleted:
+                    return None
+                stat = self._stat_held(entry, handle.tier)
+                if stat is None:
+                    return entry
+                previous = self.catalog.get_residency(entry.path, handle.tier)
+                with self.db.transaction():
+                    if handle.written:
+                        self.catalog.update_meta(entry.path, size=stat.size, mtime=stat.mtime)
+                    self.catalog.update_residency(entry.path, handle.tier,
+                                                  size=stat.size, mtime=stat.mtime, atime=now)
+                    if previous is not None and not on_source:
+                        self.registry.adjust_usage(handle.tier, bytes=stat.size - previous.size)
         return entry
+
+    def _stat_held(self, entry: Entry, tier: str) -> Optional[TierStat]:
+        """
+        The live stat of `entry`'s bytes on `tier`. The source holds them at the committed source path, which
+        lags the logical path while the entry's rename, or an ancestor's, is queued; every other tier holds
+        them at the logical path.
+        """
+        where = entry.source_path if tier == self.source.name and entry.source_path is not None else entry.path
+        return self.tiers[tier].stat(_pure(where))
 
     # -- upstream commit ----------------------------------------------------------------------------------------
 
@@ -750,28 +795,27 @@ class OverlayEngine:
         Execute one queued write-back row — the scheduler's unit of work: a
         namespace op runs against the source; a data row commits the dirty copy
         one hop across its boundary. Rows made moot since they were scanned
-        (entry unlinked, copy already committed) settle quietly.
+        (entry unlinked, copy already committed) settle quietly; a row that has
+        since run, been cancelled or cascaded away does nothing, even when its id
+        now names a newer row.
         """
         if row.op != 'data':
             self._execute_namespace(row)
             return
         entry = self.catalog.by_id(row.entry)
         if entry is None or entry.deleted:
-            self._settle_moot(row.id)
+            self._settle_moot(row)
             return
         with self.locks.hold(entry.path):
             residency = self.catalog.get_residency(entry.path, row.from_tier)
             if residency is None or residency.state != 'dirty':
-                self._settle_moot(row.id)                   # committed by fsync or flush since queued
+                self._settle_moot(row)                      # committed by fsync or flush since queued
                 return
             self._commit_hop(entry.path, row.from_tier, row.to_tier)
 
-    def _settle_moot(self, row_id: int) -> None:
-        """Settle a queue row unless a concurrent commit already did."""
-        try:
-            self.journal.settle(row_id)
-        except LookupError:
-            pass
+    def _settle_moot(self, row: Writeback) -> None:
+        """Settle a queue row unless it is no longer queued (a concurrent commit settled it, or its id was reused)."""
+        self.journal.settle_current(row)
 
     def _commit_hop(self, path: str, holder: str, upstream: str) -> None:
         """
@@ -780,11 +824,25 @@ class OverlayEngine:
         holder re-arm their dirty marking, so a write after the copy re-queues;
         a write racing the copy itself shows in the holder's stat, which leaves
         the holder dirty and re-clocks the boundary instead of settling it.
+
+        A commit to the source writes where the source already holds the entry,
+        else at its target, and records that place in the copy's confirming
+        transaction: a queued rename stays the only thing that moves an object
+        on the source, so a commit during the lag leaves no copy behind at the
+        pre-rename place. It runs under the source lock (below the caller's path
+        lock) so a replay cannot move the place between resolving and writing.
         """
-        copied = self.transfers.copy(path, self.tiers[holder], self.tiers[upstream],
-                                     action='commit', now=self.clock())
+        if self.tiers[upstream] is self.source:
+            with self._source_lock:
+                entry = self.catalog.get(path)              # read under the lock: a replay may just have moved it
+                where = entry.source_path or self._place_parents(path, self.clock())
+                copied = self.transfers.copy(path, self.tiers[holder], self.source, action='commit',
+                                             now=self.clock(), dest_path=where, source_path=where)
+        else:
+            entry = self.catalog.get(path)
+            copied = self.transfers.copy(path, self.tiers[holder], self.tiers[upstream],
+                                         action='commit', now=self.clock())
         now = self.clock()
-        entry = self.catalog.get(path)
         with self._handles_mutex:
             for open_handle in self._handles.get(entry.id, []):
                 if open_handle.tier == holder:
@@ -804,8 +862,6 @@ class OverlayEngine:
             beyond = self.upstream_of(upstream)
             if beyond is not None:
                 self.journal.mark_dirty(path, upstream, to_tier=beyond.name, now=now)
-            else:
-                self.catalog.update_meta(path, source_path=path)    # the source now holds this copy at its path
         log.trace(f'Committed {path} ({holder} -> {upstream}{", re-armed" if changed else ""})')
 
     def commit_upstream(self, path: str) -> None:
@@ -881,37 +937,61 @@ class OverlayEngine:
                 continue
             entry = self.catalog.by_id(row.entry)
             if entry is None or entry.deleted:
-                self.journal.settle(row.id)
+                self.journal.settle_current(row)            # a removal since may have queued its op under this id
                 continue
             self.commit_upstream(entry.path)
         log.debug('Flushed write-back queue to source')
 
-    def _execute_namespace(self, row) -> None:
-        """Apply one queued namespace op to the source, intent-bracketed and tolerant of no-ops."""
+    def _execute_namespace(self, row: Writeback) -> None:
+        """
+        Apply one queued namespace op to the source, intent-bracketed and tolerant of no-ops. A row
+        that is no longer queued (run by a vacate, cancelled, cascaded away) does nothing.
+
+        The op resolves against the entry's current place, not the paths recorded when it was queued:
+        the queue is a lossy history (removing an entry cancels its rows), so replaying recorded paths
+        re-creates ancestors nobody owns and reads the kind and mode of paths since reused. Removals,
+        renames and `meta` act on the committed source path, where the source physically holds the
+        bytes; `mkdir` and a rename's destination resolve to the entry's target (`_target`).
+        """
+        with self._source_lock:
+            self._execute_namespace_locked(row)
+
+    def _execute_namespace_locked(self, row: Writeback) -> None:
+        """The body of `_execute_namespace`, run with the source lock held."""
+        if self.journal.current(row) is None:
+            return                                          # already run by a vacate, cancelled, or cascaded away
         entry = self.catalog.by_id(row.entry)
+        if entry is not None and row.op == 'rmdir' and entry.source_path is not None:
+            # Empty in the catalog is not empty on the source: a child moved out or removed since may still sit
+            # in the directory's object, its move or removal queued behind this row (removing an entry cancels
+            # its queued rename and queues the removal last). Those rows run first, as in `_purge_source`.
+            rows = self._holder_rows(entry.source_path, below=True, exclude=entry.id)
+            if rows:
+                self._replay_through(rows, skip=frozenset({row.id}))
+                if self.journal.current(row) is None:
+                    return
+                entry = self.catalog.by_id(row.entry)
         if entry is None:
-            self.journal.settle(row.id)
+            self.journal.settle_current(row)
             return
+        if row.op == 'rename' and entry.source_path is not None:
+            entry = self._clear_inner_target(row, entry)
         path = entry.path
         now = self.clock()
         detail = dict(row.detail or {})
         detail['op'] = row.op
-        # Removals and renames resolve against the committed source path — where the source
-        # physically holds the bytes — which lags the entry's logical `path` while a rename is
-        # queued but uncommitted, so a superseded op never orphans its source object. `mkdir`
-        # creates at its queue-time path (`op_path`, historical if the dir was later renamed) and
-        # records that as the source path; a following rename op then relocates it. `meta` sets
-        # attributes on the object wherever it currently sits.
-        op_path = detail.get('path', path)
         source_path = entry.source_path
+        placed: Optional[str] = None                        # mkdir: where the directory now sits
+        moved: Optional[Tuple[str, str]] = None             # rename: (from, to) when the object moved
         intent = self.journal.begin('commit', self.source.name, now=now, path=path, detail=detail)
         try:
             if row.op == 'mkdir':
-                materialize_dirs(self.catalog, self.source, op_path)
-                try:
-                    self.source.mkdir(_pure(op_path), entry.mode)
-                except FileExistsError:
-                    pass
+                if source_path is None:                     # else a placement or a commit already put it there
+                    placed = self._place_parents(path, now)
+                    try:
+                        self.source.mkdir(_pure(placed), entry.mode)
+                    except FileExistsError:
+                        pass
             elif row.op in ('unlink', 'rmdir'):
                 if source_path is not None:
                     try:
@@ -922,79 +1002,189 @@ class OverlayEngine:
                     except FileNotFoundError:
                         pass
             elif row.op == 'rename':
-                materialize_dirs(self.catalog, self.source, row.detail['new'])
-                if source_path is not None:
+                # One move to the current target collapses a chain of queued renames. A same-path rename
+                # never reaches the tier: an object store's copy-then-delete would destroy the object.
+                if source_path is not None and self._target(path) != source_path:
+                    target = self._place_parents(path, now)
                     try:
-                        self.source.rename(_pure(source_path), PurePosixPath(row.detail['new']))
+                        self.source.rename(_pure(source_path), _pure(target))
+                        moved = (source_path, target)
                     except FileNotFoundError:
                         pass                                # copy vanished mid-flight; data ops fill in
             elif row.op == 'meta':
-                fields = set(detail.get('fields', ()))
-                try:
-                    self.source.set_meta(_pure(source_path if source_path is not None else path), FileMeta(
-                        size=entry.size,
-                        mtime=entry.mtime if 'mtime' in fields else None,
-                        mode=entry.mode if 'mode' in fields else None,
-                        uid=entry.uid if 'uid' in fields else None,
-                        gid=entry.gid if 'gid' in fields else None))
-                except FileNotFoundError:
-                    pass                                    # source copy not materialized yet; the data commit carries it
+                # Only where the source holds this entry: with no source copy yet, the logical path may
+                # be another entry's object, and the data commit carries the catalog's attributes.
+                if source_path is not None:
+                    fields = set(detail.get('fields', ()))
+                    try:
+                        self.source.set_meta(_pure(source_path), FileMeta(
+                            size=entry.size,
+                            mtime=entry.mtime if 'mtime' in fields else None,
+                            mode=entry.mode if 'mode' in fields else None,
+                            uid=entry.uid if 'uid' in fields else None,
+                            gid=entry.gid if 'gid' in fields else None))
+                    except FileNotFoundError:
+                        pass
             else:
                 raise EngineError(f'Unhandled namespace op: {row.op}')
         except BaseException:
             self.journal.rollback(intent)
             raise
         with self.db.transaction():
-            self.journal.settle(row.id)
+            # Settle only the row this replay read: a removal during the act (it takes no source lock) cancels
+            # it and may queue its own op under the same id, which must stay queued. The act's effect is
+            # recorded either way, so that op resolves the place the object now holds.
+            self.journal.settle_current(row)
             self.journal.confirm(intent)                    # before any purge — cascades eat intent rows
             if row.op in ('unlink', 'rmdir'):
                 self.catalog.drop_residency(path, self.source.name)
                 self.catalog.purge(path)
             elif row.op == 'mkdir':
-                self.catalog.update_meta(entry.path, source_path=op_path)
+                if placed is not None:
+                    self.catalog.update_meta(path, source_path=placed)
             elif row.op == 'rename':
-                if source_path is not None:
-                    self.catalog.advance_source_path(source_path, row.detail['new'])
-                old = self.catalog.get(row.detail['old'], include_deleted=True)
-                if old is not None and old.deleted:
-                    self.catalog.purge(row.detail['old'])
-                residency = self.catalog.get_residency(path, self.source.name)
-                if residency is None:
-                    stat = self.source.stat(_pure(path))
-                    if stat is not None and entry.kind == 'file':
+                if moved is not None:
+                    self.catalog.advance_source_path(*moved)
+                held = self.catalog.by_id(entry.id).source_path
+                if entry.kind == 'file' and held is not None \
+                        and self.catalog.get_residency(path, self.source.name) is None:
+                    stat = self.source.stat(_pure(held))
+                    if stat is not None:
                         self.catalog.add_residency(path, self.source.name,
                                                    atime=now, size=stat.size, mtime=stat.mtime)
+                # The rename's own tombstone masked the old path until now. Purge only that one: a
+                # tombstone still holding a source object, owning a queued row, or sitting where another
+                # entry's object still is has a removal of its own to wait for.
+                old = normalize(row.detail['old'])
+                tomb = self.catalog.get(old, include_deleted=True)
+                if tomb is not None and tomb.deleted and tomb.source_path is None \
+                        and not self.journal.queued_for(old) and self.catalog.holder(old) is None:
+                    self.catalog.purge(old)
             elif row.op == 'meta':
                 if 'mtime' in set(detail.get('fields', ())) \
                         and self.catalog.get_residency(path, self.source.name) is not None:
                     self.catalog.update_residency(path, self.source.name, mtime=entry.mtime)
 
-    def _vacate(self, path: str) -> None:
+    # -- source placement ---------------------------------------------------------------------------------------
+
+    def _target(self, path: str) -> str:
         """
-        Clear a tombstone occupying `path` before re-creation: the queued source
-        removal executes now (the one place a namespace op jumps its clock), so
-        the new entry can take the path.
+        Where the source should hold logical `path`: its parent's committed source path (or, when the
+        source lacks the parent, the parent's own target) joined with its name. Reads only the catalog.
         """
-        tombstone = self.catalog.get(path, include_deleted=True)
-        if tombstone is None or not tombstone.deleted:
-            return
-        now = self.clock()
-        target = tombstone.source_path                      # where the source physically holds it (may lag the path)
+        path = normalize(path)
+        parent = parent_of(path)
+        if parent is None:
+            return '/'
+        entry = self.catalog.get(parent)
+        base = entry.source_path if entry is not None and entry.source_path is not None else self._target(parent)
+        return str(_pure(base) / _pure(path).name)
+
+    def _place_parents(self, path: str, now: float) -> str:
+        """
+        Create on the source, outermost first, every ancestor of `path` the source lacks, each at its own
+        target with its own catalog mode (looked up by entry, never by a path that may since have been
+        reused), intent-bracketed and recorded as its committed source path. Returns `path`'s target.
+        The source lock is held.
+        """
+        parent = parent_of(normalize(path))
+        if parent is not None and parent != '/':
+            entry = self.catalog.get(parent)
+            if entry is not None and entry.source_path is None:
+                self._place_parents(parent, now)
+                target = self._target(parent)
+                intent = self.journal.begin('commit', self.source.name, now=now, path=parent,
+                                            detail={'op': 'mkdir', 'source_path': target})
+                try:
+                    try:
+                        self.source.mkdir(_pure(target), entry.mode)
+                    except FileExistsError:
+                        pass
+                except BaseException:
+                    self.journal.rollback(intent)
+                    raise
+                with self.db.transaction():
+                    self.catalog.update_meta(parent, source_path=target)
+                    self.journal.confirm(intent)
+        return self._target(path)
+
+    def _holder_rows(self, physical: str, *, below: bool = False, exclude: Optional[int] = None) -> set[int]:
+        """
+        Ids of the queued namespace rows of every entry (tombstones included, `exclude` not) whose committed
+        source path is `physical`, or with `below`, lies under it.
+        """
+        prefix = physical.rstrip('/') + '/'
+        rows = set()
         for row in self.journal.queued(self.source.name):
-            if row.entry != tombstone.id or row.op not in ('unlink', 'rmdir'):
+            if row.op == 'data' or row.entry == exclude:
                 continue
-            intent = self.journal.begin('commit', self.source.name, now=now, path=path,
-                                        detail={'op': row.op, 'source_path': target})
-            try:
-                if target is not None:
-                    if row.op == 'unlink':
-                        self.source.delete(_pure(target))
-                    else:
-                        self.source.rmdir(_pure(target))
-            except FileNotFoundError:
-                pass
-            self.journal.confirm(intent)
-        self.catalog.purge(path)
+            entry = self.catalog.by_id(row.entry)
+            held = entry.source_path if entry is not None else None
+            if held is None:
+                continue
+            if (held.startswith(prefix) if below else held == physical):
+                rows.add(row.id)
+        return rows
+
+    def _clear_inner_target(self, row: Writeback, entry: Entry) -> Entry:
+        """
+        A directory whose target lies inside its own source object cannot move there. The places between
+        are held by entries that have since moved out of it logically (an ancestor-to-be that was placed
+        inside it); their queued rows run first, then the target is recomputed. One still inside raises
+        rather than settle the row with the source unmoved. The source lock is held.
+        """
+        held = _pure(entry.source_path)
+        target = _pure(self._target(entry.path))
+        if target == held or not target.is_relative_to(held):
+            return entry
+        rows = set()
+        for other in self.journal.queued(self.source.name):
+            if other.op == 'data' or other.entry == entry.id:
+                continue
+            holder = self.catalog.by_id(other.entry)
+            place = holder.source_path if holder is not None else None
+            if place is not None and _pure(place) != held and _pure(place).is_relative_to(held) \
+                    and target.is_relative_to(_pure(place)):
+                rows.add(other.id)
+        self._replay_through(rows, skip=frozenset({row.id}))
+        entry = self.catalog.by_id(entry.id)
+        target = _pure(self._target(entry.path))
+        if target != _pure(entry.source_path) and target.is_relative_to(_pure(entry.source_path)):
+            raise EngineError(f'Cannot move {entry.source_path} into its own subtree ({target})')
+        return entry
+
+    def _replay_through(self, rows: set[int], skip: frozenset[int] = frozenset()) -> None:
+        """
+        Run queued namespace rows in queue order until every row in `rows` has run: the one place a
+        namespace op jumps its policy clock. Running a prefix, never a row alone, keeps a parent's `mkdir`
+        or a child's move-out ahead of the row that needs it. The source lock is held.
+        """
+        remaining = set(rows)
+        for row in self.journal.queued(self.source.name):
+            if not remaining:
+                break
+            if row.op == 'data' or row.id in skip:
+                continue
+            self._execute_namespace(row)
+            remaining.discard(row.id)
+
+    def _vacate(self, path: str, mover: Optional[int] = None) -> None:
+        """
+        Clear `path` before a new or moved entry takes it. On the source that means the place `path`
+        resolves to: the queued rows that free it run now, in queue order (a tombstone's removal at
+        `path`, the queued move or removal of any other entry still holding that place). `mover`, the
+        entry being renamed onto `path`, is never one of them. The tombstone at `path` is then dropped.
+        """
+        with self._source_lock:
+            rows = self._holder_rows(self._target(path), exclude=mover)
+            tombstone = self.catalog.get(path, include_deleted=True)
+            if tombstone is not None and tombstone.deleted:
+                rows |= {row.id for row in self.journal.queued_for(path) if row.op != 'data'}
+            if rows:
+                self._replay_through(rows)
+            tombstone = self.catalog.get(path, include_deleted=True)
+            if tombstone is not None and tombstone.deleted:
+                self.catalog.purge(path)
 
     # -- eviction -----------------------------------------------------------------------------------------------
 

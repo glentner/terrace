@@ -137,6 +137,11 @@ class Catalog:
         row = self.db.execute(t'SELECT * FROM entry WHERE id = {entry_id}').fetchone()
         return None if row is None else Entry.from_row(row)
 
+    def holder(self, source_path: str) -> Optional[Entry]:
+        """The entry, live or tombstoned, whose committed source path is `source_path`."""
+        row = self.db.execute(t'SELECT * FROM entry WHERE source_path = {normalize(source_path)}').fetchone()
+        return None if row is None else Entry.from_row(row)
+
     def children(self, path: str) -> List[Entry]:
         """Direct children of a directory, tombstones masked, ordered by path."""
         rows = self.db.execute(

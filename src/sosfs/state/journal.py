@@ -167,9 +167,10 @@ class Journal:
         transaction as the catalog mutation it propagates, so the op and the
         namespace state it describes commit together.
 
-        The queue-time `path` is recorded in `detail` so the op replays at the
-        location it operated on, not wherever the (entry-keyed) row's entry has
-        since moved — reproducing the namespace history faithfully on the source.
+        The queue-time `path` is recorded in `detail` for the audit. Replay does
+        not read it: the row is entry-keyed and resolves the entry's current place
+        when it runs, because removing an entry cancels its rows and leaves the
+        recorded history with gaps that replaying it verbatim cannot converge over.
         """
         if op not in NAMESPACE_OPS:
             raise ValueError(f'Unknown namespace op: {op!r}')
@@ -205,6 +206,36 @@ class Journal:
             t'WHERE entry = (SELECT id FROM entry WHERE path = {normalize(path)}){boundary} '
             t'ORDER BY last_write')
         return [Writeback.from_row(row) for row in rows]
+
+    def current(self, row: Writeback) -> Optional[Writeback]:
+        """
+        The queued row `row` was read from, or None once it ran, was cancelled or cascaded away.
+        Row ids are reused (the id of a deleted highest row goes to the next insert), so a match
+        is the same id, entry, op, boundary, detail and first-dirty time: a refreshed row keeps its
+        first-dirty time, and a new one does not.
+        """
+        found = self.db.execute(t'SELECT * FROM writeback WHERE id = {row.id}').fetchone()
+        if found is None:
+            return None
+        found = Writeback.from_row(found)
+
+        def key(r: Writeback) -> tuple:
+            return r.entry, r.op, r.from_tier, r.to_tier, r.detail, r.first_dirty
+
+        same = key(found) == key(row)
+        return found if same else None
+
+    def settle_current(self, row: Writeback) -> bool:
+        """
+        Settle the queued row `row` was read from, and nothing else; returns whether it did. Between the read
+        and the settle a user op may have cancelled the row and queued another that took its id, so a settle
+        by id alone would delete that newer op. The check and the delete run in one write transaction.
+        """
+        with self._atomic():
+            if self.current(row) is None:
+                return False
+            self.settle(row.id)
+        return True
 
     def settle(self, writeback_id: int) -> None:
         """Remove a queued row whose operation committed (compose with the recording transaction)."""

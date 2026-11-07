@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:deferred-rename-source-orphan
 kind: fix
 appetite: big
 lane: public
@@ -10,6 +10,10 @@ lane: public
 > **Candidate, not a contract.** `code terrace feature` promotes this into a `spec/{slug}/GOAL.md`, and
 > that promotion is where appetite, non-goals and the R-IDs get negotiated. `status: unshaped` means
 > none of that has happened yet.
+
+- 2026-11-06: every `file:line` cite and line range in this seed holds at `141aa86`, the commit the
+  `deferred-rename-source-orphan` cycle branched from. They describe the code before that cycle's
+  fix, which moved most of the lines they name.
 
 ## Problem
 

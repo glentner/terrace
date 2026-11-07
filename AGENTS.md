@@ -67,8 +67,8 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 449 tests, ~5 s — must pass before every commit
-uv run pytest -n auto -m unit                    # parallel via pytest-xdist, ~3.5 s
+uv run pytest -m unit                            # 474 tests, ~28 s — must pass before every commit
+uv run pytest -n auto -m unit                    # pytest-xdist; no faster, test_model dominates
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
 uv run pytest -m integration                     # 10 tests: real mounts (Linux) + MinIO
@@ -88,6 +88,9 @@ that libfuse loads before the tests run, so `tests/fuse` runs there in full; the
 libfuse and reports those tests skipped with a reason naming libfuse. `-rfEs` adds one
 `SKIPPED [n] file:line: reason` line per skip location to the short summary, `n` counting the tests
 folded into it; no two `tests/fuse` tests share a location today, so each gets its own line.
+Each of the four jobs (`Lint & build`, `Unit (Linux, 3.15)`, `Unit (Linux, 3.15t)` and
+`Unit (macOS, engine-only)`) is expected to conclude `success`, and no test failure is tolerated: a
+red job is a defect to fix, never a known failure to read past.
 
 **CI does not run the integration suite.** There is no integration job and nothing starts MinIO, so
 ten tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, plus the
@@ -105,7 +108,7 @@ that way proves nothing; assert a pass count.
 | `src/sosfs/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/sosfs/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/sosfs/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 459 tests (449 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 42 files, 484 tests (474 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -209,18 +212,22 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 |---|---|
 | `state/db.py` — `autocommit=True`, the four pragmas, `BEGIN IMMEDIATE`, `SCHEMA_VERSION` | Each one silently converts a durability guarantee into a performance characteristic. There is no schema migration machinery: a version bump makes every existing state database unopenable. |
 | `state/journal.py` — `mark_dirty`, `begin`, `confirm`, `_resolve` | Both sacred invariants live in about forty lines here. |
+| `state/journal.py` — `current`, `settle_current`, `settle`, `cancel` | Queue-row identity. Row ids are reused (no `AUTOINCREMENT`), so a replay or settle keyed by id alone acts on, or deletes, a newer op that took the id: silent loss behind a drained queue. |
+| `state/catalog.py` — `holder`, `advance_source_path` | Who holds a physical place on the source, and the prefix rewrite a committed rename records. Replay's tombstone purge and every placement decision read them. |
 | `state/schema.sql` — the cascades, the `CHECK` vocabularies, `source_path` | A cascade eats unresolved intent rows; a `CHECK` is the only thing keeping `shutdown_state` a three-valued flag. |
 | `state/lifecycle.py` — `begin_mount`, `Marker.write` | The crash gate and the managed-location identity. |
 | `state/registry.py` — `_attach` | The only thing standing between an evaporated tier and silent re-adoption of its residency rows. |
 | `state/sql.py` — `IDENTIFIER`; `state/catalog.py` — `META_FIELDS` / `RESIDENCY_FIELDS` | The only barrier between a userspace-derived name and SQL text. |
 | `engine/overlay.py` — `_commit_hop`, `commit_upstream`, `commit_to_shared`, `evict_copy` | The sole clean-transition point and the only code that destroys bytes on purpose. A wrong edit is silent data loss, not a crash. |
 | `engine/overlay.py` — `write`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack. Reordering two statements is undetectable in review and unrecoverable in production. |
-| `engine/overlay.py` — `_execute_namespace`, `_remove`, `_purge_source`, `_vacate` | Deferred-op replay; the confirm-before-purge ordering is not expressible in the type system. |
-| `engine/overlay.py` — `open`, `_serve`, `eligible_tier` | Placement policy, `source_path` read resolution, `bypass_size`, quota admission. |
+| `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge_source`, `_vacate`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
+| `engine/overlay.py` — `open`, `_serve`, `eligible_tier`, `getattr`, `_record`, `_stat_held` | Placement policy, `source_path` read resolution (opening, and stating the bytes a handle serves), `bypass_size`, quota admission. |
 | `engine/transfer.py` — `copy` | The single place an intent bracket wraps a real byte move, and where tier counters are adjusted. |
 | `engine/writeback.py` — `deadline`, `boundary_policies` | The loss window at every boundary is these fifteen lines. |
+| `engine/writeback.py` — `due`, `poll`, `on_scan`, `on_commit` | The scheduler's snapshot and replay route: rows scanned in one state run in the next, with user ops in between, so each must be re-checked as the row it was read as. |
 | `engine/evict.py` — `_drop_dirty` | The only path that deletes bytes the source may not yet hold. |
 | `engine/drain.py` — `tier_volatility`, `dirty_copies` | Shared by drain and rescue; a regression misallocates every constrained time budget the system will ever have. |
+| `engine/drain.py` — `drain` | A replay route: namespace rows first, then data, from one snapshot of the queue. |
 | `engine/locks.py` — `LockRegistry` | Sixty-seven lines standing between the mount and a deadlock. |
 | `core/fsm.py` | Every long-running component inherits its shutdown latency, exception visibility and liveness from it. |
 | `fuse/mount.py` — `shutdown`, `_on_sigint`, `_on_sigterm`, `_serve_after_start`, `_daemonize_and_serve` | The only code deciding drain versus rescue versus neither, and the `shutdown_state` it settles is what tells the next mount whether to trust its metadata. |
@@ -236,7 +243,8 @@ review; where its grain differs from the table above, the table governs.
 | Region | Why |
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
-| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_remove`/`_purge_source`/`_vacate` | Where a copy goes clean, where bytes are destroyed on purpose, and where deferred ops resolve. Failures here are silent, not loud. |
+| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge_source`/`_vacate`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `getattr`/`_record`/`_stat_held` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places and reports an entry's bytes. Failures here are silent, not loud. |
+| `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`; `state/catalog.py` — `holder`/`advance_source_path` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
 | `tier/posix.py`, `s3.py`, `archive.py`, `spec.py` | Adapter atomicity, and the last gate before the engine instantiates tiers. |
@@ -254,7 +262,8 @@ review; where its grain differs from the table above, the table governs.
 - **Intent → act → confirm.** Every engine-initiated mutation of a managed location is bracketed:
   `Journal.begin` commits before any bytes move, the act is made atomic by the tier adapter (§4),
   and `confirm` composes into the *same transaction* as the metadata recording the act's effect —
-  the residency row and the usage counter. Copies, creates, evictions, staging renames, source
+  the residency row and the usage counter, and for a data commit to the source the entry's committed
+  source path (§5). Copies, creates, evictions, staging renames, source
   removals and every queued namespace op all follow it.
 - Splitting the confirm out of that transaction leaves either a residency row for bytes the audit
   will discard, or an intent the audit re-runs against state that already moved.
@@ -368,21 +377,44 @@ review; where its grain differs from the table above, the table governs.
 - **`entry.source_path` is where the source physically holds the bytes**, and every physical touch of
   the *source* tier resolves through it, not through the entry's logical path. It is `NULL` until the
   source holds a copy at all. Adoption sets it to the entry path. `create` sets it only when the file
-  lands straight on the source. **A deferred rename leaves it untouched** — the source has not moved.
-  Committing a rename upstream moves the object from `source_path` to the new path and only then
-  advances it, rewriting the prefix for every descendant, because one source rename relocates a whole
-  subtree. Removals target it.
+  lands straight on the source. A data commit to the source writes where the source already holds the
+  entry, else at its target, and sets it there in the transaction that confirms the copy, so a queued
+  rename stays the only thing that moves a source object; the `mkdir` row and ancestor placement set
+  it for directories. **A deferred rename leaves it untouched** — the source has not moved.
+  Committing a rename upstream moves the object from `source_path` to the entry's *current target*
+  when the row runs — its parent's committed source path (or the parent's own target) plus its name,
+  not the path the row recorded — and only then advances it, rewriting the prefix for every
+  descendant, because one source rename relocates a whole subtree. A chain of queued renames
+  collapses into one move, and a rename whose target already equals `source_path` never calls the
+  tier (an object store's copy-then-delete onto the same key destroys the object). Removals target it.
+- **Replay resolves the entry's current place, never the paths a row recorded.** The queue is a lossy
+  history: removing an entry cancels its rows, so replaying recorded paths re-creates ancestors nobody
+  owns and reads the kind and mode of paths since reused. A queued `mkdir` creates the directory at its
+  target, placing any ancestor the source lacks at that ancestor's own target with its catalog mode,
+  looked up by entry. `Journal.queue` still records the queue-time path, for the audit only.
+- Reading the source resolves through it too: `open` serves a source-held copy from `source_path`, and
+  `getattr`'s live stat and `_record` stat it there (`_stat_held`), so a file whose bytes sit off its
+  logical path (inside a renamed directory, or behind its own queued rename) reports the size its object
+  holds.
 - Resolving against `entry.path` instead orphans the pre-rename source object: it stays on the source
   at a path the catalog no longer knows, and the next mount re-adopts it as a live file, resurrecting
-  deleted or renamed-away data. `tests/engine/test_replay.py` guards four divergence classes; see
-  § *Known open violations* for the paths that still get this wrong.
+  deleted or renamed-away data. `tests/engine/test_replay.py` guards the divergence classes its module
+  docstring lists; see § *Known open violations* for the paths that still get this wrong.
 - **`_populate_tree` before a directory rename is load-bearing and looks like a pessimization.** The
   eager recursive listing is what guarantees every descendant carries `listed=True`, which is why
   `_populate` may safely list the *logical* path — a renamed directory is never re-listed. Making a
   directory rename O(1) by deferring the walk makes directory listings silently lose children.
-- **`_vacate` is the one place a namespace op jumps its policy clock**, executing the queued source
-  removal synchronously so the path can be reused. Anything that makes namespace ops lazier must keep
-  that escape hatch, or `create` over a tombstone races the source.
+- **`_replay_through` is the one place a namespace op jumps its policy clock.** `_vacate` reaches it
+  before `mkdir`, `create` or `rename` takes a name, and `_purge_source` before a rename replaces a
+  directory; a rename row whose target lies inside its own source object uses it too, and so does an
+  `rmdir` row whose directory's source object still holds a child moved out or removed since
+  (removing an entry cancels its queued rename and queues the removal last, behind the parent's
+  `rmdir`). It runs the queue *prefix* in order through the rows that free a physical place — a
+  tombstone's removal, and the queued move or removal of any other entry still holding the place the
+  name resolves to, which can take other entries' renames, mkdirs and meta rows with it — so a
+  parent's `mkdir` or a child's move-out always runs before the row that needs it. Anything that makes
+  namespace ops lazier must keep that escape hatch, or `create` over a tombstone races the source and a
+  new name lands on an object another entry's queued op has yet to take away.
 - **A `meta` op never dirties content.** It writes the attribute to the catalog and queues a `meta`
   row in one transaction, then applies to every staged holder; it never calls `mark_dirty` and never
   touches residency `state`. If it did, every `touch(1)` would schedule a whole-file re-copy of a
@@ -400,9 +432,12 @@ review; where its grain differs from the table above, the table governs.
 - **The queue is entry-keyed, refreshed rather than duplicated, and replayed namespace-ops-first.**
   `due()` sorts namespace before data and Python's stable sort preserves the `id` tiebreak, which
   matters for two namespace ops queued at the same clock value. `drain` repeats the discipline
-  explicitly. Data landing before the tree that holds it forces `materialize_dirs` to invent parents
-  with default modes: the source tree ends up correct in shape and wrong in permissions, and the
-  divergence is invisible to the catalog.
+  explicitly. Data landing on the source before the tree that holds it does not invent that tree: a
+  commit first places each ancestor the source lacks at that ancestor's own target with its catalog
+  mode, looked up by entry (§5), so `materialize_dirs` finds every ancestor present. Inventing parents
+  by path instead leaves the source tree correct in shape and wrong in permissions (or, at a path since
+  reused, carrying another entry's mode), and the divergence is invisible to the catalog. Stage tiers
+  keep `materialize_dirs`, whose paths are logical because stage copies move with the catalog.
 - **After a copy, `changed` detection re-arms rather than settles.** A write racing the commit must
   never mark the holder clean: the residency goes clean only when the stat matches what was copied,
   and open handles have `marked_dirty` reset *before* the stat so a subsequent write re-queues.
@@ -510,7 +545,26 @@ review; where its grain differs from the table above, the table governs.
   inside an already-locked region defeats the sort and reintroduces AB/BA deadlock, which under FUSE
   hangs the mount and needs a forced unmount.
 - `_commit_hop` is called under a lock the caller already holds. Taking the lock inside it deadlocks
-  all three callers.
+  all three callers. When its destination is the source it takes the source mutex below, never a path
+  lock.
+- **One re-entrant source-namespace mutex** (`OverlayEngine._source_lock`) serializes every change to
+  the source's namespace: `_execute_namespace`, `_vacate`'s collect-and-replay, `_purge_source`, and a
+  data commit or a `create` whose destination is the source (placement, copy and recording). `_record`
+  takes it to stat a copy served off the source, so the size it records is read where the object still
+  is. Without it a replay reads a `source_path`, another thread moves or writes the object, and the
+  replay's act lands on a place that no longer holds what it read; a commit's write lands on a place a
+  replay has just moved away from. It spans the whole copy, so a large commit to the source delays
+  every `create`, `mkdir` and `rename` that reaches `_vacate`, and the `release` or `fsync` of a copy
+  served off the source, until it finishes. Lock order: **path locks → source
+  mutex → `_handles_mutex` → SQLite write lock.** Nothing holding it calls `locks.hold`, `_ensure`,
+  `getattr` or `readdir` (replay never takes a path lock; a nested `hold()` inside replay is the AB/BA
+  deadlock above). Nothing acquires it inside `db.transaction()`. It is re-entrant because replay
+  nests: `flush` → `_execute_namespace`, and `_vacate` → `_replay_through` → `_execute_namespace`.
+- **The mutex does not cover user removals.** `unlink` and `rmdir` cancel an entry's queued rows and
+  queue the removal under path locks alone, so one can land inside a replay's act. A replay therefore
+  settles with `Journal.settle_current`, never by id: the removal may have queued its op under the
+  cancelled row's id, and that op must stay queued. Removal racing a replayed `mkdir` that has placed
+  the directory but not yet recorded it is still open; see § *Known open violations*.
 
 ### 11. The engine API contract
 
@@ -569,7 +623,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 449 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 474 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -592,7 +646,8 @@ seed that owns the repair; a cycle that touches the region should either fix it 
 | § | Violation | Seed |
 |---|---|---|
 | 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. | `issues/archive-journaling-and-locking.md` |
-| 5 | Committing data to the source before a queued rename executes **orphans the pre-rename source object**; `truncate` without a handle and the live-stat path also resolve against the logical path. Reproduced. | `issues/deferred-rename-source-orphan.md` |
+| 5 | `truncate` without a handle resolves a source-served file against its logical path while its rename, or an ancestor's, is queued: `ENOENT` on a file that exists. Reproduced. Sizes existing state databases already hold wrong are uncorrected. | `issues/source-path-truncate-and-stat.md` |
+| 5, 10 | A user `rmdir` racing a replayed `mkdir` that has placed the directory but not yet recorded it reads a `NULL` `source_path`, purges the entry and its intent row (the cascade), and the replay's confirm then raises; the source keeps a directory the catalog no longer has. Threaded; reproduced by a single-thread injection, and pre-existing (`141aa86` raises at its settle instead). | `issues/freethreaded-concurrency-stress.md` |
 | 8 | A **second SIGINT settles `detached` without running the rescue**, so node-local dirty data is stranded behind a state that promises it is safe. `umount --detach` is bounded by `drain_timeout` where PLAN says it completes, and an incomplete rescue is never recorded. | `issues/shutdown-rescue-gaps.md` |
 | 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staging copy silently wins over a newer source. | `issues/archive-journaling-and-locking.md` |
 | 2, 8 | The **audit does not exist**: `journal.pending()` has no consumer, `begin_mount` raises rather than recovering, and `sosfs audit` is a stub. The recovery half of §1 is unimplemented. | `issues/audit-command.md` |
@@ -609,8 +664,9 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **449 unit tests in ~5 s serial, ~3.5 s under
-`-n auto`**. Four layers; a `verify:` should use at least one and name the post-condition it asserts:
+The suite is the gate, and it is fast enough to be one: **474 unit tests in ~28 s serial, no faster under
+`-n auto`** (the stateful model is most of it). Four layers; a `verify:` should use at least one and
+name the post-condition it asserts:
 
 - **Static** — `tools/lint.sh`: the ruff selection CI runs, the layering assertion, SPDX headers,
   the version single-source, and the `CLAUDE.md` symlink.

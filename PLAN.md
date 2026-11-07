@@ -199,19 +199,35 @@ physical location explicitly — each entry carries a *committed source path* (d
 state: the path at which the source tier holds its bytes, `NULL` until the source holds a copy
 at all). Adoption sets it to the entry's path; a deferred rename leaves it untouched (the
 source has not moved); committing a rename upstream moves the source object from the committed
-source path to the new path and advances it, rewriting the prefix for every descendant of a
-renamed directory since one source rename relocates the whole subtree; a removal targets it.
-Deferred removals and renames therefore resolve against where the source physically holds the
-data, not where the catalog now says the entry lives — so removing or superseding an entry that
-still carries an uncommitted rename deletes or moves the real source object instead of orphaning it
-at the pre-rename path (the divergence class characterized in `tests/engine/test_replay.py`). The
-committed source path is authoritative over the op log, superseding the earlier
-historical-path-in-`detail` shim for removals and renames. Both write-ordering invariants hold
-unchanged: the source-path update commits in the same transaction as the op it records
-(metadata before acknowledgment), and every source mutation stays bracketed intent → act →
-confirm. Full catalog↔source reconciliation is deliberately *not* adopted on the flush path —
-it remains the audit's job (Phase 10), which reuses the committed source path to move rather
-than re-copy a relocated clean source object.
+source path to the entry's *current target* — its parent's committed source path (or the
+parent's own target) plus its name, not the path the op recorded — and advances it, rewriting the
+prefix for every descendant of a renamed directory since one source rename relocates the whole
+subtree; a chain of queued renames collapses into one move; a removal targets it. A data commit
+to the source writes where the source already holds the entry, else at its target, and records
+that place in the transaction confirming the copy, so a queued rename stays the only thing that
+moves a source object. Replay resolves each entry's current place because the queue is a lossy
+history: removing an entry cancels its rows, so replaying recorded paths would re-create
+ancestors nobody owns and read the kind and mode of paths since reused; a queued `mkdir` creates
+the directory at its target, placing any ancestor the source lacks with that ancestor's own
+catalog mode. No two entries share a physical place: before a new or moved name takes a place,
+the queued ops that still hold it (a removed entry's removal, another entry's pending move) are
+replayed in queue order, as a prefix of the queue, so a parent's `mkdir` or a child's move-out
+always runs first; a directory's removal likewise first replays the queued move or removal of
+anything its source object still holds. A replay acts on, and settles, only the queued row it read:
+row ids are reused, so a row a user op has since run or cancelled, or whose id a newer row took,
+changes nothing, and a removal landing during the act keeps its own queued op. Reading the source
+resolves the same way: the size reported for a file served off the source, live while it is open
+and recorded when it is released, is read at its committed source path. Deferred removals and renames therefore resolve against
+where the source physically holds the data, not where the catalog now says the entry lives — so
+removing or superseding an entry that still carries an uncommitted rename deletes or moves the
+real source object instead of orphaning it at the pre-rename path (the divergence classes
+characterized in `tests/engine/test_replay.py`). The committed source path is authoritative over
+the op log, superseding the earlier historical-path-in-`detail` shim; the recorded path stays
+for the audit only. Both write-ordering invariants hold unchanged: the source-path update
+commits in the same transaction as the op it records (metadata before acknowledgment), and every
+source mutation stays bracketed intent → act → confirm. Full catalog↔source reconciliation is
+deliberately *not* adopted on the flush path — it remains the audit's job (Phase 10), which
+reuses the committed source path to move rather than re-copy a relocated clean source object.
 
 **Eviction.** Per-tier quota on bytes and file count, with high/low watermarks (default
 95%/85%) to avoid thrash. When the high watermark is crossed, the eviction manager removes
@@ -535,15 +551,46 @@ Risks and mitigations
   be lost with them; exposure is bounded by each boundary's write-back policy and reported
   precisely by the audit. Tighten `delay`/`max_interval` (or use `passthrough`) where the loss
   window matters more than write amplification.
-* **Write-back namespace replay under path mutation** *(resolved, Phase 8)* — the write-back
-  queue is entry-keyed, so a deferred namespace op's target can drift from where the source
-  physically holds the bytes while a rename is queued but uncommitted. Each entry now tracks
-  its committed source path, and deferred removals/renames resolve against it (see Write-back →
-  Deferred-op replay), so removing or superseding an entry that still carries an uncommitted
-  rename no longer orphans its source copy at the pre-rename path. The hypothesis model test
-  exercises the full op mix with no skipped window (`tests/engine/test_model.py`) and
-  `tests/engine/test_replay.py` guards the specific divergence classes; full catalog↔source
-  reconciliation remains the audit's job (Phase 10), reusing the committed source path.
+* **Write-back namespace replay under path mutation** *(open in part: the data-commit orphan, the
+  replay family, stale scheduler rows and the live stat are closed; `truncate` without a handle, a
+  removal racing a replayed `mkdir`, and the thread-level test stay open)* —
+  the write-back queue is entry-keyed, so a deferred namespace op's target can drift from where
+  the source physically holds the bytes while a rename is queued but uncommitted. Phase 8 added
+  the committed source path and resolved deferred removals and renames against it, and recorded
+  the class as resolved on the strength of a model whose only convergence checkpoint was
+  `flush()`. It was not resolved: a data commit during the lag (an `fsync` under the commit
+  policy, the eviction manager, a scheduler poll that reached the data row before the rename row)
+  wrote at the logical path and orphaned the pre-rename object, which the next mount adopted as
+  live data; `flush()` replayed queued ops at recorded paths that later ops had reused or removed
+  (`EACCES`, a stray directory, `ENOTEMPTY` on re-creating a removed directory or removing one
+  whose moved-out child still sat in it); and a scheduler snapshot made stale by a user op still
+  ran. Those are closed (see Write-back → Deferred-op replay): replay resolves each entry's
+  current target, a data commit to the source writes where the source holds the entry, the queued
+  ops that hold a place replay before a new name takes it, one source-namespace mutex serializes
+  every change to the source's namespace, and a stale row changes nothing. The mutex is held for a
+  whole copy to the source, and `_record` takes it to stat a copy served off the source, so a large
+  source commit delays every `create`, `mkdir` and `rename` that reaches `_vacate`, and the
+  `release` or `fsync` of a source-served copy, until it finishes (`AGENTS.md` § 10;
+  `issues/source-commit-staged-publish.md` proposes narrowing a commit's hold). A replay settles only
+  the row it read, so a user removal landing during its act (removals take no source mutex) keeps
+  the op it queued under the cancelled row's id, whichever of the scheduler, `flush`, a drain or a
+  vacate ran the replay; and a file whose bytes sit off its logical path reports the size its
+  object holds (the live stat behind `getattr` and `_record` reads the committed source path).
+  `tests/engine/test_replay.py` guards each class deterministically, the concurrent ones by
+  injecting the interleaving on one thread, and the hypothesis model
+  (`tests/engine/test_model.py`) commits single entries, polls the scheduler, and checks
+  convergence after draining by polls as well as at `flush()`. Still open: `truncate` without a
+  handle resolves a source-served file at its logical path while its rename or an ancestor's is
+  queued (`ENOENT` on a file that exists), and sizes existing state databases already hold wrong —
+  `issues/source-path-truncate-and-stat.md`. A user `rmdir` landing while a replayed `mkdir` has
+  placed its directory but not yet recorded it purges the entry under the replay, whose confirm then
+  raises and leaves the directory on the source (pre-existing, reproduced by injection); queue-row
+  identity is by value, not a unique key, so a reused entry id with an identical row at an
+  identical clock reading would pass as the same row. Both, and the thread-level test of the mutex,
+  are `issues/freethreaded-concurrency-stress.md` (R7, R9): the mutex is argued, and the races are
+  exercised single-threaded only. Full catalog↔source
+  reconciliation, including recovery of orphans already on a source, remains the audit's job
+  (Phase 10), reusing the committed source path.
 
 
 Phase outline

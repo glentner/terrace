@@ -1,0 +1,47 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: deferred-rename-source-orphan
+escaped_from: pre-factory
+planned: {date: '2026-11-06', phases: 5}
+landed: null
+open: null
+runs:
+- {step: feature, start: '2026-11-05T21:39:10-05:00', stop: '2026-11-05T21:48:54-05:00', seconds: 584, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-05T21:49:16-05:00', stop: '2026-11-05T22:21:07-05:00', seconds: 1911, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-06T12:24:37-05:00', stop: '2026-11-06T13:25:09-05:00', seconds: 3632, end: gate, agent: null}
+- {step: build, start: '2026-11-06T14:55:00-05:00', stop: '2026-11-06T14:55:11-05:00', seconds: 11, end: error, agent: null}
+- {step: 'build:P1', start: '2026-11-06T14:55:11-05:00', stop: '2026-11-06T15:03:40-05:00', seconds: 509, end: done, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-06T15:03:40-05:00', stop: '2026-11-06T15:11:12-05:00', seconds: 452, end: done, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-06T15:11:12-05:00', stop: '2026-11-06T15:38:05-05:00', seconds: 1613, end: done, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-06T15:38:05-05:00', stop: '2026-11-06T15:46:35-05:00', seconds: 510, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-06T15:53:45-05:00', stop: '2026-11-06T16:02:38-05:00', seconds: 533, end: done, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-11-06T16:02:38-05:00', stop: '2026-11-06T16:13:10-05:00', seconds: 632, end: done, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-11-06T16:21:52-05:00', stop: '2026-11-06T16:24:21-05:00', seconds: 149, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-06T16:24:21-05:00', stop: '2026-11-06T16:54:26-05:00', seconds: 1805, end: gate, agent: claude-opus-5-5}
+- {step: 'build:remediation-1', start: '2026-11-06T17:28:47-05:00', stop: '2026-11-06T17:57:24-05:00', seconds: 1717, end: done, agent: claude-opus-5-5}
+- {step: 'build:remediation-1', start: '2026-11-06T18:04:51-05:00', stop: '2026-11-06T18:06:42-05:00', seconds: 111, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-06T18:06:42-05:00', stop: '2026-11-06T18:34:50-05:00', seconds: 1688, end: done, agent: claude-opus-5-5}
+- {step: 'build:remediation-2', start: '2026-11-06T18:34:50-05:00', stop: '2026-11-06T18:44:36-05:00', seconds: 586, end: done, agent: claude-opus-5-5}
+- {step: 'build:remediation-2', start: '2026-11-06T18:51:44-05:00', stop: '2026-11-06T18:53:30-05:00', seconds: 106, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-06T18:53:30-05:00', stop: '2026-11-06T19:08:46-05:00', seconds: 916, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-06T20:10:37-05:00', stop: '2026-11-06T20:10:46-05:00', seconds: 9, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-06'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 2, low: 1}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-06'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 3
+  date: '2026-11-06'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+# Landing override (2026-11-06): the last review (cycle 3) is changes-requested on one LOW doc
+# finding, spot-fixed in 73c3786. Geoffrey explicitly overrode the verdict and the staleness gate
+# for that line (REVIEW.md, "Geoffrey's rulings on the cycle 3 escalation"). `metrics.py landed`
+# refuses an unapproved last review and has no override flag, so the foreman copied the live
+# record here unchanged instead of writing a false approval.

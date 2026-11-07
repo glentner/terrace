@@ -58,6 +58,31 @@ now reproduced by the model itself, so this cycle takes it too. Until it lands, 
 only failure the landed toolchain repair accepts, in CI (R9) and in the Mac's `verify` (R2, R8); see
 `spec/toolchain-repair/GOAL.md`.
 
+### `truncate` and the live stat resolve a source-served file at its logical path
+
+**Seed:** [`issues/source-path-truncate-and-stat.md`](issues/source-path-truncate-and-stat.md) · `fix` · appetite small
+
+Reproduced. The siblings the namespace-replay fix split out at its GOAL gate (2026-11-05): on a file
+served off the source while its rename or an ancestor's is queued, `truncate` without a handle opens
+the logical path and raises `ENOENT` on a file that exists. The wrong-size sibling (`_record` and
+`getattr`'s live stat) was closed in that cycle's first review remediation, which leaves a
+`bypass_size` test to pin it. The fix is small and sits in regions that cycle just opened: resolve
+through `source_path` the way `open` already does. Also owns the sizes existing state databases
+already hold wrong, with the audit as their likely home. Placed directly after the namespace-replay
+fix, while that region is fresh.
+
+### The model rarely reaches the scheduler and eviction commit routes
+
+**Seed:** [`issues/model-commit-route-reach.md`](issues/model-commit-route-reach.md) · `test` · appetite small
+
+A coverage observation from the namespace-replay fix's first review: over the fixed CI draw the
+stateful model committed to the source through a scheduler poll's data row zero times, and through the
+eviction manager zero times, though both ops are in its rule mix and fire about two thousand times each.
+`tests/engine/test_replay.py` pins both routes deterministically, so nothing is unguarded today; the
+model is the net for the next defect on those routes, and it is not reaching them. Placed after the
+truncate fix, which decides whether the model gains a source-served configuration and edits the same
+class.
+
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
@@ -243,6 +268,18 @@ filed in an archive bucket it kept losing to work that was visible. Placed direc
 whose per-shard pulls are the heaviest on-demand transfers the product will make. Shaping starts by
 establishing which on-demand path actually queues, because the synchronous promote-on-open runs on
 the calling thread and never enters the pool.
+
+### Stage a source commit outside the source mutex
+
+**Seed:** [`issues/source-commit-staged-publish.md`](issues/source-commit-staged-publish.md) · `feature` · appetite big
+
+The namespace-replay fix serializes every change to the source's namespace behind one mutex, and a
+data commit to the source holds it for the whole copy, so while a large file commits, every FUSE
+`create`, `mkdir` and `rename` that reaches `_vacate`, and every `fsync` under the commit policy,
+waits for it. Accepted as shipped at that cycle's plan sign-off (2026-11-06) and seeded here: stage
+the bytes outside the mutex and publish them inside it. That changes the `Tier` protocol in
+`posix.py` and `s3.py`, and S3 has no cheap publish (a temp key plus a server-side copy). Placed
+beside the priority lane, the other foreground-latency fix in the transfer path.
 
 ### `sosfs audit` — reconcile the state database against the tiers
 
