@@ -30,18 +30,6 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### `open` and promotion read the committed source path outside the source lock
-
-**Seed:** [`issues/source-served-open-race.md`](issues/source-served-open-race.md) · `fix` · appetite small
-
-Found on 2026-11-06 while planning the handle-less `truncate` fix, which landed on 2026-11-08
-(`spec/source-path-truncate-and-stat/`). A replay that commits a queued rename
-between `open` resolving an entry and opening its copy makes `open` raise `ENOENT` on a source-served
-file that exists. A replay landing before a promotion off the source makes the promotion's copy fail
-the same way. Both are reproduced by injection, and both fail loudly. `truncate` closes the window
-by looking the entry up again under the source lock. A promotion is a whole-file copy, so the same
-remedy has a cost that shaping must weigh. Also holds a residual gap in that lookup's identity check.
-
 ### A handle-less `truncate` records its cut under a path an ancestor's rename has just moved
 
 **Seed:** [`issues/truncate-recording-after-ancestor-rename.md`](issues/truncate-recording-after-ancestor-rename.md) · `fix` · appetite small
@@ -58,11 +46,13 @@ same lookup the cut makes.
 
 **Seed:** [`issues/entry-identity-token.md`](issues/entry-identity-token.md) · `fix` · appetite big
 
-Recorded by the handle-less `truncate` fix's plan (2026-11-06) and re-homed here on 2026-11-08 by
-`source-served-open-race`, whose seed held it. Ids are reused, so a file that takes a purged entry's id
-and is carried onto the path by a directory rename passes the check the cut, `open` and a promotion off
-the source make under the source lock, and is cut, opened or promoted. Silent, reproduced by injection, and reachable only through a rename of an ancestor during
-the call. Closing it needs an identity token, a schema change with no migration path today.
+Recorded by the handle-less `truncate` fix's plan (2026-11-06) and re-homed here by
+`source-served-open-race` (landed 2026-11-08, `spec/source-served-open-race/`), whose seed held it.
+Ids are reused, so a file that takes a purged entry's id and is carried onto the path by a directory
+rename passes the check the cut, `open` and a promotion off the source make under the source lock,
+and is cut, opened or promoted. Silent, reproduced by injection, and reachable only through a rename
+of an ancestor during the call. Closing it needs an identity token, a schema change with no
+migration path today.
 
 ### The model rarely reaches the scheduler and eviction commit routes
 

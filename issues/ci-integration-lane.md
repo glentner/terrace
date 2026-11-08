@@ -45,7 +45,7 @@ sufficient — it makes the region observable, and each defect still needs the c
 rescue cycle owes its own; the orphan's mount-level case, which its cycle left at engine level, is
 this cycle's (R7).
 
-`PLAN.md:497` states that the FUSE integration tests run in "Linux CI". They run nowhere. That claim
+`PLAN.md:513` states that the FUSE integration tests run in "Linux CI". They run nowhere. That claim
 is the reason a reader of the design believes this surface is covered.
 
 **The obvious gate is a trap, and it was measured.** On a host with no `/dev/fuse` and no MinIO —
@@ -107,7 +107,8 @@ Draft R-IDs, to be firmed up at promotion.
   least 10 passed. Observable only on the runner; the maintainer's macOS host cannot check it.
 - **R2** — If every integration test skipped, then the job shall fail. The gate asserts the pass count
   from the pytest summary line, not the process exit status, because `-m integration` exits 0 with
-  `10 skipped, 449 deselected`.
+  `10 skipped, 449 deselected` (`10 skipped, 521 deselected`, exit 0, measured on macOS at `5b8dcaf`,
+  2026-11-08).
 - **R3** — The MinIO half shall be satisfied by the endpoint and credentials `docker-compose.yml`
   already publishes, with no edit to `tests/tier/test_s3_integration.py` and no new
   `SOSFS_TEST_MINIO_*` value invented by the workflow.
@@ -134,11 +135,19 @@ Draft R-IDs, to be firmed up at promotion.
   `stat` reports the cut size, and that after the queue drains the source holds the file only at its
   new path, at that size. That cycle's GOAL left mount-level coverage out of scope; its engine-level
   regressions are in `tests/engine/test_replay.py`.
+- **R9** *(added 2026-11-08, retiring `source-served-open-race`)* — Where the FUSE half runs,
+  the lane shall include a mount-level case that opens and reads a source-served file whose rename, or
+  an ancestor's, is still queued, once served off the source and once promoted to a faster tier on
+  open, and shall assert that the reads return the file's bytes and that after the queue drains the
+  source holds the file only at its new path. That cycle's GOAL left mount-level coverage out of scope;
+  its engine-level regressions, including the replay landing mid-call, which a mount cannot schedule,
+  are in `tests/engine/test_replay.py`.
 
 ## Notes
 
 - Related: `spec/deferred-rename-source-orphan/` (landed; its mount-level case is R7 here),
-  `spec/source-path-truncate-and-stat/` (landed; its mount-level case is R8 here) and
+  `spec/source-path-truncate-and-stat/` (landed; its mount-level case is R8 here),
+  `spec/source-served-open-race/` (landed; its mount-level case is R9 here) and
   `issues/shutdown-rescue-gaps.md` (its defect lives in the surface this lane covers, and it owes the
   case its own tests do not yet contain);
   `issues/archive-tier-test-coverage.md` and `issues/crash-fault-injection-suite.md` (both add tests
@@ -146,7 +155,7 @@ Draft R-IDs, to be firmed up at promotion.
   test anywhere, and a test for it likely needs a real mount); `issues/plan-md-reconciliation.md`
   (owns `PLAN.md`'s inaccuracies that no other cycle touches — this one's "Linux CI" claim is fixed
   here instead, in this cycle's own diff, per the same-commit rule). `PLAN.md` § *Testing strategy*
-  (487–509); `AGENTS.md` § *Verification*; `AGENTS.md` § *Invariants* § *Conventions*.
+  (503–525); `AGENTS.md` § *Verification*; `AGENTS.md` § *Invariants* § *Conventions*.
 - Open — **blocking or reporting.** A blocking lane is the only kind that prevents the regression it
   exists to catch, and it is also the one that stops all work when a MinIO image tag moves or a runner
   image drops `/dev/fuse`. A reporting lane never blocks a merge and is therefore ignorable, which is

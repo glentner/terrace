@@ -102,4 +102,13 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   and § 10; [`issues/transfer-priority-lane.md`](transfer-priority-lane.md) (foreground latency in the
   transfer pool); [`issues/audit-command.md`](audit-command.md) (orphan recovery);
   [`issues/ci-integration-lane.md`](ci-integration-lane.md) (where an S3 publish would be exercised).
+- *Added 2026-11-08, retiring `source-served-open-race`:* a promotion off the source now holds the
+  mutex for its whole copy too, as the handle-less `truncate`'s promotion already did (`AGENTS.md`
+  § *Invariants* § 10; `spec/source-served-open-race/PLAN.md` deviation row 2, which names narrowing
+  that hold as this seed's question). On an S3 or archive source the copy is the whole object. Staging
+  and publishing does not apply to a read, so shaping decides whether the promotion's hold is in scope
+  here; that plan rejected copying out of a pinned, opened source object because `transfer.copy` would
+  have to take one, and S3 and archive sources buffer the whole object anyway.
+- 2026-11-08: the `overlay.py:835-840` cite under Problem holds at `0e6d14c`; at `5b8dcaf` it is
+  `src/sosfs/engine/overlay.py:900-905`.
 - Found by: `deferred-rename-source-orphan`'s plan (D4), seeded in its P5.

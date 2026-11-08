@@ -78,7 +78,7 @@ the tree that cycle landed.
   thread may hold `lock(child_old_path)`. The child's `transfer.copy` then fails with `LookupError`
   (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
   - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
-    `overlay.py` one.
+    `overlay.py` one, to `:427` at `5b8dcaf`.
 
 *Added 2026-11-06 by `deferred-rename-source-orphan`, review cycle 1:* user removals take no source
 mutex. `unlink` and `rmdir` cancel an entry's queued rows and queue the removal under path locks alone
@@ -120,6 +120,11 @@ path locks do not cover (above).
     the file is opened and written there, and the ancestor is renamed back. The promotion copies the
     source's bytes over the dirty stage copy and records both residencies clean, so the write is gone
     once the queue drains. Reproduced by injection, identically at `bab1e83` and `5e0d997`.
+  - 2026-11-08, retiring `source-served-open-race`: the same window also fails loudly. A rename of an
+    ancestor landing after `open`'s lookup and before `_serve` reads `fastest_copy` makes the call raise
+    `EngineError: No resident copy of …` (that cycle's review cycle 2, F1; identical at its base). The
+    shipped `open` and `_serve` docstrings cite this seed for it; the escape itself is
+    `issues/engine-error-mapping.md`'s.
 
 *Added 2026-11-08 by `source-served-open-race`, review cycle 1:* an instance of R7's "no exception",
 out of that cycle's scope (it touched none of this code).
