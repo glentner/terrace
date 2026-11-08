@@ -67,7 +67,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 502 tests, ~30 s — must pass before every commit
+uv run pytest -m unit                            # 521 tests, ~30 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; no faster, test_model dominates
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -108,7 +108,7 @@ that way proves nothing; assert a pass count.
 | `src/sosfs/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/sosfs/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/sosfs/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 512 tests (502 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 42 files, 531 tests (521 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -133,7 +133,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 164 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 183 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -221,7 +221,7 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 | `engine/overlay.py` — `_commit_hop`, `commit_upstream`, `commit_to_shared`, `evict_copy` | The sole clean-transition point and the only code that destroys bytes on purpose. A wrong edit is silent data loss, not a crash. |
 | `engine/overlay.py` — `write`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack. Reordering two statements is undetectable in review and unrecoverable in production. |
 | `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge_source`, `_vacate`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
-| `engine/overlay.py` — `open`, `_serve`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, stating the bytes a handle serves, and cutting them without a handle), `bypass_size`, quota admission. |
+| `engine/overlay.py` — `open`, `_serve`, `_lookup_again`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, promoting off the source, stating the bytes a handle serves, and cutting them without a handle) and the lookup under the source lock that decides it, `bypass_size`, quota admission. |
 | `engine/transfer.py` — `copy` | The single place an intent bracket wraps a real byte move, and where tier counters are adjusted. |
 | `engine/writeback.py` — `deadline`, `boundary_policies` | The loss window at every boundary is these fifteen lines. |
 | `engine/writeback.py` — `due`, `poll`, `on_scan`, `on_commit` | The scheduler's snapshot and replay route: rows scanned in one state run in the next, with user ops in between, so each must be re-checked as the row it was read as. |
@@ -243,7 +243,7 @@ review; where its grain differs from the table above, the table governs.
 | Region | Why |
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
-| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge_source`/`_vacate`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places and reports an entry's bytes. Failures here are silent, not loud. |
+| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge_source`/`_vacate`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
 | `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`; `state/catalog.py` — `holder`/`advance_source_path` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
@@ -395,9 +395,17 @@ review; where its grain differs from the table above, the table governs.
 - Reading the source resolves through it too: `open` serves a source-held copy from `source_path`,
   `getattr`'s live stat and `_record` stat it there (`_stat_held`), and `truncate` without a handle cuts
   it there, so a file whose bytes sit off its logical path (inside a renamed directory, or behind its own
-  queued rename) reports the size its object holds and is cut where that object is. `_stat_held` and the
-  cut resolve the place through one rule, `_held_path`. `_record` reads the entry again under the source
-  lock (§ 10), so a replay cannot move the object between the read and the stat. The handle-less
+  queued rename) reports the size its object holds and is cut where that object is. `open`, a promotion,
+  `_stat_held` and the cut resolve the place through one rule, `_held_path`. `_record` reads the entry
+  again under the source lock (§ 10), so a replay cannot move the object between the read and the stat.
+  `open` of a copy served off the source, and a promotion off the source (`_serve`, reached from `open`
+  or a handle-less `truncate`), take the source lock, look the entry up again at its path
+  (`_lookup_again`: path, id and kind, raising `ENOENT` when it fails), and open the object at the place
+  that entry records before they release the lock: the direct open itself, or the promotion's whole
+  copy. A replay that lands after `_ensure` and moves the object leaves the call at the object's new
+  place, not at the old one or another entry's object, short of the reused id below. A copy served off
+  a stage, and a promotion from one stage to another, are opened at the logical path without the source
+  lock: no replay moves a stage copy. The handle-less
   `truncate` takes the source lock for every cut, whatever copy serves, and decides under it and its
   path lock, once, everything the cut and its recording use: the entry at its path (path and id), its
   kind, the serving copy (promoting first, as `open` does), the held place and the path its catalog
@@ -406,7 +414,7 @@ review; where its grain differs from the table above, the table governs.
   through a renamed ancestor is the one marked dirty and cut. The cut's open never follows a symbolic
   link at the file itself, the last component of the held place (`O_NOFOLLOW`). The id check cannot
   tell the entry from a file that took its id after a purge, since ids are reused; such a file carried
-  onto the path is cut. A rename of an ancestor that has already passed its `_vacate` when the cut
+  onto the path is cut, and `open` would open or promote it the same way. A rename of an ancestor that has already passed its `_vacate` when the cut
   takes the lock can still move the entry before the cut is recorded: the recording's catalog writes,
   keyed by the old path, then match no row, while its stage-counter write, keyed by tier, lands. Both
   are in § *Known open violations*.
@@ -564,15 +572,20 @@ review; where its grain differs from the table above, the table governs.
 - **One re-entrant source-namespace mutex** (`OverlayEngine._source_lock`) serializes every change to
   the source's namespace: `_execute_namespace`, `_vacate`'s collect-and-replay, `_purge_source`, and a
   data commit or a `create` whose destination is the source (placement, copy and recording). `_record`
-  takes it to stat a copy served off the source, and `truncate` without a handle takes it for every cut,
-  whatever copy serves, from its decision through its recording, so the size recorded is read, and the
-  cut decided and made, while no replay or commit can move the object. Without it a replay reads a
+  takes it to stat a copy served off the source, `open` to look up and open a copy served off the
+  source, a promotion off the source from its lookup through its whole copy, and `truncate` without a
+  handle for every cut, whatever copy serves, from its decision through its recording, so the size
+  recorded is read, the place opened or copied from is decided and read, and the cut decided and made,
+  while no replay or commit can move the object. Without it a replay reads a
   `source_path`, another thread moves or writes the object, and the replay's act lands on a place that
   no longer holds what it read; a commit's write lands on a place a replay has just moved away from. It
   spans the whole copy, so a large commit to the source delays every `create`, `mkdir` and `rename`
-  that reaches `_vacate`, the `release` or `fsync` of a copy served off the source, and every
-  handle-less `truncate`, until it finishes. A handle-less `truncate` that promotes holds it in turn for
-  that whole-file copy (as large as the stage admits), and delays the same calls. Lock order: **path locks → source
+  that reaches `_vacate`, the `open`, `release` or `fsync` of a copy served off the source, every
+  promotion off the source, and every handle-less `truncate`, until it finishes. A promotion off the
+  source, on `open` or a handle-less `truncate`, holds it in turn for that whole-file copy, and delays
+  the same calls. On a passthrough source a promotion's copy is as large as the stage admits; on an S3
+  or archive source it is the whole object, which a stage takes whatever its `bypass_size` or quota.
+  Lock order: **path locks → source
   mutex → `_handles_mutex` → SQLite write lock.** Nothing holding it calls `locks.hold`, `_ensure`,
   `getattr` or `readdir` (replay never takes a path lock; a nested `hold()` inside replay is the AB/BA
   deadlock above). Nothing acquires it inside `db.transaction()`. It is re-entrant because replay
@@ -592,8 +605,9 @@ review; where its grain differs from the table above, the table governs.
 - **Only cataloged entries transfer.** A copy of an unknown path would put bytes in a managed location
   with no residency row, which the audit reports as unaccounted and may delete.
 - **Promotion runs on the calling thread, under the file lock.** A promote-on-open of a large file
-  holds the path lock for the whole copy. That is intended — synchronous whole-file promote — but it
-  means `open` latency is a copy.
+  holds the path lock for the whole copy, and a promotion off the source holds the source mutex for it
+  too (§ 10). That is intended — synchronous whole-file promote — but it means `open` latency is a copy,
+  and a promotion off the source delays every call that waits on the source mutex.
 - Paths are overlay-absolute strings; all time comes from the injectable clock.
 
 ### Conventions (same-commit rules)
@@ -640,7 +654,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 502 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 521 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -664,9 +678,8 @@ seed that owns the repair; a cycle that touches the region should either fix it 
 |---|---|---|
 | 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. | `issues/archive-journaling-and-locking.md` |
 | 5 | Sizes a state database written before `fe26962` may hold wrong for a copy held on the source: `entry.size` and the source residency's `size`. The residency heals on the next `release` of any handle on that copy; `entry.size` heals only on a write or a `truncate`, so `getattr` and placement read the stale figure meanwhile. Staged-tier quota counters are unaffected. | `issues/audit-command.md` |
-| 5, 10 | The handle-less `truncate` tells its entry from another only by path, id and kind, and ids are reused. If, while the cut waits for the source lock, the entry is removed and purged, a new file elsewhere takes its id, and a directory rename carries that file onto the path, the call cuts the new file and returns success. Silent; reproduced by injection. A symbolic link or a directory that takes the id is refused with `ENOENT`. Closing it needs an identity token, a schema change. | `issues/source-served-open-race.md` |
-| 5, 7, 10 | The handle-less `truncate` decides under its path lock and the source lock the path its catalog writes are keyed by, but a rename of an ancestor that has already passed its `_vacate` when the cut takes the source lock can still commit its catalog move before the cut is recorded. The recording's catalog writes, keyed by the old path, then match no row, so `entry.size` and the cut copy's residency `size` keep the old figure; its stage-counter write (`adjust_usage`), keyed by tier, lands, so the stage's counter moves while the residency does not. Eviction subtracts the residency's figure and leaves the counter off by the cut's size change, negative after a cut that shrank the copy (§ 7). A read-only open and release heals the residency `size` but moves the counter by the same change again; `entry.size` heals only on another write or `truncate`. Landing earlier, the rename makes `_serve` raise `EngineError`, a promotion raise `LookupError` with its `promote` intent unresolved and the stage bytes held under no residency, `mark_dirty` raise `LookupError`, or the open raise `ENOENT`. Silent in the recording case; reproduced by an injected rename, and pre-existing (`0e6d14c`). | `issues/truncate-recording-after-ancestor-rename.md` |
-| 5, 10 | `open` and a promotion off the source (`_serve`) read `source_path` from the entry `_ensure` returned, outside the source lock: a replay landing in between moves the object, and the call raises `ENOENT` or a `TierError` on a file that exists. Loud, never a wrong object; reproduced by injection, and pre-existing. | `issues/source-served-open-race.md` |
+| 5, 10 | The handle-less `truncate`, the `open` of a copy served off the source and a promotion off the source each tell their entry from another only by path, id and kind under the source lock, and ids are reused. If, while the call waits for the source lock, the entry is removed and purged, a new file elsewhere takes its id, and a directory rename carries that file onto the path, the cut cuts the new file and returns success, and `open` returns a handle on its bytes or promotes them. Silent; reproduced by injection, for the cut and for `open`. Every route needs a rename of an ancestor during the call. A symbolic link or a directory that takes the id is refused with `ENOENT`. Closing it needs an identity token, a schema change. | `issues/entry-identity-token.md` |
+| 5, 7, 10 | The handle-less `truncate` decides under its path lock and the source lock the path its catalog writes are keyed by, but a rename of an ancestor that has already passed its `_vacate` when the cut takes the source lock can still commit its catalog move before the cut is recorded. The recording's catalog writes, keyed by the old path, then match no row, so `entry.size` and the cut copy's residency `size` keep the old figure; its stage-counter write (`adjust_usage`), keyed by tier, lands, so the stage's counter moves while the residency does not. Eviction subtracts the residency's figure and leaves the counter off by the cut's size change, negative after a cut that shrank the copy (§ 7). A read-only open and release heals the residency `size` but moves the counter by the same change again; `entry.size` heals only on another write or `truncate`. Landing earlier, the rename makes `_serve` raise `EngineError`, its lookup under the source lock raise `ENOENT`, a promotion raise `LookupError` with its `promote` intent unresolved and the stage bytes held under no residency, `mark_dirty` raise `LookupError`, or the open raise `ENOENT`. Silent in the recording case; reproduced by an injected rename, and pre-existing (`0e6d14c`). | `issues/truncate-recording-after-ancestor-rename.md` |
 | 5, 10 | A user `rmdir` racing a replayed `mkdir` that has placed the directory but not yet recorded it reads a `NULL` `source_path`, purges the entry and its intent row (the cascade), and the replay's confirm then raises; the source keeps a directory the catalog no longer has. Threaded; reproduced by a single-thread injection, and pre-existing (`141aa86` raises at its settle instead). | `issues/freethreaded-concurrency-stress.md` |
 | 8 | A **second SIGINT settles `detached` without running the rescue**, so node-local dirty data is stranded behind a state that promises it is safe. `umount --detach` is bounded by `drain_timeout` where PLAN says it completes, and an incomplete rescue is never recorded. | `issues/shutdown-rescue-gaps.md` |
 | 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staging copy silently wins over a newer source. | `issues/archive-journaling-and-locking.md` |
@@ -684,7 +697,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **502 unit tests in ~30 s serial, no faster under
+The suite is the gate, and it is fast enough to be one: **521 unit tests in ~30 s serial, no faster under
 `-n auto`** (the stateful model is most of it). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 

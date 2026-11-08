@@ -1,0 +1,34 @@
+# Hand-copied by the publish step (2026-11-08) from the live record in the cycle worktree's git dir,
+# unchanged below this comment. `metrics.py landed` refuses an unapproved last review and has no
+# override flag: the last review (cycle 2) is changes-requested on F1 (LOW, records), closed by the
+# docstring-and-comment spot fix 7858b6e with no new review, under Geoffrey's explicit override of
+# the verdict and of the staleness gate for that fix (REVIEW.md, "Geoffrey's rulings on the cycle 4
+# escalation"). So `landed` stays null rather than recording a false approval, and the publish run
+# was not clocked (no `open` run for it).
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: source-served-open-race
+escaped_from: pre-factory
+planned: {date: '2026-11-08', phases: 3}
+landed: null
+open: null
+runs:
+- {step: feature, start: '2026-11-08T00:58:32-05:00', stop: '2026-11-08T01:04:34-05:00', seconds: 362, end: question, agent: claude-opus-5-5}
+- {step: feature, start: '2026-11-08T11:45:50-05:00', stop: '2026-11-08T11:46:22-05:00', seconds: 32, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-08T11:46:41-05:00', stop: '2026-11-08T12:33:57-05:00', seconds: 2836, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T12:34:16-05:00', stop: '2026-11-08T12:45:55-05:00', seconds: 699, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T12:45:55-05:00', stop: '2026-11-08T13:06:50-05:00', seconds: 1255, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-08T13:06:51-05:00', stop: '2026-11-08T13:33:57-05:00', seconds: 1626, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T13:33:57-05:00', stop: '2026-11-08T13:38:07-05:00', seconds: 250, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-08T13:47:09-05:00', stop: '2026-11-08T14:16:31-05:00', seconds: 1762, end: question, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T16:55:31-05:00', stop: '2026-11-08T17:02:26-05:00', seconds: 415, end: gate, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-08'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 0, low: 0}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-08'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0

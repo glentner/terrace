@@ -37,6 +37,15 @@ recorded when it was queued. The classes guarded here:
   copy serves, and decides under it the entry at its path, its kind and the serving copy, which may be
   a faster one taken during the wait; it refuses a non-file or another entry found at the path, and
   never follows a symbolic link at the file itself (the last path component);
+* a file served off the source whose object a replay moves after `open` found its entry is opened, or
+  promoted to a faster tier, where the replay left the object. The open of a copy served off the source and
+  a promotion off the source look the entry up again under the source lock and open the object before
+  releasing it, so neither reads the old place or another entry's object moved onto it, short of a file
+  that took the entry's id after a purge (ids are reused) and was carried onto the path. The lookup under the
+  source lock raises ENOENT when the path then holds no entry, another entry, or a non-file; a rename or
+  removal landing before it is otherwise outside what `open` guarantees
+  (`issues/freethreaded-concurrency-stress.md`). A copy served off a stage, and a promotion from one, take no
+  source lock;
 * a rename row's tombstone purge leaves another entry's tombstone and queued removal alone;
 * a directory whose target lies inside its own source object moves only once the entries placed
   there have moved out.
@@ -1302,4 +1311,411 @@ def test_truncate_without_a_handle_counts_the_stage_copy_it_cuts(tmp_path: Path,
     assert tree(root) == {'data': 'DIR', 'data/s.txt': b'12'}
     assert engine.evict_copy('/data/s.txt', 'scratch')
     assert dataclasses.astuple(engine.registry.usage('scratch')) == (0, 0)    # nothing held, nothing counted
+    assert_converged(engine)
+
+
+# -- open finds a source-served file where a replay moved it ---------------------------------------------------
+
+class AfterLookup:
+    """
+    Wraps the engine's `_ensure` for one path. The first time the test's thread looks that path up, another thread
+    runs `action` to completion once the lookup returns: a replay landing after `open` found its entry and before
+    it opens or promotes the file. The action's exception, if any, is raised in the test's thread, and `ran` is set
+    only on success.
+    """
+
+    def __init__(self, engine: OverlayEngine, path: str, action) -> None:
+        self.engine, self.path, self.action = engine, path, action
+        self.real, self.caller = engine._ensure, threading.get_ident()
+        self.started, self.ran, self.error = False, False, None
+        engine._ensure = self
+
+    def run(self) -> None:
+        try:
+            self.action()
+        except BaseException as error:                       # raised again in the test's thread
+            self.error = error
+
+    def __call__(self, path: str):
+        entry = self.real(path)
+        if not self.started and threading.get_ident() == self.caller and path == self.path:
+            self.started = True
+            del self.engine._ensure                          # once: the engine's own method again
+            helper = threading.Thread(target=self.run)
+            helper.start()
+            helper.join()
+            if self.error is not None:
+                raise self.error
+            self.ran = True
+        return entry
+
+
+def assert_reads(engine: OverlayEngine, path: str, tier: str, data: bytes) -> None:
+    """A fresh handle on `path` is served from `tier` and reads `data`."""
+    handle = engine.open(path)
+    try:
+        assert handle.tier == tier
+        assert engine.read(handle, len(data) + 1, 0) == data
+    finally:
+        engine.release(handle)
+
+
+def swap_onto(engine: OverlayEngine, old: str, new: str):
+    """An action: rename `old` onto `new` (its vacate runs the queued rows holding that place), then flush."""
+    def action() -> None:
+        engine.rename(old, new)
+        engine.flush()
+    return action
+
+
+def test_open_of_a_source_served_file_after_a_replay_commits_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """A replay of the file's own rename after the lookup leaves the open at the object's new place."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')                  # deferred: the source still holds /big.bin
+    after = AfterLookup(engine, '/moved.bin', engine.flush)
+    assert_reads(engine, '/moved.bin', engine.source.name, b'x' * 1000)
+    assert after.ran                                         # the replay ran inside the call, after the lookup
+    assert tree(root) == {'moved.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_open_of_a_source_served_file_after_a_replay_commits_its_directory_rename(tmp_path: Path,
+                                                                                  clock: Clock) -> None:
+    """The same, with the rename of the file's directory replayed after the lookup."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    after = AfterLookup(engine, '/moved/big.bin', engine.flush)
+    assert_reads(engine, '/moved/big.bin', engine.source.name, b'x' * 1000)
+    assert after.ran
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_open_on_a_one_tier_stack_after_a_replay_commits_its_directory_rename(tmp_path: Path, clock: Clock) -> None:
+    """With no stage, the rename of the file's directory replayed after the lookup leaves the open at the new place."""
+    engine = source_served(tmp_path, clock, {'data/a.txt': b'alpha'}, tiers=1)
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    after = AfterLookup(engine, '/moved/a.txt', engine.flush)
+    assert_reads(engine, '/moved/a.txt', engine.source.name, b'alpha')
+    assert after.ran
+    assert tree(root) == {'moved': 'DIR', 'moved/a.txt': b'alpha'}
+    assert_converged(engine)
+
+
+def test_open_promotes_after_a_replay_commits_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """
+    A file the stage admits, held only on the source behind its own queued rename, is promoted from the place a
+    replay after the lookup moved it to: the stage serves it, no intent is left, and both copies are clean.
+    """
+    engine = source_served(tmp_path, clock, {'a.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/a.txt', '/s.txt')                        # deferred: the source still holds /a.txt
+    after = AfterLookup(engine, '/s.txt', engine.flush)
+    assert_reads(engine, '/s.txt', 'scratch', b'small')
+    assert after.ran
+    assert engine.journal.pending() == []
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/s.txt')}
+    assert residencies == {'project': ('clean', 5), 'scratch': ('clean', 5)}
+    assert tree(root) == {'s.txt': b'small'}
+    assert_converged(engine)
+
+
+def test_open_promotes_after_a_replay_commits_its_directory_rename(tmp_path: Path, clock: Clock) -> None:
+    """The same, with the rename of the file's directory replayed after the lookup."""
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    after = AfterLookup(engine, '/moved/s.txt', engine.flush)
+    assert_reads(engine, '/moved/s.txt', 'scratch', b'small')
+    assert after.ran
+    assert engine.journal.pending() == []
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/moved/s.txt')}
+    assert residencies == {'project': ('clean', 5), 'scratch': ('clean', 5)}
+    assert tree(root) == {'moved': 'DIR', 'moved/s.txt': b'small'}
+    assert_converged(engine)
+
+
+def test_open_after_a_replay_moves_another_file_onto_the_old_source_place(tmp_path: Path, clock: Clock) -> None:
+    """
+    After the lookup, a rename onto the place the source held the file at runs the file's queued rename (its
+    vacate), and a flush moves the other file's object onto that place. The open serves the file's own bytes.
+    """
+    engine = source_served(tmp_path, clock, {'a.bin': b'a' * 1000, 'b.bin': b'b' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/a.bin', '/t.bin')                        # deferred: the source still holds /a.bin
+    after = AfterLookup(engine, '/t.bin', swap_onto(engine, '/b.bin', '/a.bin'))
+    assert_reads(engine, '/t.bin', engine.source.name, b'a' * 1000)
+    assert after.ran
+    assert tree(root) == {'a.bin': b'b' * 1000, 't.bin': b'a' * 1000}
+    assert_converged(engine)
+
+
+def test_open_promotes_nothing_from_another_file_moved_onto_the_old_source_place(tmp_path: Path,
+                                                                                 clock: Clock) -> None:
+    """The same swap, on files the stage admits: the promotion copies the file's own bytes, not the other file's."""
+    engine = source_served(tmp_path, clock, {'a.bin': b'apple', 'b.bin': b'berry'})
+    root = tmp_path / 'project'
+    engine.rename('/a.bin', '/t.bin')
+    after = AfterLookup(engine, '/t.bin', swap_onto(engine, '/b.bin', '/a.bin'))
+    assert_reads(engine, '/t.bin', 'scratch', b'apple')
+    assert after.ran
+    assert (tmp_path / 'scratch' / 't.bin').read_bytes() == b'apple'
+    assert tree(root) == {'a.bin': b'berry', 't.bin': b'apple'}
+    assert_converged(engine)
+
+
+def test_open_of_a_source_served_file_opens_under_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """The open of a copy served off the source runs with the source lock held, and releases it on return."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    engine.rename('/big.bin', '/moved.bin')                  # deferred: the source still holds /big.bin
+    source = engine.source
+    real = source.open_direct
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(source, 'open_direct')                       # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    source.open_direct = probed
+    handle = engine.open('/moved.bin')
+    engine.release(handle)
+    assert free == [False]                                   # another thread could not take the lock
+    probe()
+    assert free == [False, True]                             # and can once the open returns
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_promotes_off_the_source_under_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """A promotion off the source reads the source object with the source lock held, and releases it on return."""
+    engine = source_served(tmp_path, clock, {'a.txt': b'small'})
+    engine.rename('/a.txt', '/s.txt')
+    source = engine.source
+    real = source.open_read
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(source, 'open_read')                         # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    source.open_read = probed
+    assert_reads(engine, '/s.txt', 'scratch', b'small')
+    assert free == [False]
+    probe()
+    assert free == [False, True]
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_of_a_source_served_file_resolves_inside_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """A replay that moves the object before the open takes the lock leaves the open at the object's new place."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')
+    engine._source_lock = Interleaved(engine, engine.flush)
+    handle = engine.open('/moved.bin')
+    try:
+        assert engine._source_lock.ran                       # the replay ran inside the open, before its release
+        assert engine.read(handle, 1001, 0) == b'x' * 1000
+    finally:
+        engine.release(handle)
+    assert tree(root) == {'moved.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_open_promotes_from_where_a_replay_during_the_wait_moved_the_file(tmp_path: Path, clock: Clock) -> None:
+    """A replay that moves the object before the promotion takes the lock leaves the copy reading the new place."""
+    engine = source_served(tmp_path, clock, {'a.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/a.txt', '/s.txt')
+    engine._source_lock = Interleaved(engine, engine.flush)
+    handle = engine.open('/s.txt')
+    try:
+        assert engine._source_lock.ran
+        assert handle.tier == 'scratch'
+        assert engine.read(handle, 6, 0) == b'small'
+    finally:
+        engine.release(handle)
+    assert engine.journal.pending() == []
+    assert tree(root) == {'s.txt': b'small'}
+    assert_converged(engine)
+
+
+def test_open_after_a_concurrent_rename_moves_the_file_away(tmp_path: Path, clock: Clock) -> None:
+    """A directory rename landing before the open takes the lock takes the file off the path: ENOENT."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine._source_lock = Interleaved(engine, lambda: engine.rename('/data', '/moved'))
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')                         # the path lock covers the file, not its directory
+    assert engine._source_lock.ran
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'x' * 1000}
+    assert engine.getattr('/moved/big.bin').size == 1000
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_leaves_a_file_that_reused_the_entry_id_alone(tmp_path: Path, clock: Clock) -> None:
+    """A new file that took the removed entry's id under another path is not found at the path: ENOENT."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, concurrent_removal(engine, recreate=b'N' * 500))
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._source_lock.ran
+    assert engine.getattr('/moved/big.bin').id == old        # reused, but off the path: the path check rejects it
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_open_leaves_another_file_carried_onto_the_path_alone(tmp_path: Path, clock: Clock) -> None:
+    """
+    With no stage, a different file whose bytes sit on the source, carried onto the path by a directory rename
+    before the open takes the lock, is found there and refused: ENOENT.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000}, tiers=1)
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+
+    def action() -> None:
+        engine.rename('/data', '/moved')
+        engine.mkdir('/other')
+        engine.create('/other/big.bin')
+        rewrite(engine, '/other/big.bin', b'N' * 500)
+        engine.rename('/other', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/big.bin').id != old         # a file is at the path: only the id check rejects it
+    assert engine.getattr('/data/big.bin').size == 500
+    assert engine.getattr('/moved/big.bin').size == 1000
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500, 'moved': 'DIR', 'moved/big.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_open_refuses_a_symlink_that_took_the_entry_id(tmp_path: Path, clock: Clock) -> None:
+    """
+    A symbolic link that took the entry's id after a purge, carried onto the path before the open takes the lock,
+    is refused with ENOENT: the kind is decided again under the source lock. The link's target keeps its bytes.
+    """
+    root = tmp_path / 'project'
+    seed(root, 'data/big.bin', b'x' * 1000)
+    seed(root, 'other.bin', b'O' * 50)
+    (root / 'deep').mkdir()
+    engine = OverlayEngine(build_spec(tmp_path, tiers=1), clock=clock)
+    engine.start()
+    engine.readdir('/')                                      # /deep is cataloged but not listed
+    walk(engine, '/data')
+    old = engine.getattr('/data/big.bin').id
+
+    def action() -> None:
+        concurrent_removal(engine)()                         # /data renamed to /moved, the file removed and purged
+        os.symlink('../other.bin', root / 'deep' / 'link')
+        assert engine.getattr('/deep/link').id == old        # adopted from the unlisted directory: the id is reused
+        engine.rename('/deep/link', '/moved/big.bin')
+        engine.rename('/moved', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/big.bin').kind == 'symlink'
+    assert (root / 'other.bin').read_bytes() == b'O' * 50
+    engine.unlink('/data/big.bin')
+    walk(engine)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_of_a_staged_copy_takes_no_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """The open of a copy the stage serves waits for no source commit: it runs without the source lock."""
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    stage = engine.tiers['scratch']
+    real = stage.open_direct
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(stage, 'open_direct')                        # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    stage.open_direct = probed
+    assert_reads(engine, '/data/s.txt', 'scratch', b'small')
+    assert free == [True]                                    # another thread could take the lock meanwhile
+    assert_converged(engine)
+
+
+def test_open_promotes_from_where_the_source_holds_a_file_behind_its_queued_rename(tmp_path: Path,
+                                                                                   clock: Clock) -> None:
+    """With no replay, a promotion reads the pre-rename place the source still holds, which stays until the flush."""
+    engine = source_served(tmp_path, clock, {'a.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/a.txt', '/s.txt')                        # deferred: the source still holds /a.txt
+    assert_reads(engine, '/s.txt', 'scratch', b'small')
+    assert tree(root) == {'a.txt': b'small'}
+    engine.flush()
+    assert tree(root) == {'s.txt': b'small'}
+    assert_converged(engine)
+
+
+def test_open_takes_no_path_lock_and_no_lookup_under_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """
+    Through a source-served open and a promotion off the source, nothing the calling thread runs with the source
+    lock held takes a path lock or calls `_ensure`, `getattr` or `readdir`.
+    """
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000, 'a.txt': b'small'})
+    engine.rename('/big.bin', '/moved.bin')
+    engine.rename('/a.txt', '/s.txt')
+    owned = []
+    wrapped = [(engine, '_ensure'), (engine, 'getattr'), (engine, 'readdir'), (engine.locks, 'hold')]
+    for owner, name in wrapped:
+        def recorded(*args, real=getattr(owner, name), **kwargs):
+            owned.append(engine._source_lock._is_owned())
+            return real(*args, **kwargs)
+        setattr(owner, name, recorded)
+    assert_reads(engine, '/moved.bin', engine.source.name, b'x' * 1000)
+    assert_reads(engine, '/s.txt', 'scratch', b'small')
+    for owner, name in wrapped:
+        delattr(owner, name)
+    assert owned and not any(owned)                          # called, and never with the source lock held
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_promotes_from_a_staged_copy_without_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """A promotion from one stage to a faster one reads the slower stage without the source lock."""
+    root = tmp_path / 'project'
+    seed(root, 'filler.txt', b'fill')
+    seed(root, 's.txt', b'small')
+    engine = OverlayEngine(build_spec(tmp_path, tiers=3, tmp_quota=QuotaSpec(files=1)), clock=clock)
+    engine.start()
+    walk(engine)
+    assert_reads(engine, '/filler.txt', 'tmp', b'fill')      # the fastest stage takes its one file
+    assert_reads(engine, '/s.txt', 'scratch', b'small')      # so the middle stage takes this one
+    assert engine.evict_copy('/filler.txt', 'tmp')
+    stage = engine.tiers['scratch']
+    real = stage.open_read
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(stage, 'open_read')                          # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    stage.open_read = probed
+    assert_reads(engine, '/s.txt', 'tmp', b'small')          # promoted from the middle stage
+    assert free == [True]                                    # another thread could take the source lock meanwhile
     assert_converged(engine)

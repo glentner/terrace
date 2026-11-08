@@ -568,28 +568,32 @@ Risks and mitigations
   current target, a data commit to the source writes where the source holds the entry, the queued
   ops that hold a place replay before a new name takes it, one source-namespace mutex serializes
   every change to the source's namespace, and a stale row changes nothing. The mutex is held for a
-  whole copy to the source, `_record` takes it to stat a copy served off the source, and a
-  handle-less `truncate` takes it for every cut, so a large source commit delays every `create`,
-  `mkdir` and `rename` that reaches `_vacate`, the `release` or `fsync` of a source-served copy, and
-  every handle-less `truncate`, until it finishes, and a handle-less `truncate` that promotes holds it
-  for that copy in turn (`AGENTS.md` § 10; `issues/source-commit-staged-publish.md` proposes narrowing
+  whole copy to the source, `_record` takes it to stat a copy served off the source, `open` takes it
+  to open a copy served off the source, a promotion off the source takes it through its whole copy,
+  and a handle-less `truncate` takes it for every cut, so a large source commit delays every `create`,
+  `mkdir` and `rename` that reaches `_vacate`, the `open`, `release` or `fsync` of a source-served
+  copy, every promotion off the source, and every handle-less `truncate`, until it finishes, and a
+  promotion off the source, on `open` or a handle-less `truncate`, holds it for that copy in turn
+  (`AGENTS.md` § 10; `issues/source-commit-staged-publish.md` proposes narrowing
   a commit's hold). A replay settles only the row it read, so a user removal landing during its act
   (removals take no source mutex) keeps the op it queued under the cancelled row's id, whichever of
   the scheduler, `flush`, a drain or a vacate ran the replay; a file whose bytes sit off its logical
   path reports the size its object holds (the live stat behind `getattr` and `_record` reads the
   committed source path); and `truncate` without a handle cuts it there, holding the mutex from its
   decision (the entry at its path, by path, id and kind, and the copy that serves it) through its
-  recording, and never through a symbolic link at the file itself (the last path component).
+  recording, and never through a symbolic link at the file itself (the last path component); and
+  `open` of a source-served copy and a promotion off the source look the entry up again under the
+  mutex and open the object before releasing it, so a replay landing after `open`'s lookup leaves the
+  call at the object's new place.
   `tests/engine/test_replay.py` guards each class deterministically, the concurrent ones by injecting
   the interleaving on one thread or through one helper thread, and the hypothesis model
   (`tests/engine/test_model.py`) commits single entries, polls the scheduler, and checks convergence
   after draining by polls as well as at `flush()`.
   Still open: sizes that state databases written before the live-stat fix may hold wrong for a
-  source-held copy (`issues/audit-command.md`); and `open` and a promotion off the source read the
-  committed source path outside the mutex, so a replay landing in between fails the call with
-  `ENOENT` on a file that exists, and the handle-less `truncate` tells its entry from another only by
-  path, id and kind, so a file that took the entry's id after a purge and was carried onto the path
-  during the wait is cut (both `issues/source-served-open-race.md`); and that cut keys its catalog
+  source-held copy (`issues/audit-command.md`); the handle-less `truncate`, `open` of a source-served
+  copy and a promotion off the source tell their entry from another only by path, id and kind, so a
+  file that took the entry's id after a purge and was carried onto the path during the call is cut,
+  opened or promoted (`issues/entry-identity-token.md`); and that cut keys its catalog
   writes by its path, so a rename of an ancestor already past its `_vacate` can leave those writes
   matching no row while its stage-counter write, keyed by tier, lands
   (`issues/truncate-recording-after-ancestor-rename.md`). A user `rmdir` landing while a replayed `mkdir` has

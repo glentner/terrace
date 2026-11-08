@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:source-served-open-race
 kind: fix
 appetite: small
 lane: public

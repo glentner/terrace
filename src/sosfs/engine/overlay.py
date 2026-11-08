@@ -92,12 +92,14 @@ class OverlayEngine:
         self._handles: Dict[int, List[Handle]] = {}
         self._handles_mutex = threading.Lock()
         # Serializes every change to the source's namespace (a replayed op, a vacate's replay, a purge, and a data
-        # commit or a create whose destination is the source, placement through recording), and the stat behind
-        # recording a copy served off the source, so a physical place resolved from the catalog still holds when
-        # the act or the stat lands. Order: path locks, then this, then `_handles_mutex`, then the SQLite write
-        # lock. While holding it, nothing takes a path lock or calls `_ensure`, `getattr` or `readdir` (replay
-        # under a nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It
-        # is re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
+        # commit or a create whose destination is the source, placement through recording), and these acts too:
+        # the stat behind recording a copy served off the source, the open of such a copy, a promotion's copy off
+        # the source, and the handle-less cut, whatever copy serves. So a physical place resolved from the catalog
+        # still holds when the act or the stat lands. `getattr`'s live stat reads the held place without it. Order:
+        # path locks, then this, then `_handles_mutex`, then the SQLite write lock. While holding it, nothing takes
+        # a path lock or calls `_ensure`, `getattr` or `readdir` (replay under a nested path lock is the AB/BA
+        # deadlock), and nothing acquires it inside `db.transaction()`. It is re-entrant because replay nests:
+        # `_vacate` replays rows through `_execute_namespace`, which takes it.
         self._source_lock = threading.RLock()
 
     # -- lifecycle ----------------------------------------------------------------------------------------------
@@ -618,11 +620,23 @@ class OverlayEngine:
 
     def open(self, path: str, flags: int = os.O_RDONLY) -> Handle:
         """
-        Open a file, promoting it synchronously (whole-file) to the fastest tier
-        whose bypass_size and quota admit it, then hand back a passthrough handle
-        on the serving tier. O_TRUNC is honored through `truncate` so the dirty
-        transition commits before bytes vanish; O_APPEND positioning belongs to
-        the caller (FUSE sends explicit offsets).
+        Open a file, promoting it synchronously (whole-file) to the fastest tier whose bypass_size and quota admit
+        it, then hand back a passthrough handle on the serving tier. O_TRUNC is honored through `truncate` so the
+        dirty transition commits before bytes vanish; O_APPEND positioning belongs to the caller (FUSE sends
+        explicit offsets).
+
+        A copy served off the source is opened with the source lock held: under it the call looks the entry up
+        again at its path (`_lookup_again`) and opens the object at the place that entry records (`_held_path`)
+        before releasing the lock, as `_serve` does for a promotion off the source. A replay landing after the
+        first lookup, which moves the object, leaves the call at the object's new place, not at the old one or at
+        another entry's object. The lookup under the source lock raises ENOENT when the path then holds no entry,
+        another entry, or a non-file. The id check cannot tell the entry from a file that took its id after a
+        purge (ids are reused), and such a file carried onto the path is opened. A copy served off a stage is
+        opened at its logical path without the source lock. After the first lookup, only the lookup under the
+        source lock checks which entry the path holds; a rename or removal landing before it is otherwise outside
+        what this call guarantees. One that lands before `_serve` finds the copy that serves can raise
+        `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's stage bytes
+        (`issues/freethreaded-concurrency-stress.md`).
         """
         path = normalize(path)
         with self.locks.hold(path):
@@ -635,10 +649,10 @@ class OverlayEngine:
                 raise OSError(errno.ELOOP, 'Symlink not followed here', path)
             serving = self._serve(entry)
             direct = flags & ~(os.O_CREAT | os.O_EXCL | os.O_TRUNC | os.O_APPEND)
-            # Served directly off the source (no faster tier admitted), the bytes may sit at the
-            # committed source path rather than the logical one during a deferred rename.
-            serve_path = entry.source_path if serving == self.source.name and entry.source_path else path
-            fd = self.tiers[serving].open_direct(_pure(serve_path), direct)
+            on_source = serving == self.source.name
+            with self._source_lock if on_source else contextlib.nullcontext():
+                current = self._lookup_again(entry) if on_source else entry
+                fd = self.tiers[serving].open_direct(_pure(self._held_path(current, serving)), direct)
             handle = Handle(entry.id, serving, fd, flags)
             with self._handles_mutex:
                 self._handles.setdefault(entry.id, []).append(handle)
@@ -649,20 +663,48 @@ class OverlayEngine:
         return handle
 
     def _serve(self, entry: Entry) -> str:
-        """The tier to serve `entry` from, promoting first when a faster one admits it."""
+        """
+        The tier to serve `entry` from, promoting first when a faster one admits it. The tier is decided under the
+        caller's path lock. A promotion off the source takes the source lock, looks the entry up again at its path
+        under it (`_lookup_again`), and copies from the place that entry records (`_held_path`), holding the lock
+        for the whole copy, so a replay landing after the caller's lookup leaves the copy reading the object's
+        new place, not the old one or another entry's object. The lookup under the lock raises ENOENT, before any
+        intent is opened, when the path then holds no entry, another entry, or a non-file. The id check cannot
+        tell the entry from a file that took its id after a purge (ids are reused), and such a file carried onto
+        the path is promoted. A promotion from a stage reads the stage at the logical path without the source
+        lock. A rename or removal landing before the lookup under the lock is otherwise outside what this call
+        guarantees: one that lands before `fastest_copy` is read can raise `EngineError` (no resident copy), and
+        an ancestor's round trip after the tier is decided can promote over a stage copy written meanwhile and
+        record it clean (`issues/freethreaded-concurrency-stress.md`). The lock is re-entrant, so the handle-less
+        `truncate`, which calls this with it held, decides as before.
+        """
         fastest = self.catalog.fastest_copy(entry.path)
         if fastest is None:
             raise EngineError(f'No resident copy of {entry.path}')
         names = [tier.name for tier in self.spec.tiers]
         target = self.eligible_tier(entry.size)
         if names.index(target.name) > names.index(fastest.tier):
-            # Promoting off the source reads where it physically holds the bytes, which lags the
-            # logical path while a rename is queued but uncommitted.
-            src_path = entry.source_path if fastest.tier == self.source.name else None
-            self.transfers.copy(entry.path, self.tiers[fastest.tier], target,
-                                action='promote', now=self.clock(), src_path=src_path)
+            on_source = fastest.tier == self.source.name
+            with self._source_lock if on_source else contextlib.nullcontext():
+                current = self._lookup_again(entry) if on_source else entry
+                self.transfers.copy(entry.path, self.tiers[fastest.tier], target, action='promote',
+                                    now=self.clock(), src_path=self._held_path(current, fastest.tier))
             return target.name
         return fastest.tier
+
+    def _lookup_again(self, entry: Entry) -> Entry:
+        """
+        `entry` as the catalog holds it now at its path, read by the caller with the source lock held, so the
+        `source_path` it carries holds until the caller releases that lock: no replay can move the object
+        meanwhile. Raises ENOENT when the path holds no entry, another entry, or an entry that is not a file. It
+        tells the entry apart by path, id and kind only: a file that took the entry's id after a purge (ids are
+        reused) and was carried onto the path passes. It reads the catalog alone (never `_ensure`), since nothing
+        holding the source lock takes a path lock or populates.
+        """
+        current = self.catalog.get(entry.path)
+        if current is None or current.id != entry.id or current.kind != 'file':
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', entry.path)
+        return current
 
     def read(self, handle: Handle, size: int, offset: int) -> bytes:
         """Read through the passthrough handle."""

@@ -51,8 +51,18 @@ cut keys its catalog writes by the path it was given, and a rename of an ancesto
 passed its `_vacate` can move the entry before the cut is recorded: those writes match no row, so the
 entry and its residency keep the old size, while the stage counter, keyed by tier, moves, and can go
 negative once the copy is evicted. Reproduced by injection, pre-existing, and narrowed by that
-cycle to renames already past `_vacate`. Placed beside the `open` seed, which works in the same
-function.
+cycle to renames already past `_vacate`. Placed beside `entry-identity-token`, whose gap sits in the
+same lookup the cut makes.
+
+### A lookup by path, id and kind accepts a file that took a purged entry's id
+
+**Seed:** [`issues/entry-identity-token.md`](issues/entry-identity-token.md) · `fix` · appetite big
+
+Recorded by the handle-less `truncate` fix's plan (2026-11-06) and re-homed here on 2026-11-08 by
+`source-served-open-race`, whose seed held it. Ids are reused, so a file that takes a purged entry's id
+and is carried onto the path by a directory rename passes the check the cut, `open` and a promotion off
+the source make under the source lock, and is cut, opened or promoted. Silent, reproduced by injection, and reachable only through a rename of an ancestor during
+the call. Closing it needs an identity token, a schema change with no migration path today.
 
 ### The model rarely reaches the scheduler and eviction commit routes
 

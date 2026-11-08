@@ -77,6 +77,8 @@ the tree that cycle landed.
   `Catalog.rename` rewrites every descendant's path (`src/sosfs/state/catalog.py:170`) while another
   thread may hold `lock(child_old_path)`. The child's `transfer.copy` then fails with `LookupError`
   (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
+  - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
+    `overlay.py` one.
 
 *Added 2026-11-06 by `deferred-rename-source-orphan`, review cycle 1:* user removals take no source
 mutex. `unlink` and `rmdir` cancel an entry's queued rows and queue the removal under path locks alone
@@ -98,6 +100,37 @@ more race of the same shape stays open:
   reused and `AUTOINCREMENT` is a schema change with no migration path. A reused entry id carrying an
   identical row queued at an identical clock reading would pass as the same row. Not reproduced; it
   needs a clock that repeats a reading.
+
+*Added 2026-11-08 by `source-served-open-race`:* one more, from that cycle's plan (its PLAN § 5 and
+adversarial review), deferred here because it needs a rename of an ancestor during the call, which
+path locks do not cover (above).
+
+- **An ancestor's round trip between `open`'s tier decision and its act.** `open` decides which copy
+  serves under the file's path lock alone, before any source lock, and a rename of an ancestor away
+  and back during the call can change what the path names in between. A staged file renamed into the
+  path's place makes `open` return a handle on that other file's stage bytes, and a write through it
+  lands in that file's copy, which still reads clean. Silent. Reproduced by injection by that plan's
+  adversarial review, and identical at `5e0d997`. A promotion off the source could likewise copy over a
+  stage copy written meanwhile and record it clean (silent loss; argued, not reproduced), and a chosen
+  stage copy evicted meanwhile fails the call loudly. Taking the source lock for every `open` would
+  not close it, since the staged branch never touches the source: a fix needs the ancestors' path
+  locks, or the decision made again under a lock that covers them.
+  - 2026-11-08, review cycle 2 of `source-served-open-race`: the promotion case is now reproduced, not
+    only argued. `open` decides to promote a file held on the source; an ancestor is then renamed away,
+    the file is opened and written there, and the ancestor is renamed back. The promotion copies the
+    source's bytes over the dirty stage copy and records both residencies clean, so the write is gone
+    once the queue drains. Reproduced by injection, identically at `bab1e83` and `5e0d997`.
+
+*Added 2026-11-08 by `source-served-open-race`, review cycle 1:* an instance of R7's "no exception",
+out of that cycle's scope (it touched none of this code).
+
+- **A replay racing a user rename of the entry's directory.** `_execute_namespace_locked` reads
+  `entry.path` under the source lock and passes it to `journal.begin(path=…)`. A user `rename` of the
+  entry's directory that has already passed its `_vacate` moves the catalog without the source lock,
+  so it can land between the two; `begin` then raises `LookupError: No such entry` out of `flush`,
+  and out of `commit_row` on the pump's thread, killing the pump. The row stays queued, and a later
+  flush converges. Reproduced deterministically by injection at `e034985` and identically at
+  `5e0d997`, and seen under real threads.
 
 ## Why it was deferred
 
