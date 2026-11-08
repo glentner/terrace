@@ -128,10 +128,17 @@ Draft R-IDs, to be firmed up at promotion.
   `fsync_policy = "commit"`), and shall assert after the queue drains that the source holds the file
   only at its new path, with the committed bytes. That cycle's GOAL deferred this case here; its
   engine-level regressions are in `tests/engine/test_replay.py`.
+- **R8** *(added 2026-11-08, retiring `source-path-truncate-and-stat`)* — Where the FUSE half runs,
+  the lane shall include a mount-level case that calls `truncate(2)` on a path, with no open handle, for
+  a source-served file whose rename is still queued, and shall assert that the call succeeds, that
+  `stat` reports the cut size, and that after the queue drains the source holds the file only at its
+  new path, at that size. That cycle's GOAL left mount-level coverage out of scope; its engine-level
+  regressions are in `tests/engine/test_replay.py`.
 
 ## Notes
 
-- Related: `spec/deferred-rename-source-orphan/` (landed; its mount-level case is R7 here) and
+- Related: `spec/deferred-rename-source-orphan/` (landed; its mount-level case is R7 here),
+  `spec/source-path-truncate-and-stat/` (landed; its mount-level case is R8 here) and
   `issues/shutdown-rescue-gaps.md` (its defect lives in the surface this lane covers, and it owes the
   case its own tests do not yet contain);
   `issues/archive-tier-test-coverage.md` and `issues/crash-fault-injection-suite.md` (both add tests
