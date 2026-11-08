@@ -210,6 +210,20 @@ Draft R-IDs, to be firmed up at promotion.
   the counter delta together. The cycle's GOAL sends these sizes here and to
   [`issues/source-path-truncate-and-stat.md`](source-path-truncate-and-stat.md), whose R4 either
   performs the correction with its own evidence or hands it to this seed.
+- *Added 2026-11-06 by `source-path-truncate-and-stat`, which hands these sizes here (its GOAL Q3):*
+  **the already-wrong sizes, as a probe found them.** Only a copy held on the source could be
+  mis-sized: the old `_record` and live stat looked at the logical path, and a staged tier holds its
+  copy there. The fields are `entry.size` and the source residency's `size`, in state databases
+  written before `fe26962`. Probed at `0e6d14c` with both set to 1000 for a 4-byte object:
+  - the source residency's `size` heals on the next `release` of any handle on that copy, even a
+    read-only one;
+  - `entry.size` does not heal on a read-only open, an `fsync` with no write, `flush()`, a remount,
+    or a rename plus `flush()`. Only a write through a handle, or a `truncate`, corrects it. Until
+    then `getattr` reports the stale figure and placement reads it, so the 4-byte file stays served
+    off the source where its true size would stage it;
+  - the staged-tier quota counters are unaffected: `_record` never adjusts a source counter, and no
+    staged copy was mis-sized. The note above overstates that risk. The reconcile step still corrects
+    `entry.size` and the source residency, but has no counter delta to apply for these.
 - *Added 2026-11-06, retiring `deferred-rename-source-orphan`:* **orphans already on a source.**
   Before that cycle, a data commit to the source during a queued rename left the pre-rename object
   behind, and the next mount adopted it as live data. The fix prevents new orphans; its GOAL and

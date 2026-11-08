@@ -691,7 +691,22 @@ class OverlayEngine:
         handle.marked_dirty = True
 
     def truncate(self, path: str, length: int, handle: Optional[Handle] = None) -> None:
-        """Truncate to `length` — a write: the dirty transition commits first."""
+        """
+        Truncate to `length` — a write: the dirty transition commits first. Without a handle, the call takes the
+        path lock, then the source lock, and decides under both, once, everything the cut and its recording use:
+        the entry at `path`, its kind, the copy that serves it (promoting first, as `open` does), the place that
+        copy holds its bytes (`_held_path`) and the keys the recording writes. The source lock holds off every
+        replay and every commit to the source until the recording commits, so the object cannot move between the
+        decision and the cut. While the call waits for that lock, a replay may move the object, which the
+        decision follows; an ancestor's rename or a removal, which the path lock does not cover, may take the
+        entry off `path` or carry another entry onto it, and the call then raises ENOENT as if `path` never held
+        it. So does a non-file that has taken the entry's id. The id check cannot tell the entry from a file that
+        has taken its id after a purge (ids are reused, and only a schema change could tell them apart), and such
+        a file carried onto `path` is cut. The open never follows a symbolic link at the file itself, the last
+        path component (`O_NOFOLLOW`). A rename of an ancestor that has already passed its `_vacate` when the
+        call takes the source lock can still move the entry between the decision and the recording: the catalog
+        writes, keyed by `path`, then match no row, while the stage-counter write, keyed by tier, lands.
+        """
         path = normalize(path)
         if handle is not None:
             if not handle.marked_dirty:
@@ -705,22 +720,27 @@ class OverlayEngine:
                     raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
                 if entry.kind != 'file':
                     raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
-                serving = self._serve(entry)
-                upstream = self.upstream_of(serving)
-                now = self.clock()
-                if upstream is not None:
-                    self.journal.mark_dirty(path, serving, to_tier=upstream.name, now=now)
-                fd = self.tiers[serving].open_direct(_pure(path), os.O_WRONLY)
-                try:
-                    os.ftruncate(fd, length)
-                finally:
-                    os.close(fd)
-                previous = self.catalog.get_residency(path, serving)
-                with self.db.transaction():
-                    self.catalog.update_meta(path, size=length, mtime=now)
-                    self.catalog.update_residency(path, serving, size=length, mtime=now)
-                    if previous is not None and serving != self.source.name:
-                        self.registry.adjust_usage(serving, bytes=length - previous.size)
+                with self._source_lock:
+                    current = self.catalog.get(path)
+                    if current is None or current.id != entry.id or current.kind != 'file':
+                        raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
+                    serving = self._serve(current)
+                    held = self._held_path(current, serving)
+                    upstream = self.upstream_of(serving)
+                    now = self.clock()
+                    if upstream is not None:
+                        self.journal.mark_dirty(path, serving, to_tier=upstream.name, now=now)
+                    fd = self.tiers[serving].open_direct(_pure(held), os.O_WRONLY | os.O_NOFOLLOW)
+                    try:
+                        os.ftruncate(fd, length)
+                    finally:
+                        os.close(fd)
+                    previous = self.catalog.get_residency(path, serving)
+                    with self.db.transaction():
+                        self.catalog.update_meta(path, size=length, mtime=now)
+                        self.catalog.update_residency(path, serving, size=length, mtime=now)
+                        if previous is not None and serving != self.source.name:
+                            self.registry.adjust_usage(serving, bytes=length - previous.size)
 
     def fsync(self, handle: Handle, datasync: bool = False) -> None:
         """
@@ -779,14 +799,17 @@ class OverlayEngine:
                         self.registry.adjust_usage(handle.tier, bytes=stat.size - previous.size)
         return entry
 
+    def _held_path(self, entry: Entry, tier: str) -> str:
+        """
+        Where `tier` holds `entry`'s bytes. The source holds them at the committed source path, which lags the
+        logical path while the entry's rename, or an ancestor's, is queued; every other tier holds them at the
+        logical path.
+        """
+        return entry.source_path if tier == self.source.name and entry.source_path is not None else entry.path
+
     def _stat_held(self, entry: Entry, tier: str) -> Optional[TierStat]:
-        """
-        The live stat of `entry`'s bytes on `tier`. The source holds them at the committed source path, which
-        lags the logical path while the entry's rename, or an ancestor's, is queued; every other tier holds
-        them at the logical path.
-        """
-        where = entry.source_path if tier == self.source.name and entry.source_path is not None else entry.path
-        return self.tiers[tier].stat(_pure(where))
+        """The live stat of `entry`'s bytes on `tier`, read where `tier` holds them (`_held_path`)."""
+        return self.tiers[tier].stat(_pure(self._held_path(entry, tier)))
 
     # -- upstream commit ----------------------------------------------------------------------------------------
 

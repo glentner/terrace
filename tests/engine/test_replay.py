@@ -31,6 +31,12 @@ recorded when it was queued. The classes guarded here:
 * a file whose bytes sit somewhere other than its logical path (created straight on the source inside
   a renamed directory) reports the size its object holds, while open, after `release` and after the
   queue drains;
+* a file served off the source while its rename, or an ancestor's, is queued is cut by `truncate`
+  without a handle where the source holds it, and reports its object's size when written through a
+  handle on a stack whose stage it outgrows (`bypass_size`). The cut holds the source lock, whatever
+  copy serves, and decides under it the entry at its path, its kind and the serving copy, which may be
+  a faster one taken during the wait; it refuses a non-file or another entry found at the path, and
+  never follows a symbolic link at the file itself (the last path component);
 * a rename row's tombstone purge leaves another entry's tombstone and queued removal alone;
 * a directory whose target lies inside its own source object moves only once the entries placed
   there have moved out.
@@ -45,11 +51,13 @@ from __future__ import annotations
 
 # Standard libs
 import os
+import errno
+import threading
 import dataclasses
 from pathlib import Path
 
 # External libs
-from pytest import mark
+from pytest import mark, raises
 
 # Internal libs
 from sosfs.tier.spec import QuotaSpec
@@ -622,4 +630,676 @@ def test_flush_when_a_directory_target_lies_inside_its_own_source_object(engine:
     engine.flush()
     assert {k: v for k, v in tree(root).items() if k.split('/')[0] in ('e', 'p', 'x')} == {
         'p': 'DIR', 'p/x': 'DIR', 'p/x/e': 'DIR'}
+    assert_converged(engine)
+
+
+# -- a file served off the source is cut and sized where the source holds it ----------------------------------
+
+def source_served(tmp_path: Path, clock: Clock, files: dict, tiers: int = 2) -> OverlayEngine:
+    """
+    A started, walked engine over the seeded `files`. With a stage, its `bypass_size` (100 bytes) leaves the
+    larger files served off the source.
+    """
+    for relative, data in files.items():
+        seed(tmp_path / 'project', relative, data)
+    quota = {'scratch_quota': QuotaSpec(bypass_size=100)} if tiers > 1 else {}
+    engine = OverlayEngine(build_spec(tmp_path, tiers=tiers, **quota), clock=clock)
+    engine.start()
+    walk(engine)
+    return engine
+
+
+def assert_cut(engine: OverlayEngine, path: str, original: bytes, length: int) -> None:
+    """`getattr` reports `length`, and a fresh handle reads `original` cut to it, or padded with zero bytes."""
+    assert engine.getattr(path).size == length
+    handle = engine.open(path)
+    try:
+        assert engine.read(handle, length + 1, 0) == original[:length].ljust(length, b'\0')
+    finally:
+        engine.release(handle)
+
+
+class Interleaved:
+    """
+    Stands in for the source lock. The first time the test's thread takes it, another thread runs `action` to
+    completion first: a replay or a user op landing after the cut resolved the entry and before it took the
+    lock. The action's exception, if any, is raised in the test's thread, and `ran` is set only on success.
+    """
+
+    def __init__(self, engine: OverlayEngine, action) -> None:
+        self.real, self.action, self.caller = engine._source_lock, action, threading.get_ident()
+        self.started, self.ran, self.error = False, False, None
+
+    def run(self) -> None:
+        try:
+            self.action()
+        except BaseException as error:                       # raised again in the test's thread
+            self.error = error
+
+    def __enter__(self):
+        if not self.started and threading.get_ident() == self.caller:
+            self.started = True
+            helper = threading.Thread(target=self.run)
+            helper.start()
+            helper.join()
+            if self.error is not None:
+                raise self.error
+            self.ran = True
+        return self.real.__enter__()
+
+    def __exit__(self, *exc):
+        return self.real.__exit__(*exc)
+
+
+def concurrent_removal(engine: OverlayEngine, recreate: bytes | None = None):
+    """An action: rename the file's directory, remove the file and drain; optionally create a new file there."""
+    def action() -> None:
+        engine.rename('/data', '/moved')
+        engine.unlink('/moved/big.bin')
+        engine.flush()                                       # purges the tombstone, which frees its entry id
+        if recreate is not None:
+            engine.create('/moved/big.bin')
+            rewrite(engine, '/moved/big.bin', recreate)
+            engine.flush()
+    return action
+
+
+def lock_probe(engine: OverlayEngine, free: list):
+    """
+    A function that records, from another thread, whether that thread could take the source lock (the engine's
+    own, as it is when the probe is made, so a test may stand `Interleaved` in for it afterwards).
+    """
+    lock = engine._source_lock
+
+    def try_lock() -> None:
+        taken = lock.acquire(blocking=False)
+        if taken:
+            lock.release()
+        free.append(taken)
+
+    def probe() -> None:
+        helper = threading.Thread(target=try_lock)
+        helper.start()
+        helper.join()
+    return probe
+
+
+def test_truncate_without_a_handle_behind_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """A file over the stage's bypass_size is cut at its pre-rename place while its own rename is queued."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')                  # deferred: the source still holds /big.bin
+    counted = engine.registry.usage(engine.source.name)
+    engine.truncate('/moved.bin', 4)
+    assert engine.registry.usage(engine.source.name) == counted     # source counters track pushes, not I/O
+    assert tree(root) == {'big.bin': b'xxxx'}
+    assert_cut(engine, '/moved.bin', b'x' * 1000, 4)
+    engine.flush()
+    assert tree(root) == {'moved.bin': b'xxxx'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_grows_behind_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """Growing past the old end pads with zero bytes, at the pre-rename place."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')
+    engine.truncate('/moved.bin', 2000)
+    assert tree(root) == {'big.bin': b'x' * 1000 + bytes(1000)}
+    assert_cut(engine, '/moved.bin', b'x' * 1000, 2000)
+    engine.flush()
+    assert tree(root) == {'moved.bin': b'x' * 1000 + bytes(1000)}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_inside_a_renamed_directory(tmp_path: Path, clock: Clock) -> None:
+    """A file over the stage's bypass_size is cut under its directory's old place while that rename is queued."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    engine.truncate('/moved/big.bin', 4)
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'xxxx'}
+    assert_cut(engine, '/moved/big.bin', b'x' * 1000, 4)
+    engine.flush()
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'xxxx'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_an_adopted_file_inside_a_renamed_directory(tmp_path: Path, clock: Clock) -> None:
+    """With no stage, an adopted file is cut under its directory's old place."""
+    engine = source_served(tmp_path, clock, {'data/a.txt': b'alpha'}, tiers=1)
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    engine.truncate('/moved/a.txt', 0)
+    assert tree(root) == {'data': 'DIR', 'data/a.txt': b''}
+    assert_cut(engine, '/moved/a.txt', b'alpha', 0)
+    engine.flush()
+    assert tree(root) == {'moved': 'DIR', 'moved/a.txt': b''}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_file_created_inside_a_renamed_directory(tmp_path: Path, clock: Clock) -> None:
+    """With no stage, a file created under a renamed directory sits under its old place and is cut there."""
+    engine = source_served(tmp_path, clock, {'data/a.txt': b'alpha'}, tiers=1)
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    engine.create('/moved/c.txt')
+    rewrite(engine, '/moved/c.txt', b'GAMMA')
+    engine.truncate('/moved/c.txt', 0)
+    assert tree(root) == {'data': 'DIR', 'data/a.txt': b'alpha', 'data/c.txt': b''}
+    assert_cut(engine, '/moved/c.txt', b'GAMMA', 0)
+    engine.flush()
+    assert tree(root) == {'moved': 'DIR', 'moved/a.txt': b'alpha', 'moved/c.txt': b''}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_committed_file_behind_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """With no stage, a file created and flushed, then renamed, is cut at its pre-rename place."""
+    engine = source_served(tmp_path, clock, {}, tiers=1)
+    root = tmp_path / 'project'
+    engine.create('/n.txt')
+    rewrite(engine, '/n.txt', b'hello')
+    engine.flush()
+    engine.rename('/n.txt', '/m.txt')
+    engine.truncate('/m.txt', 1)
+    assert tree(root) == {'n.txt': b'h'}
+    assert_cut(engine, '/m.txt', b'hello', 1)
+    engine.flush()
+    assert tree(root) == {'m.txt': b'h'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_after_a_queued_swap(tmp_path: Path, clock: Clock) -> None:
+    """After a swap through a temporary name, the cut lands on the renamed file's own object and no other."""
+    engine = source_served(tmp_path, clock, {'a.bin': b'a' * 1000, 'b.bin': b'b' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/a.bin', '/t.bin')
+    engine.rename('/b.bin', '/a.bin')                        # its vacate runs the first rename: /a.bin is free
+    engine.truncate('/a.bin', 4)
+    assert tree(root) == {'b.bin': b'bbbb', 't.bin': b'a' * 1000}
+    assert_cut(engine, '/a.bin', b'b' * 1000, 4)
+    engine.flush()
+    assert tree(root) == {'a.bin': b'bbbb', 't.bin': b'a' * 1000}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_cuts_under_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """The cut opens a copy served off the source with the source lock held, and releases it on return."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    engine.rename('/big.bin', '/moved.bin')
+    source = engine.source
+    real = source.open_direct
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(source, 'open_direct')                       # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    source.open_direct = probed
+    engine.truncate('/moved.bin', 4)
+    assert free == [False]                                   # another thread could not take the lock
+    probe()
+    assert free == [False, True]                             # and can once the cut returns
+    assert_cut(engine, '/moved.bin', b'x' * 1000, 4)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_resolves_inside_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """A replay that moves the object before the cut takes the lock leaves the cut at the object's new place."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')
+    engine._source_lock = Interleaved(engine, engine.flush)
+    engine.truncate('/moved.bin', 4)
+    assert engine._source_lock.ran                           # the replay ran inside the call
+    assert tree(root) == {'moved.bin': b'xxxx'}
+    assert_cut(engine, '/moved.bin', b'x' * 1000, 4)
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_after_a_concurrent_rename_moves_the_file_away(tmp_path: Path, clock: Clock) -> None:
+    """A directory rename landing before the cut takes the lock takes the file off the path: ENOENT, nothing cut."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine._source_lock = Interleaved(engine, lambda: engine.rename('/data', '/moved'))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)                  # the path lock covers the file, not its directory
+    assert engine._source_lock.ran
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'x' * 1000}
+    assert engine.getattr('/moved/big.bin').size == 1000
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_after_a_concurrent_removal(tmp_path: Path, clock: Clock) -> None:
+    """A removal landing before the cut takes the lock raises ENOENT, not an error on the missing entry."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    engine._source_lock = Interleaved(engine, concurrent_removal(engine))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert tree(root) == {'moved': 'DIR'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_leaves_a_file_that_reused_the_entry_id_alone(tmp_path: Path, clock: Clock) -> None:
+    """A new file that took the removed entry's id under another path is not found at the path: it keeps its bytes."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, concurrent_removal(engine, recreate=b'N' * 500))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine.getattr('/moved/big.bin').id == old        # reused, but off the path: the path check rejects it
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    assert engine.getattr('/moved/big.bin').size == 500
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_staged_copy_inside_a_renamed_directory(tmp_path: Path, clock: Clock) -> None:
+    """A file the stage admits is marked dirty, then cut on the stage at its logical path; the source gets the cut."""
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/data', '/moved')
+    stage = engine.tiers['scratch']
+    real = stage.open_direct
+    seen = []
+
+    def probed(*args, **kwargs):
+        residency = engine.catalog.get_residency('/moved/s.txt', 'scratch')
+        seen.append(None if residency is None else (residency.state, residency.size))
+        return real(*args, **kwargs)
+
+    stage.open_direct = probed
+    engine.truncate('/moved/s.txt', 2)
+    del stage.open_direct
+    assert seen[-1] == ('dirty', 5)                          # marked dirty before the cut, recorded after it
+    assert engine.registry.usage('scratch').bytes == 2       # the promotion's 5 bytes, less the 3 cut
+    assert {r.tier for r in engine.catalog.residencies('/moved/s.txt')} == {'project', 'scratch'}
+    assert engine.catalog.get_residency('/moved/s.txt', 'scratch').size == 2
+    assert_cut(engine, '/moved/s.txt', b'small', 2)
+    engine.flush()
+    assert tree(root) == {'moved': 'DIR', 'moved/s.txt': b'sm'}
+    assert_converged(engine)
+
+
+def test_release_of_a_source_served_copy_stats_under_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """Recording a copy served off the source stats it with the source lock held, so no replay moves it between."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    engine.rename('/big.bin', '/moved.bin')
+    handle = engine.open('/moved.bin', os.O_RDWR)
+    engine.write(handle, b'tiny', 0)
+    source = engine.source
+    real = source.stat
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        probe()
+        return real(*args, **kwargs)
+
+    source.stat = probed
+    engine.release(handle)
+    del source.stat
+    assert free and not any(free)                            # every stat the release made held the lock
+    assert engine.getattr('/moved.bin').size == 1000
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_size_through_a_bypass_stage_behind_its_own_rename(tmp_path: Path, clock: Clock) -> None:
+    """A file over the stage's bypass_size, cut and written through a handle, reports its object's size throughout."""
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    source = engine.source.name
+    engine.rename('/big.bin', '/moved.bin')
+    handle = engine.open('/moved.bin', os.O_RDWR)
+    assert handle.tier == source                             # served off the source, at /big.bin
+    engine.truncate('/moved.bin', 0, handle=handle)
+    engine.write(handle, b'tiny', 0)
+    assert engine.getattr('/moved.bin').size == len(tree(root)['big.bin']) == 4     # read live while open
+    engine.fsync(handle)
+    assert engine.getattr('/moved.bin').size == engine.catalog.get_residency('/moved.bin', source).size == 4
+    engine.release(handle)
+    assert engine.getattr('/moved.bin').size == engine.catalog.get_residency('/moved.bin', source).size == 4
+    engine.flush()
+    assert engine.getattr('/moved.bin').size == engine.catalog.get_residency('/moved.bin', source).size == 4
+    assert_converged(engine)
+
+
+def test_size_through_a_bypass_stage_inside_a_renamed_directory(tmp_path: Path, clock: Clock) -> None:
+    """The same, under a directory whose rename is queued."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    source = engine.source.name
+    engine.rename('/data', '/moved')
+    handle = engine.open('/moved/big.bin', os.O_RDWR)
+    assert handle.tier == source                             # served off the source, at /data/big.bin
+    engine.truncate('/moved/big.bin', 0, handle=handle)
+    engine.write(handle, b'tiny', 0)
+    assert engine.getattr('/moved/big.bin').size == len(tree(root)['data/big.bin']) == 4
+    engine.fsync(handle)
+    assert engine.getattr('/moved/big.bin').size == engine.catalog.get_residency('/moved/big.bin', source).size == 4
+    engine.release(handle)
+    assert engine.getattr('/moved/big.bin').size == engine.catalog.get_residency('/moved/big.bin', source).size == 4
+    engine.flush()
+    assert engine.getattr('/moved/big.bin').size == engine.catalog.get_residency('/moved/big.bin', source).size == 4
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_cuts_a_faster_copy_made_during_the_wait(tmp_path: Path, clock: Clock) -> None:
+    """
+    A copy the stage takes while the cut waits for the lock, through a renamed directory the path lock does not
+    cover, is the copy that serves: it is marked dirty and cut, and the source keeps a clean, true copy.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+
+    def action() -> None:
+        engine.rename('/data', '/moved')
+        handle = engine.open('/moved/big.bin', os.O_RDWR)
+        engine.truncate('/moved/big.bin', 0, handle=handle)
+        engine.write(handle, b'0123456789', 0)
+        engine.release(handle)
+        handle = engine.open('/moved/big.bin')                # 10 bytes: the stage admits it and takes a copy
+        assert handle.tier == 'scratch'
+        engine.release(handle)
+        engine.rename('/moved', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/data/big.bin')}
+    assert residencies == {'project': ('clean', 10), 'scratch': ('dirty', 4)}
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (4, 1)    # the promotion's 10 bytes, less 6
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'0123456789'}     # clean, and true to its residency
+    assert_cut(engine, '/data/big.bin', b'0123456789', 4)
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'0123'}
+    assert engine.evict_copy('/data/big.bin', 'scratch')
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (0, 0)    # nothing held, nothing counted
+    assert_cut(engine, '/data/big.bin', b'0123456789', 4)   # the same bytes once the stage copy is gone
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_leaves_another_file_carried_onto_the_path_alone(tmp_path: Path,
+                                                                                   clock: Clock) -> None:
+    """A different file a directory rename carries onto the path during the wait is found there, and not cut."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+
+    def action() -> None:
+        engine.rename('/data', '/moved')
+        engine.mkdir('/other')
+        engine.create('/other/big.bin')
+        rewrite(engine, '/other/big.bin', b'N' * 500)
+        engine.rename('/other', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/big.bin').id != old         # a file is at the path: only the id check rejects it
+    assert engine.getattr('/data/big.bin').size == 500
+    assert engine.getattr('/moved/big.bin').size == 1000
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500, 'moved': 'DIR', 'moved/big.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_missing_path_or_a_directory(tmp_path: Path, clock: Clock) -> None:
+    """A path with no entry raises ENOENT and a directory raises EISDIR, and neither changes anything."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    with raises(FileNotFoundError):
+        engine.truncate('/data/none.bin', 4)
+    with raises(IsADirectoryError):
+        engine.truncate('/data', 4)
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'x' * 1000}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_staged_copy_holds_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """
+    A copy the stage serves is cut with its path lock and the source lock held, so a directory rename that reaches
+    its `_vacate` during the cut waits until the cut is recorded.
+    """
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    stage = engine.tiers['scratch']
+    real = stage.open_direct
+    free = []
+    probe = lock_probe(engine, free)
+    held = []
+
+    def probed(*args, **kwargs):
+        delattr(stage, 'open_direct')                        # once: the tier's own method again
+        probe()
+        held.append('/data/s.txt' in engine.locks._locks)    # the registry keeps a path while it is held
+        return real(*args, **kwargs)
+
+    stage.open_direct = probed
+    engine.truncate('/data/s.txt', 2)
+    assert free == [False]                                   # another thread could not take the source lock
+    assert held == [True]
+    assert engine.catalog.get_residency('/data/s.txt', 'scratch').size == 2
+    assert_cut(engine, '/data/s.txt', b'small', 2)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_after_the_serving_copy_flips_to_the_source(tmp_path: Path, clock: Clock) -> None:
+    """
+    The stage copy evicted during the wait, through a directory renamed away and back, leaves only the source copy.
+    The serving copy is decided under the source lock, so the cut promotes again and cuts the new stage copy with
+    that lock held; the source is never cut outside it.
+    """
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    root = tmp_path / 'project'
+    handle = engine.open('/data/s.txt')                      # the stage admits 5 bytes and takes a clean copy
+    assert handle.tier == 'scratch'
+    engine.release(handle)
+    cuts = []
+    free = []
+    probe = lock_probe(engine, free)
+    for name, tier in engine.tiers.items():
+        def probed(*args, real=tier.open_direct, name=name, **kwargs):
+            probe()
+            cuts.append((name, free[-1]))
+            return real(*args, **kwargs)
+        tier.open_direct = probed
+
+    def action() -> None:
+        engine.rename('/data', '/d2')
+        assert engine.evict_copy('/d2/s.txt', 'scratch')
+        engine.rename('/d2', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    engine.truncate('/data/s.txt', 2)
+    for tier in engine.tiers.values():
+        del tier.open_direct
+    assert engine._source_lock.ran
+    assert cuts == [('scratch', False)]                      # one open, on the stage, with the lock held
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/data/s.txt')}
+    assert residencies == {'project': ('clean', 5), 'scratch': ('dirty', 2)}
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (2, 1)
+    assert tree(root) == {'data': 'DIR', 'data/s.txt': b'small'}
+    assert_cut(engine, '/data/s.txt', b'small', 2)
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/s.txt': b'sm'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_leaves_a_file_moved_onto_the_old_source_place_alone(tmp_path: Path,
+                                                                                      clock: Clock) -> None:
+    """
+    During the wait the entry's directory moves away on the source and another file takes the place the source held
+    the entry's bytes at, and the path. The cut finds that file at the path, refuses it, and leaves it whole.
+    """
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    root = tmp_path / 'project'
+    handle = engine.open('/data/s.txt')
+    engine.release(handle)
+    old = engine.getattr('/data/s.txt').id
+
+    def action() -> None:
+        engine.rename('/data', '/d2')
+        assert engine.evict_copy('/d2/s.txt', 'scratch')
+        engine.mkdir('/other')
+        engine.create('/other/s.txt')
+        rewrite(engine, '/other/s.txt', b'OTHER')
+        engine.flush()                                       # the source moves /data to /d2
+        engine.rename('/other', '/data')
+        engine.flush()                                       # and the other file onto /data/s.txt
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/s.txt', 2)
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/s.txt').id != old
+    assert tree(root) == {'d2': 'DIR', 'd2/s.txt': b'small', 'data': 'DIR', 'data/s.txt': b'OTHER'}
+    assert engine.getattr('/data/s.txt').size == engine.getattr('/d2/s.txt').size == 5
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_a_symlink_that_took_the_entry_id(tmp_path: Path, clock: Clock) -> None:
+    """
+    A symbolic link that took the entry's id after a purge, carried onto the path during the wait, is refused with
+    ENOENT: the kind is decided again under the source lock. The link's target keeps its bytes.
+    """
+    root = tmp_path / 'project'
+    seed(root, 'data/big.bin', b'x' * 1000)
+    seed(root, 'other.bin', b'O' * 50)
+    (root / 'deep').mkdir()
+    engine = OverlayEngine(build_spec(tmp_path, tiers=1), clock=clock)
+    engine.start()
+    engine.readdir('/')                                      # /deep is cataloged but not listed
+    walk(engine, '/data')
+    old = engine.getattr('/data/big.bin').id
+
+    def action() -> None:
+        concurrent_removal(engine)()                         # /data renamed to /moved, the file removed and purged
+        os.symlink('../other.bin', root / 'deep' / 'link')
+        assert engine.getattr('/deep/link').id == old        # adopted from the unlisted directory: the id is reused
+        engine.rename('/deep/link', '/moved/big.bin')
+        engine.rename('/moved', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/big.bin').kind == 'symlink'
+    assert (root / 'other.bin').read_bytes() == b'O' * 50
+    engine.unlink('/data/big.bin')
+    walk(engine)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_a_directory_that_took_the_entry_id(tmp_path: Path, clock: Clock) -> None:
+    """A directory that took the entry's id after a purge, carried onto the path during the wait, raises ENOENT."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+
+    def action() -> None:
+        concurrent_removal(engine)()
+        engine.mkdir('/moved/big.bin')
+        assert engine.getattr('/moved/big.bin').id == old    # the id is reused
+        engine.rename('/moved', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine.getattr('/data/big.bin').kind == 'dir'
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': 'DIR'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_symlink(tmp_path: Path, clock: Clock) -> None:
+    """A symbolic link is refused (EISDIR, as for any entry that is not a file), and its target keeps its bytes."""
+    root = tmp_path / 'project'
+    seed(root, 'other.bin', b'O' * 50)
+    os.symlink('other.bin', root / 'link')
+    engine = source_served(tmp_path, clock, {}, tiers=1)
+    assert engine.getattr('/link').kind == 'symlink'
+    with raises(IsADirectoryError):
+        engine.truncate('/link', 0)
+    assert (root / 'other.bin').read_bytes() == b'O' * 50
+    assert engine.getattr('/other.bin').size == 50
+    engine.unlink('/link')
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_never_follows_a_link_at_the_held_place(tmp_path: Path, clock: Clock) -> None:
+    """
+    A symbolic link put out of band where the source holds the file is not followed: the open fails with ELOOP and
+    the link's target keeps its bytes.
+    """
+    engine = source_served(tmp_path, clock, {'big.bin': b'x' * 1000, 'other.bin': b'O' * 50}, tiers=1)
+    root = tmp_path / 'project'
+    engine.rename('/big.bin', '/moved.bin')                  # deferred: the source still holds /big.bin
+    (root / 'big.bin').rename(tmp_path / 'aside.bin')
+    os.symlink('other.bin', root / 'big.bin')
+    with raises(OSError) as raised:
+        engine.truncate('/moved.bin', 4)
+    assert raised.value.errno == errno.ELOOP
+    assert (root / 'other.bin').read_bytes() == b'O' * 50
+    (root / 'big.bin').unlink()                              # put the file back where the source holds it
+    (tmp_path / 'aside.bin').rename(root / 'big.bin')
+    assert_cut(engine, '/moved.bin', b'x' * 1000, 1000)      # nothing was cut or recorded
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_promotes_from_where_a_replay_during_the_wait_moved_the_file(tmp_path: Path,
+                                                                                              clock: Clock) -> None:
+    """
+    The file's own queued rename replays while the cut waits for the source lock, moving the source object. The
+    promotion the cut then makes reads the entry found under the lock, so it copies from the object's new place.
+    """
+    engine = source_served(tmp_path, clock, {'a.txt': b'small'})
+    root = tmp_path / 'project'
+    engine.rename('/a.txt', '/s.txt')                        # deferred: the source still holds /a.txt
+    assert tree(root) == {'a.txt': b'small'}
+    engine._source_lock = Interleaved(engine, engine.flush)
+    engine.truncate('/s.txt', 2)
+    assert engine._source_lock.ran
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/s.txt')}
+    assert residencies == {'project': ('clean', 5), 'scratch': ('dirty', 2)}
+    assert tree(root) == {'s.txt': b'small'}                 # moved by the replay, promoted from, left clean
+    assert_cut(engine, '/s.txt', b'small', 2)
+    engine.flush()
+    assert tree(root) == {'s.txt': b'sm'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_counts_the_stage_copy_it_cuts(tmp_path: Path, clock: Clock) -> None:
+    """
+    A dirty stage copy whose size differs from the source copy's moves the stage's counter by its own size change,
+    so the counter falls to zero when the copy is evicted.
+    """
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    root = tmp_path / 'project'
+    rewrite(engine, '/data/s.txt', b'12345678')              # the stage holds 8 bytes, the source still 5
+    residencies = {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/data/s.txt')}
+    assert residencies == {'project': ('clean', 5), 'scratch': ('dirty', 8)}
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (8, 1)
+    engine.truncate('/data/s.txt', 2)
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (2, 1)
+    assert tree(root) == {'data': 'DIR', 'data/s.txt': b'small'}
+    assert_cut(engine, '/data/s.txt', b'12345678', 2)
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/s.txt': b'12'}
+    assert engine.evict_copy('/data/s.txt', 'scratch')
+    assert dataclasses.astuple(engine.registry.usage('scratch')) == (0, 0)    # nothing held, nothing counted
     assert_converged(engine)

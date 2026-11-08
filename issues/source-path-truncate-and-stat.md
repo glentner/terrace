@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:source-path-truncate-and-stat
 kind: fix
 appetite: small
 lane: public

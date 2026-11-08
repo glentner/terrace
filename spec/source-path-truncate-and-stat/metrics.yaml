@@ -1,0 +1,19 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: source-path-truncate-and-stat
+escaped_from: null
+planned: null
+landed: null
+open: {step: publish, start: '2026-11-08T00:46:44-05:00', agent: claude-opus-5-5}
+runs:
+- {step: 'build:P1', start: '2026-11-08T00:12:42-05:00', stop: '2026-11-08T00:30:36-05:00', seconds: 1074, end: done, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-08T00:38:08-05:00', stop: '2026-11-08T00:40:26-05:00', seconds: 138, end: done, agent: claude-opus-5-5}
+reviews: []
+# Landing override (2026-11-08): the last review (cycle 3) is changes-requested on F1 (records,
+# MEDIUM by Geoffrey's ruling) and F3 (two surviving mutants, LOW), both closed by a spot fix with
+# no new review (4d5f198, cb50f3b). Geoffrey explicitly overrode the verdict and the staleness gate
+# (REVIEW.md, "Geoffrey's rulings on the cycle 3 escalation"). `metrics.py landed` refuses an
+# unapproved last review and has no override flag, so the foreman copied the live record here
+# unchanged instead of writing a false approval.
+# Record loss (2026-11-07): the live record for every run before 2026-11-08 (feature, plan, build
+# P1-P3, reviews 1-3, remediations 1-2) lived in the cycle worktree's git dir and was deleted when
+# the worktree was removed at a session close-out. Only the runs below survive; none is estimated.

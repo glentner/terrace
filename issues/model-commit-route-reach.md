@@ -91,4 +91,8 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   the model gains a source-served configuration, which edits the same class and redraws the same
   sample; doing both in one cycle pays for one redraw.
   `spec/deferred-rename-source-orphan/` (GOAL R7, R8; PLAN § 2.7; REVIEW F4).
+  - 2026-11-06: `source-path-truncate-and-stat` decided it: the model gains no source-served
+    configuration, and `tests/engine/test_model.py` stays unchanged (that cycle's GOAL Q2).
+    Model coverage of source-served files, if wanted, stays with this seed, whose cycle redraws
+    the sample anyway.
 - Found by: `deferred-rename-source-orphan` review cycle 1 (F4, coverage observation), 2026-11-06.

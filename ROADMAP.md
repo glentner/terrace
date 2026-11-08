@@ -44,6 +44,29 @@ through `source_path` the way `open` already does. Also owns the sizes existing 
 already hold wrong, with the audit as their likely home. Placed to follow the namespace-replay fix,
 which has landed, while that region is fresh.
 
+### `open` and promotion read the committed source path outside the source lock
+
+**Seed:** [`issues/source-served-open-race.md`](issues/source-served-open-race.md) · `fix` · appetite small
+
+Found while planning the handle-less `truncate` fix (2026-11-06). A replay that commits a queued rename
+between `open` resolving an entry and opening its copy makes `open` raise `ENOENT` on a source-served
+file that exists. A replay landing before a promotion off the source makes the promotion's copy fail
+the same way. Both are reproduced by injection, and both fail loudly. `truncate` closes the window
+by looking the entry up again under the source lock. A promotion is a whole-file copy, so the same
+remedy has a cost that shaping must weigh. Also holds a residual gap in that lookup's identity check.
+
+### A handle-less `truncate` records its cut under a path an ancestor's rename has just moved
+
+**Seed:** [`issues/truncate-recording-after-ancestor-rename.md`](issues/truncate-recording-after-ancestor-rename.md) · `fix` · appetite small
+
+Found in the handle-less `truncate` fix's second review (2026-11-07) and ruled out of that cycle. The
+cut keys its catalog writes by the path it was given, and a rename of an ancestor that has already
+passed its `_vacate` can move the entry before the cut is recorded: those writes match no row, so the
+entry and its residency keep the old size, while the stage counter, keyed by tier, moves, and can go
+negative once the copy is evicted. Reproduced by injection, pre-existing, and narrowed by that
+cycle to renames already past `_vacate`. Placed beside the `open` seed, which works in the same
+function.
+
 ### The model rarely reaches the scheduler and eviction commit routes
 
 **Seed:** [`issues/model-commit-route-reach.md`](issues/model-commit-route-reach.md) · `test` · appetite small
