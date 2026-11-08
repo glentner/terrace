@@ -197,6 +197,8 @@ Draft R-IDs, to be firmed up at promotion.
     work and needs the same ordering, which is not expressible in the schema.
     - 2026-11-06: `overlay.py:949` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
       the confirm before the purge is at `src/sosfs/engine/overlay.py:1038`.
+    - 2026-11-08: `source-path-truncate-and-stat` moved it again; at `6425a21` it is at
+      `src/sosfs/engine/overlay.py:1061`.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the state-store
   invariants topic (the intent journal has no consumer) and the remaining-work topic (dossier 4).
 - *Added 2026-11-06 by `deferred-rename-source-orphan` (review cycle 1):* **catalog and residency
@@ -207,9 +209,10 @@ Draft R-IDs, to be firmed up at promotion.
   databases written before it can still hold them, and the quota counters eviction trusts are built
   from residency sizes. The reconcile step is their natural owner: compare each residency's size with
   the tier's object (on the source, at `entry.source_path`) and correct the entry, the residency and
-  the counter delta together. The cycle's GOAL sends these sizes here and to
-  [`issues/source-path-truncate-and-stat.md`](source-path-truncate-and-stat.md), whose R4 either
-  performs the correction with its own evidence or hands it to this seed.
+  the counter delta together. The cycle's GOAL sent these sizes here and to the
+  `source-path-truncate-and-stat` seed, whose cycle (landed 2026-11-08,
+  `spec/source-path-truncate-and-stat/`) handed them to this seed under its R4; the next note records
+  what it found.
 - *Added 2026-11-06 by `source-path-truncate-and-stat`, which hands these sizes here (its GOAL Q3):*
   **the already-wrong sizes, as a probe found them.** Only a copy held on the source could be
   mis-sized: the old `_record` and live stat looked at the logical path, and a staged tier holds its

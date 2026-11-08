@@ -87,9 +87,10 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   so any quota goes through `dataclasses.replace`, as `fsync_policy` already does.
 - Open question — **the draw.** Any edit redraws the CI sample, so the cycle re-runs `verify`, the
   twenty seeds and the mutants on the new draw, as the namespace-replay cycle's P3 had to.
-- Related: [`issues/source-path-truncate-and-stat.md`](source-path-truncate-and-stat.md) decides whether
-  the model gains a source-served configuration, which edits the same class and redraws the same
-  sample; doing both in one cycle pays for one redraw.
+- Related: the `source-path-truncate-and-stat` cycle (landed 2026-11-08,
+  `spec/source-path-truncate-and-stat/`) decided whether the model gains a source-served
+  configuration, which edits the same class and redraws the same sample; doing both in one cycle
+  would have paid for one redraw.
   `spec/deferred-rename-source-orphan/` (GOAL R7, R8; PLAN § 2.7; REVIEW F4).
   - 2026-11-06: `source-path-truncate-and-stat` decided it: the model gains no source-served
     configuration, and `tests/engine/test_model.py` stays unchanged (that cycle's GOAL Q2).

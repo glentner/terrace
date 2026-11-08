@@ -30,25 +30,12 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### `truncate` and the live stat resolve a source-served file at its logical path
-
-**Seed:** [`issues/source-path-truncate-and-stat.md`](issues/source-path-truncate-and-stat.md) · `fix` · appetite small
-
-Reproduced. The siblings the namespace-replay fix (landed 2026-11-06,
-`spec/deferred-rename-source-orphan/`) split out at its GOAL gate (2026-11-05): on a file
-served off the source while its rename or an ancestor's is queued, `truncate` without a handle opens
-the logical path and raises `ENOENT` on a file that exists. The wrong-size sibling (`_record` and
-`getattr`'s live stat) was closed in that cycle's first review remediation, which leaves a
-`bypass_size` test to pin it. The fix is small and sits in regions that cycle just opened: resolve
-through `source_path` the way `open` already does. Also owns the sizes existing state databases
-already hold wrong, with the audit as their likely home. Placed to follow the namespace-replay fix,
-which has landed, while that region is fresh.
-
 ### `open` and promotion read the committed source path outside the source lock
 
 **Seed:** [`issues/source-served-open-race.md`](issues/source-served-open-race.md) · `fix` · appetite small
 
-Found while planning the handle-less `truncate` fix (2026-11-06). A replay that commits a queued rename
+Found on 2026-11-06 while planning the handle-less `truncate` fix, which landed on 2026-11-08
+(`spec/source-path-truncate-and-stat/`). A replay that commits a queued rename
 between `open` resolving an entry and opening its copy makes `open` raise `ENOENT` on a source-served
 file that exists. A replay landing before a promotion off the source makes the promotion's copy fail
 the same way. Both are reproduced by injection, and both fail loudly. `truncate` closes the window
@@ -75,16 +62,17 @@ A coverage observation from the namespace-replay fix's first review: over the fi
 stateful model committed to the source through a scheduler poll's data row zero times, and through the
 eviction manager zero times, though both ops are in its rule mix and fire about two thousand times each.
 `tests/engine/test_replay.py` pins both routes deterministically, so nothing is unguarded today; the
-model is the net for the next defect on those routes, and it is not reaching them. Placed after the
-truncate fix, which decides whether the model gains a source-served configuration and edits the same
-class.
+model is the net for the next defect on those routes, and it is not reaching them. The truncate fix
+(landed 2026-11-08) left the model without a source-served configuration (its GOAL Q2), so model
+coverage of source-served files, if wanted, is this cycle's too: it edits the same class and redraws
+the same sample.
 
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
-Early, right behind the namespace-replay fix (landed 2026-11-06) and that fix's two small
-follow-ups, because the cost grows with every later cycle: 498
+Early, right behind the namespace-replay fix (landed 2026-11-06) and the small follow-ups
+above, because the cost grows with every later cycle: 498
 occurrences across 83 files at `6419966`, before this harness added its own, and every entry below
 writes more of them. The mechanical two-thirds — distribution name, package directory,
 imports, class names, test modules, CI, prose — is a rename. The other third is not: the `SOSFS_*`

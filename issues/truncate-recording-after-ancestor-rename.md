@@ -97,4 +97,11 @@ for the recording. Shaping should weigh it against taking the ancestors' path lo
 
 - Related: `issues/source-served-open-race.md` (the same cycle's other deferral, on the same function);
   `issues/engine-error-mapping.md` (the `LookupError`).
+- *Added 2026-11-08, retiring `source-path-truncate-and-stat`:* **the counter guard.** The recording
+  moves the stage counter only when `previous is not None` (`src/sosfs/engine/overlay.py:742` at
+  `6425a21`). That cycle's mutant sweep
+  (`spec/source-path-truncate-and-stat/remediation/cycle2-mutant-sweep.md`, E1) found that dropping
+  the guard changes behaviour only inside this seed's window, where it keeps the call from raising `AttributeError` after the bytes are cut, and
+  left it unpinned because a pin would assert the stale size this seed fixes. Once the recording
+  reaches the entry, re-judge the guard: pin it, or remove it if the fix leaves it dead.
 - Found by: `source-path-truncate-and-stat` review cycle 2, F6 (2026-11-07).
