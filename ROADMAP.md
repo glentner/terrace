@@ -30,18 +30,6 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### A handle-less `truncate` records its cut under a path an ancestor's rename has just moved
-
-**Seed:** [`issues/truncate-recording-after-ancestor-rename.md`](issues/truncate-recording-after-ancestor-rename.md) · `fix` · appetite small
-
-Found in the handle-less `truncate` fix's second review (2026-11-07) and ruled out of that cycle. The
-cut keys its catalog writes by the path it was given, and a rename of an ancestor that has already
-passed its `_vacate` can move the entry before the cut is recorded: those writes match no row, so the
-entry and its residency keep the old size, while the stage counter, keyed by tier, moves, and can go
-negative once the copy is evicted. Reproduced by injection, pre-existing, and narrowed by that
-cycle to renames already past `_vacate`. Placed beside `entry-identity-token`, whose gap sits in the
-same lookup the cut makes.
-
 ### A lookup by path, id and kind accepts a file that took a purged entry's id
 
 **Seed:** [`issues/entry-identity-token.md`](issues/entry-identity-token.md) · `fix` · appetite big

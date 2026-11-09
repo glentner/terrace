@@ -110,5 +110,14 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   here; that plan rejected copying out of a pinned, opened source object because `transfer.copy` would
   have to take one, and S3 and archive sources buffer the whole object anyway.
 - 2026-11-08: the `overlay.py:835-840` cite under Problem holds at `0e6d14c`; at `5b8dcaf` it is
-  `src/sosfs/engine/overlay.py:900-905`.
+  `src/sosfs/engine/overlay.py:900-905`, and at `d557db2` `:915-920`.
+- *Added 2026-11-09, retiring `truncate-recording-after-ancestor-rename`:* a user `rename` now holds
+  the mutex too, from its `_vacate` through its catalog-move transaction, including that transaction's
+  wait for SQLite's write lock and the `UPDATE` that moves every descendant's path (`AGENTS.md`
+  § *Invariants* § 10; `spec/truncate-recording-after-ancestor-rename/PLAN.md` deviation row 1). So
+  renaming a large directory delays every `create`, `mkdir` and `rename` that reaches `_vacate`, every
+  `fsync` under the commit policy, and every replay and commit to the source, for that long. The hold is metadata work, not a copy, so staging and publishing does not shorten it;
+  shaping decides whether narrowing it is in scope here, and any narrowing must still keep an
+  ancestor's catalog move out of a handle-less `truncate` from its lookup under the mutex to its
+  recording (that cycle's GOAL R4).
 - Found by: `deferred-rename-source-orphan`'s plan (D4), seeded in its P5.

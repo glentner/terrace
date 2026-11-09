@@ -82,7 +82,8 @@ the tree that cycle landed.
   thread may hold `lock(child_old_path)`. The child's `transfer.copy` then fails with `LookupError`
   (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
   - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
-    `overlay.py` one, to `:427` at `5b8dcaf`.
+    `overlay.py` one, to `:427` at `5b8dcaf`, and `truncate-recording-after-ancestor-rename` to
+    `:431` at `d557db2`.
   - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a user `rename` now holds the source lock
     from its `_vacate` through its catalog move, which keeps the move out of the handle-less
     `truncate` from its lookup under that lock to its recording. Other calls hold a path lock and write the catalog by that path with no source lock,
@@ -147,6 +148,9 @@ path locks do not cover (above).
     `EngineError: No resident copy of …` (that cycle's review cycle 2, F1; identical at its base). The
     shipped `open` and `_serve` docstrings cite this seed for it; the escape itself is
     `issues/engine-error-mapping.md`'s.
+  - 2026-11-09, retiring `truncate-recording-after-ancestor-rename`: since `d557db2` no docstring or
+    comment in `src/` or `tests/` cites a seed, and the `open` and `_serve` docstrings state this
+    window in their own words. It stays this seed's.
 
 *Added 2026-11-08 by `source-served-open-race`, review cycle 1:* an instance of R7's "no exception",
 out of that cycle's scope (it touched none of this code).
@@ -208,6 +212,10 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   another thread commits or stages a child of it, the child's operation SHALL complete against the
   child's current path, or fail with an `OSError` the VFS API maps, never `LookupError` or a read of
   a moved staging file.
+  - *Added 2026-11-09, retiring `truncate-recording-after-ancestor-rename`:* a handle-less `truncate`
+    of the child is such an operation. That cycle pins its interleavings with an ancestor's rename in
+    `tests/engine/test_replay.py` on two threads ordered by events at the source lock; nothing runs the
+    two unordered under load.
 - **R9** *(added 2026-11-06, `deferred-rename-source-orphan` review cycle 1)* — WHEN a user `unlink`
   or `rmdir` runs on one thread while the write-back scheduler, `flush` or a drain replays a queued
   op for the same entry on another, the replay SHALL raise no exception, SHALL settle only the row it

@@ -108,7 +108,7 @@ Draft R-IDs, to be firmed up at promotion.
 - **R2** — If every integration test skipped, then the job shall fail. The gate asserts the pass count
   from the pytest summary line, not the process exit status, because `-m integration` exits 0 with
   `10 skipped, 449 deselected` (`10 skipped, 521 deselected`, exit 0, measured on macOS at `5b8dcaf`,
-  2026-11-08).
+  2026-11-08; `10 skipped, 530 deselected`, exit 0, at `d557db2`, 2026-11-09).
 - **R3** — The MinIO half shall be satisfied by the endpoint and credentials `docker-compose.yml`
   already publishes, with no edit to `tests/tier/test_s3_integration.py` and no new
   `SOSFS_TEST_MINIO_*` value invented by the workflow.
@@ -142,12 +142,23 @@ Draft R-IDs, to be firmed up at promotion.
   source holds the file only at its new path. That cycle's GOAL left mount-level coverage out of scope;
   its engine-level regressions, including the replay landing mid-call, which a mount cannot schedule,
   are in `tests/engine/test_replay.py`.
+- **R10** *(added 2026-11-09, retiring `truncate-recording-after-ancestor-rename`)* — Where the FUSE
+  half runs, the lane shall include a mount-level case that calls `truncate(2)` on a path, with no open
+  handle, while another process renames a directory above the file, once for a source-served file and
+  once for a stage-served one, and shall assert that a call that succeeds leaves `stat` at the file's
+  final path reporting the cut size, and that after the queue drains the source holds the file only at
+  its final path, at the size `stat` reports. A mount cannot place the rename inside the call, so the
+  case samples that window rather than pins it. That cycle's GOAL left mount-level coverage out of
+  scope; its engine-level regressions, which do place the rename inside the call, are in
+  `tests/engine/test_replay.py`, and the same race under unordered real threads is
+  [`issues/freethreaded-concurrency-stress.md`](freethreaded-concurrency-stress.md)'s.
 
 ## Notes
 
 - Related: `spec/deferred-rename-source-orphan/` (landed; its mount-level case is R7 here),
   `spec/source-path-truncate-and-stat/` (landed; its mount-level case is R8 here),
-  `spec/source-served-open-race/` (landed; its mount-level case is R9 here) and
+  `spec/source-served-open-race/` (landed; its mount-level case is R9 here),
+  `spec/truncate-recording-after-ancestor-rename/` (landed; its mount-level case is R10 here) and
   `issues/shutdown-rescue-gaps.md` (its defect lives in the surface this lane covers, and it owes the
   case its own tests do not yet contain);
   `issues/archive-tier-test-coverage.md` and `issues/crash-fault-injection-suite.md` (both add tests
