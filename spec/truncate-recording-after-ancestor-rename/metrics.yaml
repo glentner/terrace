@@ -1,0 +1,29 @@
+# Hand-copied by the publish step (2026-11-09) from the live record in the cycle worktree's git dir,
+# unchanged below this comment. `metrics.py landed` refuses an unapproved last review and has no
+# override flag: the last review (cycle 1) is changes-requested on F1 (HIGH, records), closed by the
+# records spot fix 4f12582, a7b493d and e0a6161 with no review cycle 2, under Geoffrey's explicit
+# override of the verdict and of the staleness gate for that fix (REVIEW.md, "Geoffrey's rulings on
+# review cycle 1"). So `landed` stays null rather than recording a false approval, and the publish run
+# was not clocked (no `open` run for it).
+# The feature run's 15218 s includes about 4 h of waiting on Geoffrey's answer to Q4 in-session, because
+# the clock was not stopped first (the foreman's error); the shaping itself took minutes.
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: truncate-recording-after-ancestor-rename
+escaped_from: pre-factory
+planned: {date: '2026-11-08', phases: 3}
+landed: null
+open: null
+runs:
+- {step: feature, start: '2026-11-08T17:40:56-05:00', stop: '2026-11-08T21:54:34-05:00', seconds: 15218, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-08T21:54:34-05:00', stop: '2026-11-08T22:47:39-05:00', seconds: 3185, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T22:47:39-05:00', stop: '2026-11-08T22:56:49-05:00', seconds: 550, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T22:56:50-05:00', stop: '2026-11-08T23:03:15-05:00', seconds: 385, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-08T23:03:15-05:00', stop: '2026-11-08T23:16:40-05:00', seconds: 805, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-08T23:16:40-05:00', stop: '2026-11-08T23:50:06-05:00', seconds: 2006, end: question, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-09T08:20:22-05:00', stop: '2026-11-09T08:31:06-05:00', seconds: 644, end: gate, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-08'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 0, low: 0}
+  plausible: 0

@@ -93,13 +93,14 @@ class OverlayEngine:
         self._handles_mutex = threading.Lock()
         # Serializes every change to the source's namespace (a replayed op, a vacate's replay, a purge, and a data
         # commit or a create whose destination is the source, placement through recording), and these acts too:
-        # the stat behind recording a copy served off the source, the open of such a copy, a promotion's copy off
-        # the source, and the handle-less cut, whatever copy serves. So a physical place resolved from the catalog
-        # still holds when the act or the stat lands. `getattr`'s live stat reads the held place without it. Order:
-        # path locks, then this, then `_handles_mutex`, then the SQLite write lock. While holding it, nothing takes
-        # a path lock or calls `_ensure`, `getattr` or `readdir` (replay under a nested path lock is the AB/BA
-        # deadlock), and nothing acquires it inside `db.transaction()`. It is re-entrant because replay nests:
-        # `_vacate` replays rows through `_execute_namespace`, which takes it.
+        # a user rename from its `_vacate` through its catalog move, the stat behind recording a copy served off the
+        # source, the open of such a copy, a promotion's copy off the source, and the handle-less cut, whatever copy
+        # serves. So a physical place resolved from the catalog still holds when the act or the stat lands, and no
+        # ancestor's catalog move lands between the cut's lookup and its recording. `getattr`'s live stat reads the
+        # held place without it. Order: path locks, then this, then `_handles_mutex`, then the SQLite write lock.
+        # While holding it, nothing takes a path lock or calls `_ensure`, `getattr` or `readdir` (replay under a
+        # nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It is
+        # re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
         self._source_lock = threading.RLock()
 
     # -- lifecycle ----------------------------------------------------------------------------------------------
@@ -412,7 +413,10 @@ class OverlayEngine:
         """
         Rename, replacing a live file (or empty directory) at `new`. Durable in
         the catalog immediately; staging copies move now; the source moves when
-        the queued op commits.
+        the queued op commits. The source lock is held from `_vacate` through the
+        catalog move, so the move never lands between a handle-less `truncate`'s
+        lookup under that lock and its recording, for a file below `old`; the
+        staging copies move after the lock is released.
         """
         old, new = normalize(old), normalize(new)
         if old == '/' or new == '/':
@@ -441,17 +445,18 @@ class OverlayEngine:
                 elif entry.kind == 'dir':
                     raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', new)
                 self._remove(target, replaced=True)
-            self._vacate(new, mover=entry.id)
-            now = self.clock()
-            with self.db.transaction():
-                self.catalog.rename(old, new)
-                self.journal.queue(new, 'rename', to_tier=self.source.name, now=now,
-                                   detail={'old': old, 'new': new})
-                # The source still holds the old path until the op commits; a tombstone
-                # masks it from re-adoption (purged when the rename executes upstream).
-                self.catalog.add(old, entry.kind, mode=entry.mode, uid=entry.uid, gid=entry.gid,
-                                 mtime=now, ctime=now, atime=now)
-                self.catalog.mark_deleted(old)
+            with self._source_lock:
+                self._vacate(new, mover=entry.id)
+                now = self.clock()
+                with self.db.transaction():
+                    self.catalog.rename(old, new)
+                    self.journal.queue(new, 'rename', to_tier=self.source.name, now=now,
+                                       detail={'old': old, 'new': new})
+                    # The source still holds the old path until the op commits; a tombstone
+                    # masks it from re-adoption (purged when the rename executes upstream).
+                    self.catalog.add(old, entry.kind, mode=entry.mode, uid=entry.uid, gid=entry.gid,
+                                     mtime=now, ctime=now, atime=now)
+                    self.catalog.mark_deleted(old)
             for name, tier in self.tiers.items():
                 if tier is self.source or tier.stat(_pure(old)) is None:
                     continue
@@ -635,8 +640,9 @@ class OverlayEngine:
         opened at its logical path without the source lock. After the first lookup, only the lookup under the
         source lock checks which entry the path holds; a rename or removal landing before it is otherwise outside
         what this call guarantees. One that lands before `_serve` finds the copy that serves can raise
-        `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's stage bytes
-        (`issues/freethreaded-concurrency-stress.md`).
+        `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's stage bytes.
+        Nothing holds those off: the path lock covers `path` alone, not an ancestor, and the source lock is taken
+        only for the lookup under it.
         """
         path = normalize(path)
         with self.locks.hold(path):
@@ -675,8 +681,9 @@ class OverlayEngine:
         lock. A rename or removal landing before the lookup under the lock is otherwise outside what this call
         guarantees: one that lands before `fastest_copy` is read can raise `EngineError` (no resident copy), and
         an ancestor's round trip after the tier is decided can promote over a stage copy written meanwhile and
-        record it clean (`issues/freethreaded-concurrency-stress.md`). The lock is re-entrant, so the handle-less
-        `truncate`, which calls this with it held, decides as before.
+        record it clean: the caller's path lock does not cover an ancestor, and the source lock is taken only for
+        a promotion off the source. The lock is re-entrant, so the handle-less `truncate`, which calls this with it
+        held, decides as before.
         """
         fastest = self.catalog.fastest_copy(entry.path)
         if fastest is None:
@@ -745,9 +752,17 @@ class OverlayEngine:
         it. So does a non-file that has taken the entry's id. The id check cannot tell the entry from a file that
         has taken its id after a purge (ids are reused, and only a schema change could tell them apart), and such
         a file carried onto `path` is cut. The open never follows a symbolic link at the file itself, the last
-        path component (`O_NOFOLLOW`). A rename of an ancestor that has already passed its `_vacate` when the
-        call takes the source lock can still move the entry between the decision and the recording: the catalog
-        writes, keyed by `path`, then match no row, while the stage-counter write, keyed by tier, lands.
+        path component (`O_NOFOLLOW`). An ancestor's `rename` holds the source lock from its `_vacate` through its
+        catalog move, so it never moves the entry between the decision and the recording: one whose catalog move
+        commits first leaves `path` empty (unless another rename has carried the file back, and the cut then goes
+        on), and the call raises ENOENT before anything is marked or cut; one that reaches the lock meanwhile waits
+        until the recording commits. The rename moves stage copies after releasing the lock, and a cut at the path
+        it has just moved the file to, before the rename has moved the stage copy that is the file's fastest,
+        finds that copy missing at the new path: serving it, the cut raises ENOENT after its dirty mark, having cut
+        nothing; promoting from it to a faster tier that admits the file, the cut raises `TierError` (not an
+        OSError) out of the promotion, before any dirty mark. A cut whose fastest copy is on the source, or on a
+        stage copy the rename has already moved, goes on and records its cut. Neither lock holds that gap off: the
+        path lock does not cover an ancestor, and the rename moves its stage copies without the source lock.
         """
         path = normalize(path)
         if handle is not None:
@@ -781,7 +796,7 @@ class OverlayEngine:
                     with self.db.transaction():
                         self.catalog.update_meta(path, size=length, mtime=now)
                         self.catalog.update_residency(path, serving, size=length, mtime=now)
-                        if previous is not None and serving != self.source.name:
+                        if serving != self.source.name:
                             self.registry.adjust_usage(serving, bytes=length - previous.size)
 
     def fsync(self, handle: Handle, datasync: bool = False) -> None:

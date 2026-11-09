@@ -36,16 +36,20 @@ recorded when it was queued. The classes guarded here:
   handle on a stack whose stage it outgrows (`bypass_size`). The cut holds the source lock, whatever
   copy serves, and decides under it the entry at its path, its kind and the serving copy, which may be
   a faster one taken during the wait; it refuses a non-file or another entry found at the path, and
-  never follows a symbolic link at the file itself (the last path component);
+  never follows a symbolic link at the file itself (the last path component). A directory rename holds
+  the source lock from its `_vacate` through its catalog move, so a cut of a file below it that the
+  rename, stopped past its `_vacate`, would otherwise land inside (at its serving decision, a promotion
+  and its copy, its dirty mark, its open or its recording) either raises ENOENT having cut nothing or
+  records its cut where the rename moves the file, with every stage's counter agreeing; a rename that
+  reaches the lock while the cut holds it waits; the rename moves its stage copies after releasing it;
 * a file served off the source whose object a replay moves after `open` found its entry is opened, or
   promoted to a faster tier, where the replay left the object. The open of a copy served off the source and
   a promotion off the source look the entry up again under the source lock and open the object before
   releasing it, so neither reads the old place or another entry's object moved onto it, short of a file
   that took the entry's id after a purge (ids are reused) and was carried onto the path. The lookup under the
   source lock raises ENOENT when the path then holds no entry, another entry, or a non-file; a rename or
-  removal landing before it is otherwise outside what `open` guarantees
-  (`issues/freethreaded-concurrency-stress.md`). A copy served off a stage, and a promotion from one, take no
-  source lock;
+  removal landing before it is otherwise outside what `open` guarantees, since its path lock does not cover
+  an ancestor. A copy served off a stage, and a promotion from one, take no source lock;
 * a rename row's tombstone purge leaves another entry's tombstone and queued removal alone;
 * a directory whose target lies inside its own source object moves only once the entries placed
   there have moved out.
@@ -1718,4 +1722,308 @@ def test_open_promotes_from_a_staged_copy_without_the_source_lock(tmp_path: Path
     stage.open_read = probed
     assert_reads(engine, '/s.txt', 'tmp', b'small')          # promoted from the middle stage
     assert free == [True]                                    # another thread could take the source lock meanwhile
+    assert_converged(engine)
+
+
+# -- an ancestor's rename lands in no window of the cut: the cut records where it moves the file, or refuses ----
+
+JOIN = 10.0                     # seconds any wait may take; a deadlock fails the test instead of hanging it
+
+
+class Watched:
+    """
+    Stands in for the source lock. When a thread in `waits` finds it held and has to wait for it, that thread's
+    event is set first. The real lock is re-entrant and is taken and released exactly as the engine asks.
+    """
+
+    def __init__(self, real) -> None:
+        self.real, self.waits = real, {}
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if self.real.acquire(blocking=False):
+            return True
+        if (event := self.waits.get(threading.current_thread())) is not None:
+            event.set()
+        return self.real.acquire(blocking=blocking)
+
+    def release(self) -> None:
+        self.real.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.release()
+
+
+class WaitSignal:
+    """Set by a `Watched` lock when its thread must wait: records that, and wakes the driver's `event`."""
+
+    def __init__(self, event: threading.Event) -> None:
+        self.event, self.seen = event, False
+
+    def set(self) -> None:
+        self.seen = True
+        self.event.set()
+
+
+def stop_at(owner, name: str, pause, after: bool = False) -> None:
+    """Wrap `owner.name` so that `pause()` runs before (or after) the real call."""
+    real = getattr(owner, name)
+
+    def stopped(*args, **kwargs):
+        if not after:
+            pause()
+        result = real(*args, **kwargs)
+        if after:
+            pause()
+        return result
+
+    setattr(owner, name, stopped)
+
+
+def race(engine: OverlayEngine, old: str, new: str, cut, stop, rename_first: bool = True) -> dict:
+    """
+    Run `engine.rename(old, new)` and `cut()` on two threads of their own, and return each one's exception (None
+    on success) under 'rename' and 'cut', whether the cut reached its stop under 'stopped', and the names of the
+    threads that had to wait for the source lock under 'waited'. `stop(engine, pause)` installs `pause` where the
+    cut is to stop, once.
+
+    With `rename_first`, the rename stops just after its `_vacate` returns: it has cleared its target and has not
+    yet moved the catalog. The cut then starts and runs until it reaches its stop or has to wait for the source
+    lock. The rename goes on until it finishes or has to wait for the source lock; then the cut goes on. Without
+    it, the cut starts first and stops, the rename runs until it finishes or has to wait for the source lock, and
+    the cut goes on. Either way, no step waits on a thread that waits on the other, whatever the engine locks.
+    """
+    cut_stopped, rename_stopped, past, go_rename, go_cut = (threading.Event() for _ in range(5))
+    outcome: dict = {}
+    lock = Watched(engine._source_lock)
+
+    def run(name: str, call, done: threading.Event | None = None) -> None:
+        try:
+            call()
+        except BaseException as error:                       # read in the test's thread
+            outcome[name] = error
+        else:
+            outcome[name] = None
+        finally:
+            if done is not None:
+                done.set()
+
+    renamer = threading.Thread(target=run, args=('rename', lambda: engine.rename(old, new), rename_stopped),
+                               daemon=True)
+    cutter = threading.Thread(target=run, args=('cut', cut, cut_stopped), daemon=True)
+    lock.waits = {renamer: WaitSignal(rename_stopped), cutter: WaitSignal(cut_stopped)}
+    real_vacate, paused = engine._vacate, []
+
+    def vacate(*args, **kwargs) -> None:
+        real_vacate(*args, **kwargs)
+        if rename_first and threading.current_thread() is renamer:
+            past.set()
+            assert go_rename.wait(JOIN)
+
+    def pause() -> None:
+        if threading.current_thread() is cutter and not paused:
+            paused.append(True)
+            cut_stopped.set()
+            assert go_cut.wait(JOIN)
+
+    engine._source_lock, engine._vacate = lock, vacate
+    stop(engine, pause)
+    try:
+        if rename_first:
+            renamer.start()
+            assert past.wait(JOIN)
+            cutter.start()
+            assert cut_stopped.wait(JOIN)
+            go_rename.set()
+            assert rename_stopped.wait(JOIN)
+        else:
+            cutter.start()
+            assert cut_stopped.wait(JOIN)
+            renamer.start()
+            assert rename_stopped.wait(JOIN)
+        go_cut.set()
+        cutter.join(JOIN)
+        renamer.join(JOIN)
+        assert not renamer.is_alive() and not cutter.is_alive()
+    finally:
+        go_rename.set()
+        go_cut.set()
+        engine._source_lock = lock.real
+        del engine._vacate
+    outcome['stopped'] = bool(paused)
+    outcome['waited'] = {name for name, thread in (('rename', renamer), ('cut', cutter)) if lock.waits[thread].seen}
+    return outcome
+
+
+def assert_counted(engine: OverlayEngine) -> None:
+    """Every stage's counter is the sum of its residency rows' sizes and their count, and neither is negative."""
+    for spec in engine.spec.tiers[1:]:
+        rows = list(engine.db.execute(t'SELECT size FROM residency WHERE tier = {spec.name}'))
+        usage = dataclasses.astuple(engine.registry.usage(spec.name))
+        assert usage == (sum(row['size'] for row in rows), len(rows)) and min(usage) >= 0, spec.name
+
+
+def assert_recorded_or_refused(engine: OverlayEngine, outcome: dict, path: str, original: bytes, length: int) -> bool:
+    """
+    The rename succeeded; the cut either returned, with `getattr` at the file's new `path`, the fastest copy's
+    residency and a read all at `length`, or raised ENOENT with the file whole on every tier that holds it. No
+    intent is left unresolved and every stage's counter agrees. Returns whether the cut returned.
+    """
+    returned = cut_returned(outcome)
+    assert engine.journal.pending() == []
+    assert_counted(engine)
+    expected = length if returned else len(original)
+    assert_cut(engine, path, original, expected)
+    assert engine.catalog.fastest_copy(path).size == expected
+    if not returned:
+        assert {r.size for r in engine.catalog.residencies(path)} == {len(original)}
+    return returned
+
+
+def cut_returned(outcome: dict) -> bool:
+    """The rename succeeded, and the cut either returned or raised ENOENT; whether it returned."""
+    assert outcome['rename'] is None, repr(outcome['rename'])
+    error = outcome['cut']
+    assert error is None or (isinstance(error, FileNotFoundError) and error.errno == errno.ENOENT), repr(error)
+    return error is None
+
+
+def assert_counted_through(engine: OverlayEngine, path: str) -> None:
+    """Counters agree after the queue drains, after each stage copy's eviction, and after an open and release."""
+    engine.flush()
+    assert_counted(engine)
+    for residency in engine.catalog.residencies(path):
+        if residency.tier != engine.source.name:
+            assert engine.evict_copy(path, residency.tier)
+    assert_counted(engine)
+    engine.release(engine.open(path))
+    assert_counted(engine)
+
+
+def staged(tmp_path: Path, clock: Clock) -> OverlayEngine:
+    """A 5-byte `/data/s.txt` the stage serves (`bypass_size` 100), opened once to promote it."""
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    engine.release(engine.open('/data/s.txt'))
+    assert {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/data/s.txt')} == {
+        'project': ('clean', 5), 'scratch': ('clean', 5)}
+    return engine
+
+
+def cut_staged_past_vacate(tmp_path: Path, clock: Clock, stop) -> None:
+    """The staged file is cut to 2 bytes while its directory's rename, past its `_vacate`, races it."""
+    engine = staged(tmp_path, clock)
+    outcome = race(engine, '/data', '/moved', lambda: engine.truncate('/data/s.txt', 2), stop)
+    assert_recorded_or_refused(engine, outcome, '/moved/s.txt', b'small', 2)
+    assert_counted_through(engine, '/moved/s.txt')
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_of_a_staged_copy_meets_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """Racing the cut once the stage copy is open, the rename's catalog move lands outside the cut."""
+    cut_staged_past_vacate(tmp_path, clock,
+                           lambda e, pause: stop_at(e.tiers['scratch'], 'open_direct', pause, after=True))
+
+
+def test_truncate_without_a_handle_counts_its_cut_under_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """The same, once the cut has read the residency its counter change is computed from."""
+    cut_staged_past_vacate(tmp_path, clock,
+                           lambda e, pause: stop_at(e.catalog, 'get_residency', pause, after=True))
+
+
+def test_truncate_without_a_handle_decides_its_serving_copy_outside_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """The same, at the serving decision."""
+    cut_staged_past_vacate(tmp_path, clock, lambda e, pause: stop_at(e.catalog, 'fastest_copy', pause))
+
+
+def test_truncate_without_a_handle_marks_dirty_outside_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """The same, at the dirty mark."""
+    cut_staged_past_vacate(tmp_path, clock, lambda e, pause: stop_at(e.journal, 'mark_dirty', pause))
+
+
+def test_truncate_without_a_handle_of_a_source_served_file_meets_an_ancestor_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """A file served off the source, two levels below the renamed directory, once the source object is open."""
+    data = bytes(range(200))
+    engine = source_served(tmp_path, clock, {'data/deep/big.bin': data})
+    outcome = race(engine, '/data', '/moved', lambda: engine.truncate('/data/deep/big.bin', 2),
+                   lambda e, pause: stop_at(e.tiers['project'], 'open_direct', pause, after=True))
+    assert_recorded_or_refused(engine, outcome, '/moved/deep/big.bin', data, 2)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_promotes_outside_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    A promotion off the source the cut triggers, once the stage holds the copied bytes: no `promote` intent is
+    left, and the stage holds the file's bytes only where a residency row says.
+    """
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    outcome = race(engine, '/data', '/moved', lambda: engine.truncate('/data/s.txt', 2),
+                   lambda e, pause: stop_at(e.tiers['scratch'], 'put', pause, after=True))
+    returned = cut_returned(outcome)                         # read before a check's own open promotes the file
+    assert tree(tmp_path / 'scratch') == ({'moved': 'DIR', 'moved/s.txt': b'sm'} if returned else {})
+    assert ('scratch' in {r.tier for r in engine.catalog.residencies('/moved/s.txt')}) == returned
+    assert assert_recorded_or_refused(engine, outcome, '/moved/s.txt', b'small', 2) == returned
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_promotion_looks_up_outside_a_directory_rename_past_its_vacate(
+        tmp_path: Path, clock: Clock) -> None:
+    """The same where the promotion looks the entry up again, before it opens an intent."""
+    engine = source_served(tmp_path, clock, {'data/s.txt': b'small'})
+    outcome = race(engine, '/data', '/moved', lambda: engine.truncate('/data/s.txt', 2),
+                   lambda e, pause: stop_at(e, '_lookup_again', pause))
+    returned = cut_returned(outcome)
+    assert tree(tmp_path / 'scratch') == ({'moved': 'DIR', 'moved/s.txt': b'sm'} if returned else {})
+    assert ('scratch' in {r.tier for r in engine.catalog.residencies('/moved/s.txt')}) == returned
+    assert assert_recorded_or_refused(engine, outcome, '/moved/s.txt', b'small', 2) == returned
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_records_its_cut_before_a_waiting_directory_rename_moves_it(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    A directory rename that reaches the source lock while the cut holds it waits, and the cut is recorded where
+    the rename then moves the file: its size, its stage copy's size and the stage's counter agree.
+    """
+    engine = staged(tmp_path, clock)
+    outcome = race(engine, '/data', '/moved', lambda: engine.truncate('/data/s.txt', 2),
+                   lambda e, pause: stop_at(e.tiers['scratch'], 'open_direct', pause, after=True),
+                   rename_first=False)
+    assert outcome['stopped'] and outcome['waited'] == {'rename'}    # the cut held the lock at its stop
+    assert assert_recorded_or_refused(engine, outcome, '/moved/s.txt', b'small', 2)
+    assert {r.tier: (r.state, r.size) for r in engine.catalog.residencies('/moved/s.txt')} == {
+        'project': ('clean', 5), 'scratch': ('dirty', 2)}
+    assert_counted_through(engine, '/moved/s.txt')
+    assert_converged(engine)
+
+
+def test_rename_moves_stage_copies_outside_the_source_lock(tmp_path: Path, clock: Clock) -> None:
+    """A rename holds the source lock through its catalog move, and moves the stage copies after releasing it."""
+    engine = staged(tmp_path, clock)
+    stage = engine.tiers['scratch']
+    real = stage.rename
+    free = []
+    probe = lock_probe(engine, free)
+
+    def probed(*args, **kwargs):
+        delattr(stage, 'rename')                             # once: the tier's own method again
+        probe()
+        return real(*args, **kwargs)
+
+    stage.rename = probed
+    engine.rename('/data', '/moved')
+    assert free == [True]
+    assert_reads(engine, '/moved/s.txt', 'scratch', b'small')
+    engine.flush()
     assert_converged(engine)

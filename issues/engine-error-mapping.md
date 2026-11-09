@@ -31,6 +31,7 @@ cataloged entry. `EngineError` subclasses `SOSFSError`, which subclasses `Except
 an errno the engine chose. Found by reading the call graph, not reproduced: it requires a catalog
 entry whose residency rows have all vanished, which is a state `sosfs audit` is meant to repair and
 today nothing repairs.
+- 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
 
 **Writing through a handle to an unlinked file raises `LookupError`.** `write` calls
 `_mark_handle_dirty` before the bytes land (`overlay.py:650-651`, the metadata-before-acknowledgment
@@ -39,6 +40,7 @@ gone, the residency `UPDATE` at `src/sosfs/state/journal.py:149-150` matches zer
 `journal.py:152` raises `LookupError(f'No copy of {path} in tier {tier}')`. Reproduced: against a file
 that already exists in the source, the sequence open → unlink → write yields
 `LookupError('No copy of /x.dat in tier scratch')`.
+- 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
 
 **The same write on a file the mount itself created raises `AttributeError`.** `_remove` tombstones
 an unlinked entry only when it has a source copy and purges it outright when it does not
@@ -46,6 +48,7 @@ an unlinked entry only when it has a source copy and purges it outright when it 
 `catalog.by_id` returns `None` and `overlay.py:661` dereferences it in
 `with self.locks.hold(entry.path)`, before `mark_dirty` is reached. Reproduced: the sequence
 create → open → unlink → write yields `AttributeError("'NoneType' object has no attribute 'path'")`.
+- 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
 
 That last sequence is `tempfile.TemporaryFile`. Create a file, keep the descriptor, unlink the name,
 write through the descriptor — the standard way every POSIX program makes a scratch file that cannot
@@ -66,6 +69,20 @@ both `create` (`overlay.py:337`) and `_serve` (`overlay.py:629`) — callback pa
 `OverlaySpec._validate_stack` (`src/sosfs/tier/spec.py:304`) does not require an S3 or archive source
 to be backed by a POSIX staging tier, so that configuration parses and then throws a non-`OSError` out
 of the first `open`.
+- 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
+
+*Added 2026-11-08 by `truncate-recording-after-ancestor-rename`, review cycle 1:* an instance outside
+that cycle's scope (it lands before the cut's lookup under the source lock, and the escape is that
+GOAL's Non-goal).
+
+- **A promotion from a slower stage in a rename's stage-move gap raises `TierError`.** A user `rename`
+  of a directory moves its stage copies after it releases the source lock. In that gap the catalog
+  holds the file at its new path while the stage still holds the bytes at the old one. A handle-less
+  `truncate` at the new path whose `_serve` promotes the file from a slower stage to a faster one that
+  admits it copies from the logical new path, and `transfer.copy` raises
+  `TierError('No file at /moved/s.txt in tier scratch')` (`engine/transfer.py:91`). `TierError` is a
+  `SOSFSError`, not an `OSError`. Nothing is marked dirty and no intent is left open. Reproduced by
+  injection on a three-tier stack at `9169405`, and identically with `overlay.py` as at `630a406`.
 
 ## Why it was deferred
 
@@ -101,6 +118,7 @@ Draft R-IDs, to be firmed up at promotion.
   public engine operation through its failure paths and asserting `isinstance(error, OSError)`; the
   four sites known today are `overlay.py:200`, `:627`, the un-guarded `entry` dereference at `:661`
   and the `mark_dirty` path at `:662`.
+  - 2026-11-09: the `overlay.py` line numbers in this item hold at `6a046b4`.
 - **R4** — If the engine cannot serve an entry because no resident copy exists, then it shall raise an
   `OSError` subclass whose `errno` the adapter forwards unchanged to libfuse. The errno is named at
   promotion; see the open question below.
@@ -125,6 +143,7 @@ Draft R-IDs, to be firmed up at promotion.
   including the start-up failures at `overlay.py:120` and `:128` that never occur inside a callback and
   would then carry a meaningless errno into a CLI error message. Per-site errnos are more code and say
   something true at each site.
+  - 2026-11-09: the `overlay.py` line numbers in this item hold at `6a046b4`.
 - Open — **what the write path does on a dead entry.** POSIX wants the write to land in the resident
   copy; the residency row is also what the eviction manager and the quota counters read, so "no row"
   needs its own handling rather than an early return. Whether the entry keeps a residency row until the

@@ -72,6 +72,10 @@ the tree that cycle landed.
   exercised only by deterministic stale-snapshot regressions in `tests/engine/test_replay.py` and by
   the model's split of a scheduler poll into the pump's scan and commit. Nothing runs a replay and a
   data commit for the same entry on two threads.
+  - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a user `rename` now holds the mutex from
+    its `_vacate` through its catalog move. `tests/engine/test_replay.py` runs that rename and a
+    handle-less `truncate` on two threads, ordered by events at the mutex rather than by timing; no
+    test yet runs a replay and a data commit for the same entry on two threads.
 - **Path locks do not cover descendants** (pre-existing; that cycle neither widened nor fixed it). A
   directory `rename` holds `lock(old, new)` only (`src/sosfs/engine/overlay.py:425`), and
   `Catalog.rename` rewrites every descendant's path (`src/sosfs/state/catalog.py:170`) while another
@@ -79,6 +83,24 @@ the tree that cycle landed.
   (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
   - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
     `overlay.py` one, to `:427` at `5b8dcaf`.
+  - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a user `rename` now holds the source lock
+    from its `_vacate` through its catalog move, which keeps the move out of the handle-less
+    `truncate` from its lookup under that lock to its recording. Other calls hold a path lock and write the catalog by that path with no source lock,
+    and an ancestor's catalog move can still land inside them: `evict_copy`, `_set_meta`,
+    `_mark_handle_dirty`, `_record` (a copy served off a stage), `commit_row` and `_commit_hop`,
+    `commit_upstream`, `commit_to_shared`, `create`, `mkdir` and `_remove`. Argued from the code, not
+    reproduced.
+  - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a rename moves its stage copies after it
+    releases the source lock. A cut at the new path in that gap whose fastest copy is a stage copy not
+    yet moved raises ENOENT after its dirty mark, having cut nothing, when it serves that copy, and
+    `TierError`, not an `OSError`, out of `_serve`'s promotion before any dirty mark when a faster tier
+    admits the file (`issues/engine-error-mapping.md`); one whose fastest copy is on the source, or on a
+    stage copy already moved, is cut and recorded. A cut or an `open` there that promotes the file
+    off the source creates the new path's directory on the stage, after which the rename's stage move
+    fails with ENOTEMPTY, which escapes `rename` after its catalog move, and leaves the stage's other
+    copies at the old path. A second rename in that gap could also leave another entry's stage bytes
+    where a cut at the new path then opens them. The cut's outcomes and the ENOTEMPTY sequence were
+    reproduced by injection at `9169405`; the second rename is argued from the code, not reproduced.
 
 *Added 2026-11-06 by `deferred-rename-source-orphan`, review cycle 1:* user removals take no source
 mutex. `unlink` and `rmdir` cancel an entry's queued rows and queue the removal under path locks alone
@@ -136,6 +158,9 @@ out of that cycle's scope (it touched none of this code).
   and out of `commit_row` on the pump's thread, killing the pump. The row stays queued, and a later
   flush converges. Reproduced deterministically by injection at `e034985` and identically at
   `5e0d997`, and seen under real threads.
+  - 2026-11-08 (`truncate-recording-after-ancestor-rename`): closed by the rename's hold of the
+    source lock through its catalog move, which the replay's read and `begin` sit under. Argued from
+    the code; no test pins it.
 
 ## Why it was deferred
 

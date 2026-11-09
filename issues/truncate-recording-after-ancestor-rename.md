@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:truncate-recording-after-ancestor-rename
 kind: fix
 appetite: small
 lane: public

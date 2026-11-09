@@ -552,8 +552,8 @@ Risks and mitigations
   precisely by the audit. Tighten `delay`/`max_interval` (or use `passthrough`) where the loss
   window matters more than write amplification.
 * **Write-back namespace replay under path mutation** *(open in part: the data-commit orphan, the
-  replay family, stale scheduler rows and the live stat are closed; `truncate` without a handle, a
-  removal racing a replayed `mkdir`, and the thread-level test stay open)* —
+  replay family, stale scheduler rows, the live stat and the handle-less `truncate`'s recording are closed;
+  a removal racing a replayed `mkdir`, and the thread-level test stay open)* —
   the write-back queue is entry-keyed, so a deferred namespace op's target can drift from where
   the source physically holds the bytes while a rename is queued but uncommitted. Phase 8 added
   the committed source path and resolved deferred removals and renames against it, and recorded
@@ -584,19 +584,24 @@ Risks and mitigations
   recording, and never through a symbolic link at the file itself (the last path component); and
   `open` of a source-served copy and a promotion off the source look the entry up again under the
   mutex and open the object before releasing it, so a replay landing after `open`'s lookup leaves the
-  call at the object's new place.
+  call at the object's new place. A user `rename` holds the mutex from its `_vacate` through its catalog
+  move, so no ancestor's catalog move lands between the cut's lookup and its recording.
   `tests/engine/test_replay.py` guards each class deterministically, the concurrent ones by injecting
-  the interleaving on one thread or through one helper thread, and the hypothesis model
+  the interleaving on one thread, through one helper thread, or (an ancestor's rename against the
+  handle-less `truncate`) on two threads ordered by events at the mutex, and the hypothesis model
   (`tests/engine/test_model.py`) commits single entries, polls the scheduler, and checks convergence
   after draining by polls as well as at `flush()`.
   Still open: sizes that state databases written before the live-stat fix may hold wrong for a
   source-held copy (`issues/audit-command.md`); the handle-less `truncate`, `open` of a source-served
   copy and a promotion off the source tell their entry from another only by path, id and kind, so a
   file that took the entry's id after a purge and was carried onto the path during the call is cut,
-  opened or promoted (`issues/entry-identity-token.md`); and that cut keys its catalog
-  writes by its path, so a rename of an ancestor already past its `_vacate` can leave those writes
-  matching no row while its stage-counter write, keyed by tier, lands
-  (`issues/truncate-recording-after-ancestor-rename.md`). A user `rmdir` landing while a replayed `mkdir` has
+  opened or promoted (`issues/entry-identity-token.md`). A rename moves its stage copies after releasing
+  the mutex. A cut at the file's new path before they move, whose fastest copy is a stage copy not yet
+  moved, raises `ENOENT` after its dirty mark, having cut nothing, when it serves that copy, and
+  `TierError`, not an `OSError`, out of `_serve`'s promotion before any dirty mark when a faster tier
+  admits the file (`issues/engine-error-mapping.md`); one whose fastest copy is on the source, or on a
+  stage copy already moved, is cut and recorded (`issues/freethreaded-concurrency-stress.md`). A user
+  `rmdir` landing while a replayed `mkdir` has
   placed its directory but not yet recorded it purges the entry under the replay, whose confirm then
   raises and leaves the directory on the source (pre-existing, reproduced by injection); queue-row
   identity is by value, not a unique key, so a reused entry id with an identical row at an
