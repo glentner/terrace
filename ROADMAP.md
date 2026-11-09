@@ -30,18 +30,6 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Queued
 
-### A lookup by path, id and kind accepts a file that took a purged entry's id
-
-**Seed:** [`issues/entry-identity-token.md`](issues/entry-identity-token.md) · `fix` · appetite big
-
-Recorded by the handle-less `truncate` fix's plan (2026-11-06) and re-homed here by
-`source-served-open-race` (landed 2026-11-08, `spec/source-served-open-race/`), whose seed held it.
-Ids are reused, so a file that takes a purged entry's id and is carried onto the path by a directory
-rename passes the check the cut, `open` and a promotion off the source make under the source lock,
-and is cut, opened or promoted. Silent, reproduced by injection, and reachable only through a rename
-of an ancestor during the call. Closing it needs an identity token, a schema change with no
-migration path today.
-
 ### The model rarely reaches the scheduler and eviction commit routes
 
 **Seed:** [`issues/model-commit-route-reach.md`](issues/model-commit-route-reach.md) · `test` · appetite small
