@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:model-commit-route-reach
 kind: test
 appetite: small
 lane: public
