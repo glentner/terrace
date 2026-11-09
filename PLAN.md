@@ -580,22 +580,22 @@ Risks and mitigations
   the scheduler, `flush`, a drain or a vacate ran the replay; a file whose bytes sit off its logical
   path reports the size its object holds (the live stat behind `getattr` and `_record` reads the
   committed source path); and `truncate` without a handle cuts it there, holding the mutex from its
-  decision (the entry at its path, by path, id and kind, and the copy that serves it) through its
+  decision (the entry at its path, by path, id, kind and a purge watch, and the copy that serves it) through its
   recording, and never through a symbolic link at the file itself (the last path component); and
   `open` of a source-served copy and a promotion off the source look the entry up again under the
   mutex and open the object before releasing it, so a replay landing after `open`'s lookup leaves the
   call at the object's new place. A user `rename` holds the mutex from its `_vacate` through its catalog
-  move, so no ancestor's catalog move lands between the cut's lookup and its recording.
+  move, so no ancestor's catalog move lands between the cut's lookup and its recording. Each of the
+  cut, that `open` and that promotion opens a purge watch before it names its entry, which records every
+  purge from then on, and its lookup under the mutex refuses with `ENOENT` a file that took the entry's id
+  after its purge and was carried onto the path during the call; a purge of another entry refuses none.
   `tests/engine/test_replay.py` guards each class deterministically, the concurrent ones by injecting
   the interleaving on one thread, through one helper thread, or (an ancestor's rename against the
   handle-less `truncate`) on two threads ordered by events at the mutex, and the hypothesis model
   (`tests/engine/test_model.py`) commits single entries, polls the scheduler, and checks convergence
   after draining by polls as well as at `flush()`.
   Still open: sizes that state databases written before the live-stat fix may hold wrong for a
-  source-held copy (`issues/audit-command.md`); the handle-less `truncate`, `open` of a source-served
-  copy and a promotion off the source tell their entry from another only by path, id and kind, so a
-  file that took the entry's id after a purge and was carried onto the path during the call is cut,
-  opened or promoted (`issues/entry-identity-token.md`). A rename moves its stage copies after releasing
+  source-held copy (`issues/audit-command.md`). A rename moves its stage copies after releasing
   the mutex. A cut at the file's new path before they move, whose fastest copy is a stage copy not yet
   moved, raises `ENOENT` after its dirty mark, having cut nothing, when it serves that copy, and
   `TierError`, not an `OSError`, out of `_serve`'s promotion before any dirty mark when a faster tier

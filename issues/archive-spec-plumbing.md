@@ -25,7 +25,7 @@ writeback}` — no `location`, no `staging`, no `sync`, no `sharded`. `_reject_u
 `spec.py:204`, before the type is examined, so the first archive-shaped key kills the parse.
 `SUPPORTED_TYPES` (`spec.py:25`) is `{'posix', 's3'}` while `TIER_TYPES` (`spec.py:24`) admits
 `zip`, `tar` and `tar.gz`; `spec.py:209-210` raises "not yet supported" for the three it names but
-does not accept. And `OverlayEngine.start` (`src/sosfs/engine/overlay.py:109-126`) has exactly two
+does not accept. And `OverlayEngine.start` (`src/sosfs/engine/overlay.py:109-126` (holds at `5e0d997`)) has exactly two
 construction branches, `if tier_spec.type == 's3'` and an `else` that builds a `PosixTier` rooted at
 `tier_spec.path` — an archive spec that got past the parser would be constructed as a POSIX tier
 rooted at the archive *file*.
@@ -60,7 +60,7 @@ Widening the gate raises validation questions that the current stack rules do no
 one has a cost paid at the wrong time.
 
 **An archive tier has nowhere to put its managed-location marker.** The engine registers every tier
-and refuses to mount on any `MarkerStatus` but `OK` (`overlay.py:127-128`). `TierRegistry.attach`
+and refuses to mount on any `MarkerStatus` but `OK` (`overlay.py:127-128` (holds at `141aa86`)). `TierRegistry.attach`
 (`state/registry.py:106-110`) writes `.sosfs/marker` under a POSIX root; `attach_tier`
 (`registry.py:112-117`) delegates to `tier.read_marker` / `tier.write_marker`, which only `S3Tier`
 implements (`s3.py:286`, `:294`). `ArchiveTier` implements neither, and it cannot host the marker
@@ -68,7 +68,7 @@ inside itself: `_guard` (`archive.py:271-274`) raises `PermissionError` for any 
 `.sosfs`. An unmarked managed location is what the audit reads as tier evaporation.
 
 **An archive source with no POSIX staging tier is caught at first write, not at parse.**
-`eligible_tier` falls through to `overlay.py:200-201` and raises `EngineError: No
+`eligible_tier` falls through to `overlay.py:200-201` (holds at `141aa86`) and raises `EngineError: No
 passthrough-capable tier to stage a N-byte file from a zip source`. The mount comes up clean and
 then every `open` fails. `_validate_stack` (`spec.py:304-324`) enforces every other stack rule
 `PLAN.md` states — one source, source first, source not node-scoped, non-overlapping roots, state
@@ -123,7 +123,7 @@ Draft R-IDs, to be firmed up at promotion.
   directory SHALL also report `OK`, not `MISSING`.
 - **R5** — IF a spec names an archive source with no POSIX staging tier in the stack, THEN the spec
   parser SHALL refuse it at load, naming the missing staging tier; no spec that loaded SHALL be able
-  to reach the `EngineError` at `overlay.py:200-201`.
+  to reach the `EngineError` at `overlay.py:200-201` (holds at `141aa86`).
 - **R6** — IF a spec names a staged archive type without a `staging` path, THEN the spec parser
   SHALL refuse it at load rather than deferring to `ValueError` from `ArchiveTier.__init__`.
 - **R7** — WHEN two tier roots overlap after symlink resolution — including a `staging` working

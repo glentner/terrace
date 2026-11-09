@@ -84,6 +84,8 @@ the tree that cycle landed.
   - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
     `overlay.py` one, to `:427` at `5b8dcaf`, and `truncate-recording-after-ancestor-rename` to
     `:431` at `d557db2`.
+  - 2026-11-09 (`entry-identity-token`): `Catalog.purge` grew by a line, so `Catalog.rename` now
+    starts at line 171 of `src/sosfs/state/catalog.py`, one below the cite above.
   - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a user `rename` now holds the source lock
     from its `_vacate` through its catalog move, which keeps the move out of the handle-less
     `truncate` from its lookup under that lock to its recording. Other calls hold a path lock and write the catalog by that path with no source lock,
@@ -123,6 +125,20 @@ more race of the same shape stays open:
   reused and `AUTOINCREMENT` is a schema change with no migration path. A reused entry id carrying an
   identical row queued at an identical clock reading would pass as the same row. Not reproduced; it
   needs a clock that repeats a reading.
+  - *Added 2026-11-09 by `entry-identity-token`:* the three lookups under the source lock (the handle-less
+    `truncate`, a source-served `open`, a promotion off the source) now tell their entry from a file that
+    took its id, by an in-process purge watch each opens before it names the entry. Other lookups by entry
+    id after a wait stay open, argued from the code and not run: handles keyed by entry id (`_handles`,
+    `Handle.entry_id`), read by `_mark_handle_dirty`, `_record`, `getattr`, `_commit_hop` and
+    `evict_copy`, where a handle on an entry purged while it is open (a file with no source copy) reaches
+    the file that took its id; and a data row a scheduler snapshot read, looked up by `row.entry` in
+    `commit_row`, `flush` and `dirty_copies`. Also open: an `open` whose new file's fastest copy is on a
+    stage, when the route lands before `_serve` decides the serving copy, or after a promotion off the
+    source and before `open` opens the stage copy it made (an ancestor's round trip, below).
+  - *Added 2026-11-09 by `entry-identity-token`:* no test pins `_vacate`'s tombstone purge inside its
+    `db.transaction()`: unwrapped, the purge would commit before it records the freed id in the open purge
+    watches, and a call on another thread that took that id and named its file in between would be refused
+    falsely, which only real threads can reach.
 
 *Added 2026-11-08 by `source-served-open-race`:* one more, from that cycle's plan (its PLAN § 5 and
 adversarial review), deferred here because it needs a rename of an ancestor during the call, which

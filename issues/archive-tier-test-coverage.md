@@ -28,7 +28,7 @@ What does not exist is any test that drives an archive **through the engine or a
 `grep -rl archive tests/engine tests/fuse` returns nothing. No `tests/engine/` module builds an
 archive stack, and none can: `OverlaySpec` rejects the tier type and the archive keys
 (`tier/spec.py:25`, `:28`) and `OverlayEngine.start` has no archive branch
-(`engine/overlay.py:109-126`). The gap is structural, not neglect.
+(`engine/overlay.py:109-126` (holds at `5e0d997`)). The gap is structural, not neglect.
 
 The consequence is that every property that only appears above the adapter is unverified. Nothing
 checks promote-on-open from an archive source, cascade commit into an archive, the eviction

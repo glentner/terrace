@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:entry-identity-token
 kind: fix
 appetite: big
 lane: public

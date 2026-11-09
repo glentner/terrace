@@ -163,9 +163,10 @@ class Catalog:
         """Tombstone an entry: masked from lookups until the unlink commits upstream."""
         self.db.execute(t'UPDATE entry SET deleted = 1 WHERE path = {normalize(path)}')
 
-    def purge(self, path: str) -> None:
-        """Hard-delete an entry (residency, writeback, and intent rows cascade)."""
-        self.db.execute(t'DELETE FROM entry WHERE path = {normalize(path)}')
+    def purge(self, path: str) -> Optional[int]:
+        """Hard-delete an entry (residency, writeback, and intent rows cascade); the id it held, or None if none."""
+        row = self.db.execute(t'DELETE FROM entry WHERE path = {normalize(path)} RETURNING id').fetchone()
+        return None if row is None else row['id']
 
     def rename(self, old: str, new: str) -> None:
         """Rename an entry and, for directories, rewrite the whole subtree."""

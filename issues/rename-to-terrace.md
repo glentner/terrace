@@ -95,7 +95,7 @@ Rename the constant with no migration and `Marker.read` returns `None` for every
 row already exists in the state database:
 
 * **State DB survives.** `new` is false, `_attach` returns `MarkerStatus.MISSING`, and the engine
-  raises at `engine/overlay.py:127-128`: `Tier 'project' marker is missing — audit required`. Every
+  raises at `engine/overlay.py:127-128` (holds at `141aa86`): `Tier 'project' marker is missing — audit required`. Every
   existing overlay refuses to mount. Loud, correct, recoverable, no data touched. This is the *safe*
   failure and the cycle must preserve it.
 * **State DB does not survive.** `new` is true, `_attach` takes the `write(Marker(...))` branch at

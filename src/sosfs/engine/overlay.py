@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 # Standard libs
 import io
@@ -97,11 +97,17 @@ class OverlayEngine:
         # source, the open of such a copy, a promotion's copy off the source, and the handle-less cut, whatever copy
         # serves. So a physical place resolved from the catalog still holds when the act or the stat lands, and no
         # ancestor's catalog move lands between the cut's lookup and its recording. `getattr`'s live stat reads the
-        # held place without it. Order: path locks, then this, then `_handles_mutex`, then the SQLite write lock.
+        # held place without it. Order: path locks, then this, then `_handles_mutex`, then the SQLite write lock,
+        # then the purge-watch mutex below.
         # While holding it, nothing takes a path lock or calls `_ensure`, `getattr` or `readdir` (replay under a
         # nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It is
         # re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
         self._source_lock = threading.RLock()
+        # The open purge watches (`_watch`) and the lock guarding them and their ids: a leaf, below the SQLite write
+        # lock, since `_purge` takes it inside its transaction. Nothing is acquired while holding it.
+        self._watches: List[PurgeWatch] = []
+        self._watches_mutex = threading.Lock()
+        self._naming = threading.local()                    # each thread's open watch, if its call holds one
 
     # -- lifecycle ----------------------------------------------------------------------------------------------
 
@@ -215,9 +221,13 @@ class OverlayEngine:
     # -- lazy population ----------------------------------------------------------------------------------------
 
     def _ensure(self, path: str) -> Optional[Entry]:
-        """Entry for `path`, populating the catalog from the source on first touch."""
+        """
+        Entry for `path`, populating the catalog from the source on first touch. On a thread whose call holds an open
+        purge watch (`_watch`), the read that returns the entry clears that watch atomically with it (`_named`, or
+        inside `_adopt`'s transaction), so the watch holds exactly the purges from that read on.
+        """
         path = normalize(path)
-        entry = self.catalog.get(path)
+        entry = self._named(path)
         if entry is not None:
             return entry
         if self.catalog.get(path, include_deleted=True) is not None:
@@ -233,8 +243,29 @@ class OverlayEngine:
             return None
         return self._adopt(path, stat)
 
+    def _named(self, path: str) -> Optional[Entry]:
+        """
+        The live entry at `path`. When the calling thread's call holds an open watch, the read is made holding the
+        watch mutex and the watch is cleared in the same hold: every purge records inside its own transaction and
+        holding that mutex (`_purge`), so a record made before this read is of a row that held the id earlier, and
+        one made after it can only be this entry's. The thread's connection is opened before the hold, so its
+        pragmas never run under the watch mutex; the read in the hold is a WAL read, which takes no write lock.
+        """
+        watch = getattr(self._naming, 'watch', None)
+        if watch is None:
+            return self.catalog.get(path)
+        self.db.connection                                  # open this thread's connection outside the hold
+        with self._watches_mutex:
+            watch.clear()
+            return self.catalog.get(path)
+
     def _adopt(self, path: str, stat: TierStat) -> Entry:
-        """Record a source-tier object in the catalog (with its source residency)."""
+        """
+        Record a source-tier object in the catalog (with its source residency). The calling thread's open watch, if any,
+        is cleared inside the insert's transaction, which holds SQLite's write lock, so no purge records between the
+        clear and the commit: a row that held the id earlier was purged before it, and this entry's own purge comes
+        after.
+        """
         now = self.clock()
         try:
             with self.db.transaction():
@@ -246,8 +277,11 @@ class OverlayEngine:
                 if stat.kind != 'dir':
                     self.catalog.add_residency(path, self.source.name,
                                                atime=now, size=stat.size, mtime=stat.mtime)
+                if (watch := getattr(self._naming, 'watch', None)) is not None:
+                    with self._watches_mutex:
+                        watch.clear()
         except sqlite3.IntegrityError:
-            entry = self.catalog.get(path)                  # raced another adoption; theirs won
+            entry = self._named(path)                       # raced another adoption; theirs won
         return entry
 
     def _populate(self, path: str) -> None:
@@ -531,7 +565,7 @@ class OverlayEngine:
                 self.catalog.mark_deleted(path)
                 self.journal.queue(path, op, to_tier=self.source.name, now=now)
             else:
-                self.catalog.purge(path)
+                self._purge(path)
 
     def _purge_source(self, entry: Entry, now: float) -> None:
         """
@@ -625,27 +659,27 @@ class OverlayEngine:
 
     def open(self, path: str, flags: int = os.O_RDONLY) -> Handle:
         """
-        Open a file, promoting it synchronously (whole-file) to the fastest tier whose bypass_size and quota admit
-        it, then hand back a passthrough handle on the serving tier. O_TRUNC is honored through `truncate` so the
-        dirty transition commits before bytes vanish; O_APPEND positioning belongs to the caller (FUSE sends
-        explicit offsets).
+        Open a file, promoting it synchronously (whole-file) to the fastest tier whose bypass_size and quota admit it,
+        then hand back a passthrough handle on the serving tier. O_TRUNC is honored through `truncate` so the dirty
+        transition commits before bytes vanish; O_APPEND positioning belongs to the caller (FUSE sends explicit
+        offsets).
 
-        A copy served off the source is opened with the source lock held: under it the call looks the entry up
-        again at its path (`_lookup_again`) and opens the object at the place that entry records (`_held_path`)
-        before releasing the lock, as `_serve` does for a promotion off the source. A replay landing after the
-        first lookup, which moves the object, leaves the call at the object's new place, not at the old one or at
-        another entry's object. The lookup under the source lock raises ENOENT when the path then holds no entry,
-        another entry, or a non-file. The id check cannot tell the entry from a file that took its id after a
-        purge (ids are reused), and such a file carried onto the path is opened. A copy served off a stage is
-        opened at its logical path without the source lock. After the first lookup, only the lookup under the
-        source lock checks which entry the path holds; a rename or removal landing before it is otherwise outside
-        what this call guarantees. One that lands before `_serve` finds the copy that serves can raise
-        `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's stage bytes.
-        Nothing holds those off: the path lock covers `path` alone, not an ancestor, and the source lock is taken
-        only for the lookup under it.
+        A copy served off the source is opened with the source lock held: under it the call looks the entry up again at
+        its path (`_lookup_again`) and opens the object at the place that entry records (`_held_path`) before releasing
+        the lock, as `_serve` does for a promotion off the source. A replay landing after the first lookup, which moves
+        the object, leaves the call at the object's new place, not at the old one or at another entry's object. The
+        lookup under the source lock raises ENOENT when the path then holds no entry, another entry, a non-file, or a
+        file that took the entry's id after a purge: the call opens a purge watch, and its first lookup (`_ensure`)
+        clears the watch atomically with the read that names the entry, so the watch records every purge of that entry
+        from then on. A copy served off a stage is opened at its logical path without the source lock. After the first
+        lookup, only the lookup under the source lock checks which entry the path holds; a rename or removal landing
+        before it is otherwise outside what this call guarantees. One that lands before `_serve` finds the copy that
+        serves can raise `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's
+        stage bytes. Nothing holds those off: the path lock covers `path` alone, not an ancestor, and the source lock is
+        taken only for the lookup under it.
         """
         path = normalize(path)
-        with self.locks.hold(path):
+        with self.locks.hold(path), self._watch() as watch:
             entry = self._ensure(path)
             if entry is None:
                 raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -653,11 +687,11 @@ class OverlayEngine:
                 raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
             if entry.kind == 'symlink':
                 raise OSError(errno.ELOOP, 'Symlink not followed here', path)
-            serving = self._serve(entry)
+            serving = self._serve(entry, watch)
             direct = flags & ~(os.O_CREAT | os.O_EXCL | os.O_TRUNC | os.O_APPEND)
             on_source = serving == self.source.name
             with self._source_lock if on_source else contextlib.nullcontext():
-                current = self._lookup_again(entry) if on_source else entry
+                current = self._lookup_again(entry, watch) if on_source else entry
                 fd = self.tiers[serving].open_direct(_pure(self._held_path(current, serving)), direct)
             handle = Handle(entry.id, serving, fd, flags)
             with self._handles_mutex:
@@ -668,22 +702,20 @@ class OverlayEngine:
         log.trace(f'Opened {path} (tier={serving})')
         return handle
 
-    def _serve(self, entry: Entry) -> str:
+    def _serve(self, entry: Entry, watch: PurgeWatch) -> str:
         """
         The tier to serve `entry` from, promoting first when a faster one admits it. The tier is decided under the
-        caller's path lock. A promotion off the source takes the source lock, looks the entry up again at its path
-        under it (`_lookup_again`), and copies from the place that entry records (`_held_path`), holding the lock
-        for the whole copy, so a replay landing after the caller's lookup leaves the copy reading the object's
-        new place, not the old one or another entry's object. The lookup under the lock raises ENOENT, before any
-        intent is opened, when the path then holds no entry, another entry, or a non-file. The id check cannot
-        tell the entry from a file that took its id after a purge (ids are reused), and such a file carried onto
-        the path is promoted. A promotion from a stage reads the stage at the logical path without the source
-        lock. A rename or removal landing before the lookup under the lock is otherwise outside what this call
-        guarantees: one that lands before `fastest_copy` is read can raise `EngineError` (no resident copy), and
-        an ancestor's round trip after the tier is decided can promote over a stage copy written meanwhile and
-        record it clean: the caller's path lock does not cover an ancestor, and the source lock is taken only for
-        a promotion off the source. The lock is re-entrant, so the handle-less `truncate`, which calls this with it
-        held, decides as before.
+        caller's path lock. A promotion off the source takes the source lock, looks the entry up again at its path under
+        it (`_lookup_again`), and copies from the place that entry records (`_held_path`), holding the lock for the
+        whole copy, so a replay landing after the caller's lookup leaves the copy reading the object's new place, not
+        the old one or another entry's object. The lookup under the lock raises ENOENT, before any intent is opened,
+        when the path then holds no entry, another entry, a non-file, or a file that took the entry's id after a purge
+        (the caller's `watch`). A promotion from a stage reads the stage at the logical path without the source lock. A
+        rename or removal landing before the lookup under the lock is otherwise outside what this call guarantees: one
+        that lands before `fastest_copy` is read can raise `EngineError` (no resident copy), and an ancestor's round
+        trip after the tier is decided can promote over a stage copy written meanwhile and record it clean: the caller's
+        path lock does not cover an ancestor, and the source lock is taken only for a promotion off the source. The lock
+        is re-entrant, so the handle-less `truncate`, which calls this with it held, decides as before.
         """
         fastest = self.catalog.fastest_copy(entry.path)
         if fastest is None:
@@ -693,25 +725,59 @@ class OverlayEngine:
         if names.index(target.name) > names.index(fastest.tier):
             on_source = fastest.tier == self.source.name
             with self._source_lock if on_source else contextlib.nullcontext():
-                current = self._lookup_again(entry) if on_source else entry
+                current = self._lookup_again(entry, watch) if on_source else entry
                 self.transfers.copy(entry.path, self.tiers[fastest.tier], target, action='promote',
                                     now=self.clock(), src_path=self._held_path(current, fastest.tier))
             return target.name
         return fastest.tier
 
-    def _lookup_again(self, entry: Entry) -> Entry:
+    def _lookup_again(self, entry: Entry, watch: PurgeWatch) -> Entry:
         """
         `entry` as the catalog holds it now at its path, read by the caller with the source lock held, so the
         `source_path` it carries holds until the caller releases that lock: no replay can move the object
-        meanwhile. Raises ENOENT when the path holds no entry, another entry, or an entry that is not a file. It
-        tells the entry apart by path, id and kind only: a file that took the entry's id after a purge (ids are
-        reused) and was carried onto the path passes. It reads the catalog alone (never `_ensure`), since nothing
-        holding the source lock takes a path lock or populates.
+        meanwhile. Raises ENOENT when the path holds no entry, another entry, or an entry that is not a file, or
+        when `watch` holds the entry's id: the entry was purged after the caller named it, so a file at the path
+        with that id took the id since (ids are reused). It reads the catalog and the watch alone (never
+        `_ensure`), since nothing holding the source lock takes a path lock or populates.
         """
         current = self.catalog.get(entry.path)
-        if current is None or current.id != entry.id or current.kind != 'file':
+        if current is None or current.id != entry.id or current.kind != 'file' or entry.id in watch:
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', entry.path)
         return current
+
+    @contextlib.contextmanager
+    def _watch(self) -> Iterator[PurgeWatch]:
+        """
+        A purge watch, open for the block: every entry purged meanwhile has its id recorded in it (`_purge`). It is
+        the calling thread's naming watch while open (`_named`, `_adopt`), and the thread's previous one, if any, is
+        restored after, so a nested call names with its own watch and leaves the outer call's in place. It is
+        registered inside the `try`, so no exception leaves it registered.
+        """
+        watch = PurgeWatch(self._watches_mutex)
+        previous = getattr(self._naming, 'watch', None)
+        registered = False
+        try:
+            with self._watches_mutex:
+                self._watches.append(watch)
+                registered = True
+            self._naming.watch = watch                      # the calling thread's `_ensure` names with it
+            yield watch
+        finally:
+            self._naming.watch = previous
+            if registered:
+                with self._watches_mutex:
+                    self._watches.remove(watch)
+
+    def _purge(self, path: str) -> None:
+        """
+        Purge the entry at `path` (`Catalog.purge`) inside the caller's transaction, and record its id in every open
+        watch before that transaction commits, so no entry can take the id before a watch holds it.
+        """
+        entry_id = self.catalog.purge(path)
+        if entry_id is not None:
+            with self._watches_mutex:
+                for watch in self._watches:
+                    watch.add(entry_id)
 
     def read(self, handle: Handle, size: int, offset: int) -> bytes:
         """Read through the passthrough handle."""
@@ -749,9 +815,9 @@ class OverlayEngine:
         decision and the cut. While the call waits for that lock, a replay may move the object, which the
         decision follows; an ancestor's rename or a removal, which the path lock does not cover, may take the
         entry off `path` or carry another entry onto it, and the call then raises ENOENT as if `path` never held
-        it. So does a non-file that has taken the entry's id. The id check cannot tell the entry from a file that
-        has taken its id after a purge (ids are reused, and only a schema change could tell them apart), and such
-        a file carried onto `path` is cut. The open never follows a symbolic link at the file itself, the last
+        it. So does a non-file that has taken the entry's id, and a file that has taken it after a purge: the call
+        opens a purge watch before it names its entry, and the lookup under the lock refuses an id the watch saw
+        purged. The open never follows a symbolic link at the file itself, the last
         path component (`O_NOFOLLOW`). An ancestor's `rename` holds the source lock from its `_vacate` through its
         catalog move, so it never moves the entry between the decision and the recording: one whose catalog move
         commits first leaves `path` empty (unless another rename has carried the file back, and the cut then goes
@@ -771,7 +837,7 @@ class OverlayEngine:
             os.ftruncate(handle.fd, length)
             handle.written = True
         else:
-            with self.locks.hold(path):
+            with self.locks.hold(path), self._watch() as watch:
                 entry = self._ensure(path)
                 if entry is None:
                     raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
@@ -779,9 +845,9 @@ class OverlayEngine:
                     raise IsADirectoryError(errno.EISDIR, 'Is a directory', path)
                 with self._source_lock:
                     current = self.catalog.get(path)
-                    if current is None or current.id != entry.id or current.kind != 'file':
+                    if current is None or current.id != entry.id or current.kind != 'file' or entry.id in watch:
                         raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
-                    serving = self._serve(current)
+                    serving = self._serve(current, watch)
                     held = self._held_path(current, serving)
                     upstream = self.upstream_of(serving)
                     now = self.clock()
@@ -1118,7 +1184,7 @@ class OverlayEngine:
             self.journal.confirm(intent)                    # before any purge — cascades eat intent rows
             if row.op in ('unlink', 'rmdir'):
                 self.catalog.drop_residency(path, self.source.name)
-                self.catalog.purge(path)
+                self._purge(path)
             elif row.op == 'mkdir':
                 if placed is not None:
                     self.catalog.update_meta(path, source_path=placed)
@@ -1139,7 +1205,7 @@ class OverlayEngine:
                 tomb = self.catalog.get(old, include_deleted=True)
                 if tomb is not None and tomb.deleted and tomb.source_path is None \
                         and not self.journal.queued_for(old) and self.catalog.holder(old) is None:
-                    self.catalog.purge(old)
+                    self._purge(old)
             elif row.op == 'meta':
                 if 'mtime' in set(detail.get('fields', ())) \
                         and self.catalog.get_residency(path, self.source.name) is not None:
@@ -1264,7 +1330,8 @@ class OverlayEngine:
                 self._replay_through(rows)
             tombstone = self.catalog.get(path, include_deleted=True)
             if tombstone is not None and tombstone.deleted:
-                self.catalog.purge(path)
+                with self.db.transaction():
+                    self._purge(path)
 
     # -- eviction -----------------------------------------------------------------------------------------------
 
@@ -1304,3 +1371,30 @@ class OverlayEngine:
                 self.journal.confirm(intent)
         log.trace(f'Evicted {path} from {tier} ({residency.size} bytes)')
         return True
+
+
+class PurgeWatch:
+    """
+    The ids of the entries purged while it is open, recorded by `OverlayEngine._purge` before each purge commits.
+    Entry ids are reused, so a call that names its entry and then waits for the source lock opens one before it
+    names the entry: the entry's id found here afterwards means that entry was purged, and a file at its path with
+    that id took the id since. Guarded by the engine's watch mutex, a leaf lock.
+    """
+
+    __slots__ = ('_mutex', '_ids')
+
+    def __init__(self, mutex: threading.Lock) -> None:
+        self._mutex = mutex
+        self._ids: set[int] = set()
+
+    def add(self, entry_id: int) -> None:
+        """Record a purged entry's id; the caller holds the watch mutex."""
+        self._ids.add(entry_id)
+
+    def clear(self) -> None:
+        """Forget every id recorded so far, as the call names its entry; the caller holds the watch mutex."""
+        self._ids.clear()
+
+    def __contains__(self, entry_id: object) -> bool:
+        with self._mutex:
+            return entry_id in self._ids

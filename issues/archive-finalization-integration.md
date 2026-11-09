@@ -33,7 +33,7 @@ most-volatile-first, and returns without touching the source tier's adapter. Its
 limits arrive with Phase 8 and take the same path)" — a stale phase pointer describing a path that
 does not exist. The old ROADMAP checked the waiver off.
 
-`flush` (`overlay.py:870`) and the eviction manager's commit-upstream will drive the same per-file
+`flush` (`overlay.py:870` (holds at `141aa86`)) and the eviction manager's commit-upstream will drive the same per-file
 `put` into an archive source the moment archives are reachable, so this is not only a drain concern.
 
 **The memory shape is a constraint on whatever design comes out of this, not a separate problem.**

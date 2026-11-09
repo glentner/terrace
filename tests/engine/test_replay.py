@@ -45,11 +45,15 @@ recorded when it was queued. The classes guarded here:
 * a file served off the source whose object a replay moves after `open` found its entry is opened, or
   promoted to a faster tier, where the replay left the object. The open of a copy served off the source and
   a promotion off the source look the entry up again under the source lock and open the object before
-  releasing it, so neither reads the old place or another entry's object moved onto it, short of a file
-  that took the entry's id after a purge (ids are reused) and was carried onto the path. The lookup under the
+  releasing it, so neither reads the old place or another entry's object moved onto it. The lookup under the
   source lock raises ENOENT when the path then holds no entry, another entry, or a non-file; a rename or
   removal landing before it is otherwise outside what `open` guarantees, since its path lock does not cover
   an ancestor. A copy served off a stage, and a promotion from one, take no source lock;
+* a file that took a purged entry's id (ids are reused) and was carried onto the path while the handle-less
+  `truncate`, a source-served `open` or a promotion off the source waited for the source lock is refused with
+  ENOENT, served off the source or off a stage, whether the entry was purged by a replay or by its own removal,
+  and keeps its bytes; a purge of another entry, or a create that takes another purged id, refuses none of them;
+  a file that took the id before the cut's first lookup read the path is the file the cut names;
 * a rename row's tombstone purge leaves another entry's tombstone and queued removal alone;
 * a directory whose target lies inside its own source object moves only once the entries placed
   there have moved out.
@@ -2025,5 +2029,490 @@ def test_rename_moves_stage_copies_outside_the_source_lock(tmp_path: Path, clock
     engine.rename('/data', '/moved')
     assert free == [True]
     assert_reads(engine, '/moved/s.txt', 'scratch', b'small')
+    engine.flush()
+    assert_converged(engine)
+
+
+# -- a file that took a purged entry's id is told from that entry ------------------------------------------------
+
+def reuse_route(engine: OverlayEngine, name: str, data: bytes, served: str) -> object:
+    """
+    An action: rename `/data` to `/moved`, remove `/moved/{name}` and drain, which purges its entry and frees its
+    id; create a file there, which takes the id, holding `data`, drained to the source and kept on the stage
+    (`served='stage'`) or evicted from it (`served='source'`); then rename `/moved` back to `/data`.
+    """
+    def action() -> None:
+        concurrent_removal(engine, recreate=data)()
+        if served == 'source':
+            assert engine.evict_copy(f'/moved/{name}', 'scratch')
+        engine.rename('/moved', '/data')
+    return action
+
+
+def other_purged(engine: OverlayEngine) -> object:
+    """An action: remove `/other.bin` and drain, which purges its tombstone and records its id."""
+    def action() -> None:
+        engine.unlink('/other.bin')
+        engine.flush()
+    return action
+
+
+def other_created(engine: OverlayEngine) -> object:
+    """
+    An action: remove `/other.bin`, then create a file at its path, which first runs its queued removal (purging
+    its tombstone) and then takes the id it freed.
+    """
+    def action() -> None:
+        old = engine.getattr('/other.bin').id
+        engine.unlink('/other.bin')
+        engine.create('/other.bin')
+        assert engine.getattr('/other.bin').id == old        # the id is reused
+    return action
+
+
+def with_other(engine: OverlayEngine) -> OverlayEngine:
+    """Add `/other.bin`, on the source, holding the largest entry id, so its purge frees an id a create takes."""
+    engine.create('/other.bin')
+    rewrite(engine, '/other.bin', b'O' * 10)
+    engine.flush()
+    return engine
+
+
+def first_call(caller: int, action):
+    """A pause for `stop_at`: the first time `caller`'s thread reaches it, `action` runs to completion on another."""
+    state = {'done': False, 'error': None}
+
+    def run() -> None:
+        try:
+            action()
+        except BaseException as error:                       # raised again in the caller's thread
+            state['error'] = error
+
+    def pause() -> None:
+        if state['done'] or threading.get_ident() != caller:
+            return
+        state['done'] = True
+        helper = threading.Thread(target=run, daemon=True)
+        helper.start()
+        helper.join(JOIN)
+        assert not helper.is_alive()
+        if state['error'] is not None:
+            raise state['error']
+    return pause
+
+
+def test_truncate_without_a_handle_refuses_a_source_served_file_that_took_the_entry_id(tmp_path: Path,
+                                                                                     clock: Clock) -> None:
+    """A file served off the source that took the entry's id after its purge, carried onto the path: ENOENT."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, reuse_route(engine, 'big.bin', b'N' * 500, 'source'))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old         # the file at the path took the id
+    assert engine.getattr('/data/big.bin').size == 500
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}      # the rename back is queued
+    assert {r.tier: r.state for r in engine.catalog.residencies('/data/big.bin')} == {'project': 'clean'}
+    assert engine.journal.pending() == []
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_a_staged_file_that_took_the_entry_id(tmp_path: Path,
+                                                                              clock: Clock) -> None:
+    """The same where a stage serves the file that took the id: nothing is marked dirty or cut on the stage."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, reuse_route(engine, 'big.bin', b'N' * 500, 'stage'))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert engine.getattr('/data/big.bin').size == 500
+    assert tree(tmp_path / 'scratch') == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    assert {r.tier: r.state for r in engine.catalog.residencies('/data/big.bin')} == {
+        'project': 'clean', 'scratch': 'clean'}
+    assert engine.journal.pending() == []
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_open_refuses_a_source_served_file_that_took_the_entry_id(tmp_path: Path, clock: Clock) -> None:
+    """A source-served open finds a file that took the entry's id on the path: ENOENT, and no handle is kept."""
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, reuse_route(engine, 'big.bin', b'N' * 500, 'source'))
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._source_lock.ran
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert old not in engine._handles
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_open_that_promotes_refuses_a_file_that_took_the_entry_id(tmp_path: Path, clock: Clock) -> None:
+    """
+    An open whose file a stage admits finds, as its promotion takes the source lock, a file that took the entry's
+    id on the path: ENOENT before any intent opens; the stage holds no bytes and no residency for it.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 50})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+    engine._source_lock = Interleaved(engine, reuse_route(engine, 'big.bin', b'N' * 30, 'source'))
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._source_lock.ran
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert old not in engine._handles
+    assert engine.journal.pending() == []
+    assert tree(tmp_path / 'scratch') == {'data': 'DIR'}
+    assert engine.catalog.get_residency('/data/big.bin', 'scratch') is None
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 30}
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 30}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_cuts_when_another_entry_is_purged_during_the_wait(tmp_path: Path,
+                                                                                    clock: Clock) -> None:
+    """A flush during the wait that purges another entry's tombstone does not refuse the cut."""
+    engine = with_other(source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000}))
+    engine._source_lock = Interleaved(engine, other_purged(engine))
+    engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert_cut(engine, '/data/big.bin', b'x' * 1000, 4)
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'xxxx'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_cuts_when_another_file_is_created_during_the_wait(tmp_path: Path,
+                                                                                    clock: Clock) -> None:
+    """A create of another file during the wait, which purges a tombstone and takes its id, does not refuse."""
+    engine = with_other(source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000}))
+    engine._source_lock = Interleaved(engine, other_created(engine))
+    engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran
+    assert_cut(engine, '/data/big.bin', b'x' * 1000, 4)
+    engine.flush()
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'xxxx', 'other.bin': b''}
+    assert_converged(engine)
+
+
+def test_open_of_a_source_served_file_opens_when_another_entry_is_purged_during_the_wait(tmp_path: Path,
+                                                                                       clock: Clock) -> None:
+    """A flush during a source-served open's wait that purges another entry's tombstone does not refuse it."""
+    engine = with_other(source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000}))
+    engine._source_lock = Interleaved(engine, other_purged(engine))
+    handle = engine.open('/data/big.bin')
+    try:
+        assert engine._source_lock.ran
+        assert handle.tier == 'project'
+        assert engine.read(handle, 2000, 0) == b'x' * 1000
+    finally:
+        engine.release(handle)
+    assert_converged(engine)
+
+
+def test_open_of_a_source_served_file_opens_when_another_file_is_created_during_the_wait(tmp_path: Path,
+                                                                                       clock: Clock) -> None:
+    """A create of another file during a source-served open's wait, taking a purged id, does not refuse it."""
+    engine = with_other(source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000}))
+    engine._source_lock = Interleaved(engine, other_created(engine))
+    handle = engine.open('/data/big.bin')
+    try:
+        assert engine._source_lock.ran
+        assert handle.tier == 'project'
+        assert engine.read(handle, 2000, 0) == b'x' * 1000
+    finally:
+        engine.release(handle)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_that_promotes_promotes_when_another_entry_is_purged_during_the_wait(tmp_path: Path,
+                                                                                 clock: Clock) -> None:
+    """A flush during a promotion's wait that purges another entry's tombstone does not refuse the promotion."""
+    engine = with_other(source_served(tmp_path, clock, {'data/s.bin': b'x' * 50}))
+    engine._source_lock = Interleaved(engine, other_purged(engine))
+    handle = engine.open('/data/s.bin')
+    try:
+        assert engine._source_lock.ran
+        assert handle.tier == 'scratch'
+        assert engine.read(handle, 100, 0) == b'x' * 50
+    finally:
+        engine.release(handle)
+    assert tree(tmp_path / 'scratch') == {'data': 'DIR', 'data/s.bin': b'x' * 50}
+    assert engine.journal.pending() == []
+    assert_converged(engine)
+
+
+def test_open_that_promotes_promotes_when_another_file_is_created_during_the_wait(tmp_path: Path,
+                                                                                 clock: Clock) -> None:
+    """A create of another file during a promotion's wait, taking a purged id, does not refuse the promotion."""
+    engine = with_other(source_served(tmp_path, clock, {'data/s.bin': b'x' * 50}))
+    engine._source_lock = Interleaved(engine, other_created(engine))
+    handle = engine.open('/data/s.bin')
+    try:
+        assert engine._source_lock.ran
+        assert handle.tier == 'scratch'
+        assert engine.read(handle, 100, 0) == b'x' * 50
+    finally:
+        engine.release(handle)
+    assert engine.journal.pending() == []
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_names_a_file_that_took_a_purged_id_before_its_first_lookup(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    A file that took a purged entry's id and was carried onto the path before the cut's first lookup read it is the
+    file the cut names, though the purge landed after the cut opened its watch: the lookup clears the watch as it
+    reads, and the cut cuts that file.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    old = engine.getattr('/data/big.bin').id
+    stop_at(engine, '_ensure', first_call(threading.get_ident(),
+                                          reuse_route(engine, 'big.bin', b'N' * 500, 'source')))
+    engine.truncate('/data/big.bin', 4)
+    assert engine.getattr('/data/big.bin').id == old
+    assert_cut(engine, '/data/big.bin', b'N' * 500, 4)
+    assert tree(tmp_path / 'project') == {'moved': 'DIR', 'moved/big.bin': b'NNNN'}
+    engine.flush()
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'NNNN'}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_once_its_entry_is_purged_after_its_first_lookup(tmp_path: Path,
+                                                                                         clock: Clock) -> None:
+    """
+    The entry the cut's first lookup returned is moved away, removed and purged before the cut has finished naming
+    it, and a file that took its id is carried onto the path while the cut waits for the source lock: ENOENT.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    root = tmp_path / 'project'
+    old = engine.getattr('/data/big.bin').id
+
+    def purged() -> None:
+        concurrent_removal(engine, recreate=b'N' * 500)()
+        assert engine.evict_copy('/moved/big.bin', 'scratch')
+
+    stop_at(engine, '_ensure', first_call(threading.get_ident(), purged), after=True)
+    engine._source_lock = Interleaved(engine, lambda: engine.rename('/moved', '/data'))
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._source_lock.ran                           # the carry landed while the cut waited for the lock
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert engine.getattr('/data/big.bin').size == 500
+    assert tree(root) == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    engine.flush()
+    assert tree(root) == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_a_file_that_took_the_id_of_an_entry_removed_with_no_source_copy(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    An entry the stage alone holds is purged by its removal itself, with no replay; a file that took its id,
+    carried onto the path during the cut's wait, is refused with ENOENT and keeps its bytes.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    engine.create('/data/new.bin')                          # on the stage only, holding the largest id
+    rewrite(engine, '/data/new.bin', b'y' * 10)
+    old = engine.getattr('/data/new.bin').id
+
+    def action() -> None:
+        engine.rename('/data', '/moved')
+        for row in engine.journal.queued(engine.source.name):
+            if row.op == 'rename':
+                engine.commit_row(row)                       # purges the rename's tombstone, which held a larger id
+        assert engine.catalog.get_residency('/moved/new.bin', engine.source.name) is None
+        engine.unlink('/moved/new.bin')                      # no source copy: purged here, freeing its id
+        engine.create('/moved/new.bin')
+        rewrite(engine, '/moved/new.bin', b'N' * 20)
+        assert engine.getattr('/moved/new.bin').id == old    # the id is reused
+        engine.rename('/moved', '/data')
+
+    engine._source_lock = Interleaved(engine, action)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/new.bin', 4)
+    assert engine._source_lock.ran
+    assert engine._watches == []
+    assert engine.getattr('/data/new.bin').id == old
+    assert engine.getattr('/data/new.bin').size == 20
+    assert tree(tmp_path / 'scratch')['data/new.bin'] == b'N' * 20
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_refuses_a_file_that_took_its_id_right_after_its_first_lookup(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    The whole route, the file that took the id carried onto the path included, lands just after the cut's first
+    lookup returned its entry and before the cut takes the source lock: ENOENT, and the new file keeps its bytes.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    old = engine.getattr('/data/big.bin').id
+    stop_at(engine, '_ensure', first_call(threading.get_ident(),
+                                          reuse_route(engine, 'big.bin', b'N' * 500, 'source')), after=True)
+    with raises(FileNotFoundError):
+        engine.truncate('/data/big.bin', 4)
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert engine.getattr('/data/big.bin').size == 500
+    assert tree(tmp_path / 'project') == {'moved': 'DIR', 'moved/big.bin': b'N' * 500}
+    engine.flush()
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_cuts_a_file_it_adopts_with_an_id_another_purge_freed(tmp_path: Path,
+                                                                                      clock: Clock) -> None:
+    """
+    The cut's first lookup adopts its file from the source, and another entry's purge, landing after the lookup
+    found the path uncataloged and before the adoption, frees the id the adoption takes: the cut is not refused.
+    """
+    root = tmp_path / 'project'
+    seed(root, 'deep/f.bin', b'x' * 1000)
+    engine = OverlayEngine(build_spec(tmp_path, tiers=2, scratch_quota=QuotaSpec(bypass_size=100)), clock=clock)
+    engine.start()
+    engine.readdir('/')                                      # /deep is cataloged but not listed
+    with_other(engine)
+    other = engine.getattr('/other.bin').id
+    stop_at(engine.tiers['project'], 'stat', first_call(threading.get_ident(), other_purged(engine)))
+    engine.truncate('/deep/f.bin', 4)
+    assert engine.getattr('/deep/f.bin').id == other         # the adoption took the purged id
+    assert_cut(engine, '/deep/f.bin', b'x' * 1000, 4)
+    walk(engine)
+    engine.flush()
+    assert_converged(engine)
+
+
+def test_open_refuses_a_source_served_file_that_took_its_id_right_after_its_first_lookup(tmp_path: Path,
+                                                                                          clock: Clock) -> None:
+    """
+    The whole route, the file that took the id carried onto the path included, lands just after a source-served
+    open's first lookup returned its entry: ENOENT, and no handle is kept for the id.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 1000})
+    old = engine.getattr('/data/big.bin').id
+    stop_at(engine, '_ensure', first_call(threading.get_ident(),
+                                          reuse_route(engine, 'big.bin', b'N' * 500, 'source')), after=True)
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert old not in engine._handles
+    engine.flush()
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'N' * 500}
+    assert_converged(engine)
+
+
+def test_open_that_promotes_refuses_a_file_that_took_its_id_right_after_its_first_lookup(tmp_path: Path,
+                                                                                         clock: Clock) -> None:
+    """
+    The same just after the first lookup of an open whose file a stage admits: ENOENT before any intent opens, and
+    the stage holds no bytes and no residency for the file that took the id.
+    """
+    engine = source_served(tmp_path, clock, {'data/big.bin': b'x' * 50})
+    old = engine.getattr('/data/big.bin').id
+    stop_at(engine, '_ensure', first_call(threading.get_ident(),
+                                          reuse_route(engine, 'big.bin', b'N' * 30, 'source')), after=True)
+    with raises(FileNotFoundError):
+        engine.open('/data/big.bin')
+    assert engine._watches == []
+    assert engine.getattr('/data/big.bin').id == old
+    assert engine.journal.pending() == []
+    assert engine.catalog.get_residency('/data/big.bin', 'scratch') is None
+    engine.flush()
+    assert tree(tmp_path / 'project') == {'data': 'DIR', 'data/big.bin': b'N' * 30}
+    assert_converged(engine)
+
+
+def test_truncate_without_a_handle_is_not_refused_by_a_purge_that_committed_before_it_named_its_file(
+        tmp_path: Path, clock: Clock) -> None:
+    """
+    A removal purges the entry holding the largest id. Just after its transaction commits, another thread adopts a
+    file that takes the freed id, and a cut names that file and waits. A purge records before it commits, so the
+    cut's watch never holds the id, and the cut goes ahead.
+    """
+    root = tmp_path / 'project'
+    seed(root, 'deep/f.bin', b'x' * 1000)
+    engine = OverlayEngine(build_spec(tmp_path, tiers=2, scratch_quota=QuotaSpec(bypass_size=100)), clock=clock)
+    engine.start()
+    engine.readdir('/')                                      # /deep is cataloged but not listed: f.bin adopts lazily
+    engine.create('/s.bin')                                  # on the stage only, holding the largest id
+    freed = engine.getattr('/s.bin').id
+    remover = threading.get_ident()
+    purged_here = {'flag': False}
+    real_purge = engine.catalog.purge
+
+    def purge(path):
+        if threading.get_ident() == remover:
+            purged_here['flag'] = True
+        return real_purge(path)
+    engine.catalog.purge = purge
+
+    named, go = threading.Event(), threading.Event()
+    outcome = {}
+    real_ensure = engine._ensure
+
+    def ensure(path):
+        entry = real_ensure(path)
+        if path == '/deep/f.bin' and threading.get_ident() != remover:
+            named.set()
+            assert go.wait(JOIN)
+        return entry
+
+    def cut() -> None:
+        try:
+            engine.truncate('/deep/f.bin', 4)
+            outcome['cut'] = None
+        except BaseException as error:                       # read in the test's thread
+            outcome['cut'] = error
+
+    cutter = threading.Thread(target=cut, daemon=True)
+    real_transaction = engine.db.transaction
+    from contextlib import contextmanager                    # local: an import above would shift the cited lines
+
+    @contextmanager
+    def transaction():
+        with real_transaction() as conn:
+            yield conn
+        if threading.get_ident() == remover and purged_here['flag']:    # after the removal's commit
+            purged_here['flag'] = False
+            adopt = threading.Thread(target=engine.getattr, args=('/deep/f.bin',), daemon=True)
+            adopt.start()
+            adopt.join(JOIN)
+            assert engine.catalog.get('/deep/f.bin').id == freed           # the adoption took the freed id
+            engine._ensure = ensure
+            cutter.start()
+            assert named.wait(JOIN)                                         # the cut has named its file
+
+    engine.db.transaction = transaction
+    engine.unlink('/s.bin')
+    del engine.db.transaction
+    go.set()
+    cutter.join(JOIN)
+    assert not cutter.is_alive()
+    assert outcome['cut'] is None
+    del engine._ensure
+    assert_cut(engine, '/deep/f.bin', b'x' * 1000, 4)
+    walk(engine)
     engine.flush()
     assert_converged(engine)

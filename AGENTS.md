@@ -67,7 +67,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 530 tests, ~30 s — must pass before every commit
+uv run pytest -m unit                            # 548 tests, ~30 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; no faster, test_model dominates
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -108,7 +108,7 @@ that way proves nothing; assert a pass count.
 | `src/sosfs/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/sosfs/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/sosfs/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 540 tests (530 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 42 files, 558 tests (548 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -133,7 +133,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 192 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 210 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -213,15 +213,15 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 | `state/db.py` — `autocommit=True`, the four pragmas, `BEGIN IMMEDIATE`, `SCHEMA_VERSION` | Each one silently converts a durability guarantee into a performance characteristic. There is no schema migration machinery: a version bump makes every existing state database unopenable. |
 | `state/journal.py` — `mark_dirty`, `begin`, `confirm`, `_resolve` | Both sacred invariants live in about forty lines here. |
 | `state/journal.py` — `current`, `settle_current`, `settle`, `cancel` | Queue-row identity. Row ids are reused (no `AUTOINCREMENT`), so a replay or settle keyed by id alone acts on, or deletes, a newer op that took the id: silent loss behind a drained queue. |
-| `state/catalog.py` — `holder`, `advance_source_path` | Who holds a physical place on the source, and the prefix rewrite a committed rename records. Replay's tombstone purge and every placement decision read them. |
+| `state/catalog.py` — `holder`, `advance_source_path`, `purge` | Who holds a physical place on the source, and the prefix rewrite a committed rename records. Replay's tombstone purge and every placement decision read them. `purge` returns the id the engine's purge watches record. |
 | `state/schema.sql` — the cascades, the `CHECK` vocabularies, `source_path` | A cascade eats unresolved intent rows; a `CHECK` is the only thing keeping `shutdown_state` a three-valued flag. |
 | `state/lifecycle.py` — `begin_mount`, `Marker.write` | The crash gate and the managed-location identity. |
 | `state/registry.py` — `_attach` | The only thing standing between an evaporated tier and silent re-adoption of its residency rows. |
 | `state/sql.py` — `IDENTIFIER`; `state/catalog.py` — `META_FIELDS` / `RESIDENCY_FIELDS` | The only barrier between a userspace-derived name and SQL text. |
 | `engine/overlay.py` — `_commit_hop`, `commit_upstream`, `commit_to_shared`, `evict_copy` | The sole clean-transition point and the only code that destroys bytes on purpose. A wrong edit is silent data loss, not a crash. |
 | `engine/overlay.py` — `write`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack. Reordering two statements is undetectable in review and unrecoverable in production. |
-| `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge_source`, `_vacate`, `rename`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
-| `engine/overlay.py` — `open`, `_serve`, `_lookup_again`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, promoting off the source, stating the bytes a handle serves, and cutting them without a handle) and the lookup under the source lock that decides it, `bypass_size`, quota admission. |
+| `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge`, `_purge_source`, `_vacate`, `rename`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
+| `engine/overlay.py` — `open`, `_serve`, `_lookup_again`, `_ensure`, `_named`, `_adopt`, `_watch`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, promoting off the source, stating the bytes a handle serves, and cutting them without a handle) and the lookup under the source lock that decides it, with the purge watch that tells the entry from a file that took its id, `bypass_size`, quota admission. |
 | `engine/transfer.py` — `copy` | The single place an intent bracket wraps a real byte move, and where tier counters are adjusted. |
 | `engine/writeback.py` — `deadline`, `boundary_policies` | The loss window at every boundary is these fifteen lines. |
 | `engine/writeback.py` — `due`, `poll`, `on_scan`, `on_commit` | The scheduler's snapshot and replay route: rows scanned in one state run in the next, with user ops in between, so each must be re-checked as the row it was read as. |
@@ -243,8 +243,8 @@ review; where its grain differs from the table above, the table governs.
 | Region | Why |
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
-| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
-| `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`; `state/catalog.py` — `holder`/`advance_source_path` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
+| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
+| `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`; `state/catalog.py` — `holder`/`advance_source_path`/`purge` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
 | `tier/posix.py`, `s3.py`, `archive.py`, `spec.py` | Adapter atomicity, and the last gate before the engine instantiates tiers. |
@@ -398,34 +398,44 @@ review; where its grain differs from the table above, the table governs.
   queued rename) reports the size its object holds and is cut where that object is. `open`, a promotion,
   `_stat_held` and the cut resolve the place through one rule, `_held_path`. `_record` reads the entry
   again under the source lock (§ 10), so a replay cannot move the object between the read and the stat.
-  `open` of a copy served off the source, and a promotion off the source (`_serve`, reached from `open`
-  or a handle-less `truncate`), take the source lock, look the entry up again at its path
-  (`_lookup_again`: path, id and kind, raising `ENOENT` when it fails), and open the object at the place
-  that entry records before they release the lock: the direct open itself, or the promotion's whole
-  copy. A replay that lands after `_ensure` and moves the object leaves the call at the object's new
-  place, not at the old one or another entry's object, short of the reused id below. A copy served off
-  a stage, and a promotion from one stage to another, are opened at the logical path without the source
-  lock: no replay moves a stage copy. The handle-less
-  `truncate` takes the source lock for every cut, whatever copy serves, and decides under it and its
-  path lock, once, everything the cut and its recording use: the entry at its path (path and id), its
-  kind, the serving copy (promoting first, as `open` does), the held place and the path its catalog
-  writes are keyed by. An entry that an ancestor's rename or a removal took off the path during the wait
-  raises `ENOENT`, and so does another entry, or a non-file, found there; a faster copy taken meanwhile
-  through a renamed ancestor is the one marked dirty and cut. The cut's open never follows a symbolic
-  link at the file itself, the last component of the held place (`O_NOFOLLOW`). The id check cannot
-  tell the entry from a file that took its id after a purge, since ids are reused; such a file carried
-  onto the path is cut, and `open` would open or promote it the same way; the reused id is in
-  § *Known open violations*. A user `rename` holds the source lock from its `_vacate` through its
-  catalog move (§ 10), so an ancestor's rename never moves the entry between the cut's lookup under the
-  lock and its recording. One whose catalog move commits first leaves the path empty (unless another
-  rename has carried the file back), and the cut raises `ENOENT` having cut nothing; one that reaches
-  the lock while the cut holds it waits, then moves the file with its cut recorded. The rename moves
-  its stage copies after releasing the lock, and a cut at the file's new path before they move turns on
-  where the file's fastest copy is. On a stage copy not yet moved, the cut that serves it finds no copy
-  to open and raises `ENOENT` after its dirty mark, having cut nothing; where a faster tier admits the
-  file, `_serve` first promotes from that copy and raises `TierError`, not an `OSError`, before any
-  dirty mark (`issues/engine-error-mapping.md`). On the source, or on a stage copy the rename has
-  already moved, the cut goes on and is recorded (`issues/freethreaded-concurrency-stress.md`).
+  `open` of a copy served off the source, and a promotion off the source (`_serve`, reached from `open` or a
+  handle-less `truncate`), take the source lock, look the entry up again at its path (`_lookup_again`: path,
+  id, kind and the call's purge watch, raising `ENOENT` when any fails), and open the object at the place that
+  entry records before they release the lock: the direct open itself, or the promotion's whole copy. A replay
+  that lands after `_ensure` and moves the object leaves the call at the object's new place, not at the old
+  one or another entry's object. A copy served off a stage, and a promotion from one stage to another, are
+  opened at the logical path without the source lock: no replay moves a stage copy. The handle-less `truncate`
+  takes the source lock for every cut, whatever copy serves, and decides under it and its path lock, once,
+  everything the cut and its recording use: the entry at its path (path, id and its purge watch), its kind,
+  the serving copy (promoting first, as `open` does), the held place and the path its catalog writes are keyed
+  by. An entry that an ancestor's rename or a removal took off the path during the wait raises `ENOENT`, and
+  so does another entry, or a non-file, found there; a faster copy taken meanwhile through a renamed ancestor
+  is the one marked dirty and cut. The cut's open never follows a symbolic link at the file itself, the last
+  component of the held place (`O_NOFOLLOW`). Ids are reused: once the entry holding the largest id is
+  purged, the next entry the catalog adds takes that id. So each of the three calls (the cut, the `open` of a
+  copy served off the source, and a promotion off the source) opens a purge watch (`_watch`) under its path lock,
+  and its first lookup (`_ensure`) clears the watch atomically with the read that returns its entry: under the
+  watch mutex for an entry already cataloged (`_named`), or inside the insert's transaction for one it adopts
+  (`_adopt`). Every purge records the purged id in every open watch inside its own transaction, before it
+  commits and holding that mutex (`_purge`, the one caller of `Catalog.purge`), so a record that lands after
+  the read can only be the named entry's own purge. The lookup under the source lock refuses with `ENOENT` an
+  entry whose id its watch holds: a file that took the id after the named entry's purge, carried onto the
+  path. A purge of another entry, or a `create` that takes another purged id, never refuses. A purge that
+  rolls back after its record leaves the id in the watch, and refuses a call whose named entry it was. A route
+  that lands before `_serve` decides the serving copy, and leaves the new file's fastest copy on a stage, is
+  served or promoted from that stage with no lookup under the source lock, as any stage copy is; so is a route
+  that lands after a promotion off the source and before `open` opens the stage copy it made, which `open`
+  opens at the logical path without the lock (`issues/freethreaded-concurrency-stress.md`, an ancestor's round
+  trip). A user `rename` holds the source lock from its `_vacate` through its catalog move (§ 10), so an
+  ancestor's rename never moves the entry between the cut's lookup under the lock and its recording. One whose
+  catalog move commits first leaves the path empty (unless another rename has carried the file back), and the
+  cut raises `ENOENT` having cut nothing; one that reaches the lock while the cut holds it waits, then moves
+  the file with its cut recorded. The rename moves its stage copies after releasing the lock, and a cut at the
+  file's new path before they move turns on where the file's fastest copy is. On a stage copy not yet moved,
+  the cut that serves it finds no copy to open and raises `ENOENT` after its dirty mark, having cut nothing;
+  where a faster tier admits the file, `_serve` first promotes from that copy and raises `TierError`, not an
+  `OSError`, before any dirty mark (`issues/engine-error-mapping.md`). On the source, or on a stage copy the
+  rename has already moved, the cut goes on and is recorded (`issues/freethreaded-concurrency-stress.md`).
 - Resolving against `entry.path` instead orphans the pre-rename source object: it stays on the source
   at a path the catalog no longer knows, and the next mount re-adopts it as a live file, resurrecting
   deleted or renamed-away data. `tests/engine/test_replay.py` guards the divergence classes its module
@@ -599,12 +609,23 @@ review; where its grain differs from the table above, the table governs.
   write lock (up to the 5 s busy timeout) and the `UPDATE` that moves every descendant's path, so
   renaming a large directory delays the same calls, and every replay and commit to the source, for that
   long. Lock order: **path locks → source
-  mutex → `_handles_mutex` → SQLite write lock.** Nothing holding it calls `locks.hold`, `_ensure`,
+  mutex → `_handles_mutex` → SQLite write lock → purge-watch mutex.** Nothing holding it calls `locks.hold`, `_ensure`,
   `getattr` or `readdir` (replay never takes a path lock; a nested `hold()` inside replay is the AB/BA
   deadlock above). Nothing acquires it inside `db.transaction()`. It is re-entrant because replay
   nests: `flush` → `_execute_namespace`, and `_vacate` → `_replay_through` → `_execute_namespace`;
   `rename` takes it around its `_vacate`, and the cut around `_serve`, which takes it again to promote
   off the source.
+- **The purge-watch mutex** (`OverlayEngine._watches_mutex`) guards the open purge watches and the ids
+  recorded in them (§ 5). It is a leaf, last in the order. Its holders: `_purge`, inside its transaction,
+  after the SQLite write lock, to record a purged id; `_adopt`, inside its insert's transaction, to clear
+  the calling thread's watch; `_watch`, to open and close a watch, under the call's path lock; `_named`,
+  which makes one catalog read while holding it, so the read that names a call's entry and the clearing of
+  its watch are one step; and the cut's check and `_lookup_again`, to test it under the path lock and the
+  source lock. Nothing else is acquired while it is held: `_named` opens the thread's connection before it
+  takes the mutex, so no pragma runs under it, and its read takes no SQLite write lock; a WAL reader does
+  not wait on a writer's open transaction (measured: 0.000 s against one). `_purge` runs only inside a
+  `db.transaction()` and never opens one; `_vacate` wraps its tombstone purge in one, under the source
+  mutex, which the order allows. The source mutex gains no holder.
 - **The mutex does not cover user removals.** `unlink` and `rmdir` cancel an entry's queued rows and
   queue the removal under path locks alone, so one can land inside a replay's act. A replay therefore
   settles with `Journal.settle_current`, never by id: the removal may have queued its op under the
@@ -669,7 +690,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 530 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 548 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -693,7 +714,6 @@ seed that owns the repair; a cycle that touches the region should either fix it 
 |---|---|---|
 | 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. | `issues/archive-journaling-and-locking.md` |
 | 5 | Sizes a state database written before `fe26962` may hold wrong for a copy held on the source: `entry.size` and the source residency's `size`. The residency heals on the next `release` of any handle on that copy; `entry.size` heals only on a write or a `truncate`, so `getattr` and placement read the stale figure meanwhile. Staged-tier quota counters are unaffected. | `issues/audit-command.md` |
-| 5, 10 | The handle-less `truncate`, the `open` of a copy served off the source and a promotion off the source each tell their entry from another only by path, id and kind under the source lock, and ids are reused. If, while the call waits for the source lock, the entry is removed and purged, a new file elsewhere takes its id, and a directory rename carries that file onto the path, the cut cuts the new file and returns success, and `open` returns a handle on its bytes or promotes them. Silent; reproduced by injection, for the cut and for `open`. Every route needs a rename of an ancestor during the call. A symbolic link or a directory that takes the id is refused with `ENOENT`. Closing it needs an identity token, a schema change. | `issues/entry-identity-token.md` |
 | 5, 10 | A user `rmdir` racing a replayed `mkdir` that has placed the directory but not yet recorded it reads a `NULL` `source_path`, purges the entry and its intent row (the cascade), and the replay's confirm then raises; the source keeps a directory the catalog no longer has. Threaded; reproduced by a single-thread injection, and pre-existing (`141aa86` raises at its settle instead). | `issues/freethreaded-concurrency-stress.md` |
 | 8 | A **second SIGINT settles `detached` without running the rescue**, so node-local dirty data is stranded behind a state that promises it is safe. `umount --detach` is bounded by `drain_timeout` where PLAN says it completes, and an incomplete rescue is never recorded. | `issues/shutdown-rescue-gaps.md` |
 | 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staging copy silently wins over a newer source. | `issues/archive-journaling-and-locking.md` |
@@ -711,7 +731,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **530 unit tests in ~30 s serial, no faster under
+The suite is the gate, and it is fast enough to be one: **548 unit tests in ~30 s serial, no faster under
 `-n auto`** (the stateful model is most of it). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 

@@ -18,7 +18,7 @@ FUSE throughput — this is a reference implementation, not a kernel bypass; mit
 file handles for resident-copy I/O, free-threading, and a benchmark harness … to keep honest numbers
 in the docs." The mitigation exists in code and the number does not. `PosixTier.open_direct`
 (`src/sosfs/tier/posix.py:70`) hands the engine a real OS file descriptor, and `OverlayEngine.read`
-and `write` (`src/sosfs/engine/overlay.py:639-654`) are `os.pread` and `os.pwrite` on it — the design
+and `write` (`src/sosfs/engine/overlay.py:639-654` (holds at `141aa86`)) are `os.pread` and `os.pwrite` on it — the design
 that makes a defensible overhead ratio possible. Until someone measures it, the claim that the
 overlay adds a tolerable fraction to direct tier access is an assertion in a risks table.
 

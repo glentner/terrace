@@ -17,7 +17,7 @@ lane: public
 § 10). It serializes every change to the source's namespace: namespace replay, `_vacate`'s collect
 and replay, `_purge_source`, `create` straight onto the source, and a data commit whose destination is
 the source. For a data commit it is held for the **whole copy**: `_commit_hop` takes it
-(`src/sosfs/engine/overlay.py:835-840`), resolves where the source holds the entry, then runs
+(`src/sosfs/engine/overlay.py:835-840` (holds at `0e6d14c`)), resolves where the source holds the entry, then runs
 `transfers.copy` to the source inside it. The `deferred-rename-source-orphan` cycle shipped it that way
 as deviation D4 of its plan, accepted at the PLAN/TECH sign-off (2026-11-06) with this seed as the
 follow-up.

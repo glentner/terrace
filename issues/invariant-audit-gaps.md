@@ -21,7 +21,7 @@ and a verification substrate, not a mechanism; see the last open question.
 **1. `residency.checksum` is never written.** The column is reserved at
 `src/sosfs/state/schema.sql:95` ("blake2b hex, when checksum recording is enabled"), it is in
 `RESIDENCY_FIELDS` (`src/sosfs/state/catalog.py:88`) and in the insert
-(`src/sosfs/state/catalog.py:196-203`), and `OverlaySpec` parses `checksum = true` from the
+(`src/sosfs/state/catalog.py:196-203` (holds at `141aa86`)), and `OverlaySpec` parses `checksum = true` from the
 `[overlay]` table (`src/sosfs/tier/spec.py:287-289`, key at `:27`). Nothing computes a digest:
 `blake2b` occurs in `src/` only in that schema comment, and `spec.checksum` has no reader anywhere
 under `src/sosfs/engine/` or `src/sosfs/fuse/`. An operator who sets the flag gets an inert
@@ -36,7 +36,7 @@ work**, not a live defect — but a spec key that silently does nothing is a def
 (`src/sosfs/state/registry.py:151-157`) has no caller under `src/`; the only call sites are
 `tests/state/test_registry.py:92-97`. `MarkerStatus.GENERATION_MISMATCH` therefore only ever arises
 from someone editing a marker file out of band, never from a re-initialization sosfs performed itself.
-The status is implemented, tested and turned into an `EngineError` by `src/sosfs/engine/overlay.py:128`,
+The status is implemented, tested and turned into an `EngineError` by `src/sosfs/engine/overlay.py:128` (holds at `141aa86`),
 so it reads as a live safety check on a code path that has never fired. Whatever operation was meant to
 bump it — a deliberate tier reset, a re-register after an evaporation — does not exist. **Unbuilt
 work**; the risk is that a future reader trusts the mismatch branch as exercised.

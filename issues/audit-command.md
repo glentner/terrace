@@ -198,7 +198,7 @@ Draft R-IDs, to be firmed up at promotion.
     - 2026-11-06: `overlay.py:949` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
       the confirm before the purge is at `src/sosfs/engine/overlay.py:1038`.
     - 2026-11-08: `source-path-truncate-and-stat` moved it again; at `6425a21` it is at
-      `src/sosfs/engine/overlay.py:1061`.
+      `src/sosfs/engine/overlay.py:1061` (holds at `5e0d997`).
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the state-store
   invariants topic (the intent journal has no consumer) and the remaining-work topic (dossier 4).
 - *Added 2026-11-06 by `deferred-rename-source-orphan` (review cycle 1):* **catalog and residency
