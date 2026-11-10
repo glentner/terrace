@@ -43,6 +43,17 @@ model is the net for the next defect on those routes, and it is not reaching the
 coverage of source-served files, if wanted, is this cycle's too: it edits the same class and redraws
 the same sample.
 
+### The model never serves a file from the source
+
+**Seed:** [`issues/model-source-served-reach.md`](issues/model-source-served-reach.md) · `test` · appetite small
+
+The stateful model's stages have no `bypass_size`, so it never serves a file from the source, and the
+source-served `open`, handle-less `truncate` and live stat the cycles since 2026-11-08 changed are pinned
+only by deterministic tests. The truncate fix kept the model unchanged (its GOAL Q2, 2026-11-06), and the
+commit-route reach cycle ruled the configuration out of its own small appetite (its GOAL Q1,
+2026-11-09): a source-served model is a second deliverable with its own oracle questions, and it
+redraws the fixed CI sample.
+
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
