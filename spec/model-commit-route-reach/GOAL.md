@@ -225,6 +225,27 @@ Ruled at the GOAL gate. Each takes the shaper's recommended answer:
   justified against the re-measured base, and never zero (R3). Requiring the base's count itself would
   push the build to tune the draw. (ruled 2026-11-09, foreman as gate judge)
 
+Ruled at the Q6 stop, before the plan gate. The planner stopped uncommitted when the P2 dry run's seed 5 reached
+a base-engine defect (`research/03-engine-defect.md`); the foreman reproduced it on `980f998`.
+
+- **Q8 — How does the cycle proceed after the Q6 stop?** — **A:** (A), a separate fix cycle first. A `fix` cycle
+  files and fixes the rename-over-tombstoned-child defect and lands on `main`. This cycle is parked unchanged and
+  then resumes on the new `main`: rebase the prototype, refill PLAN § 6, re-run P2 and P3, commit the plan. This
+  cycle's Non-goals and Constraints stand (`src/` byte-identical to the base it builds on). (Geoffrey, 2026-11-09,
+  in the foreman's session)
+- **Q-a — Which draw grades R1, R3, R4 and R6?** — **A:** (A), the standalone fixed CI draw
+  (`pytest tests/engine/test_model.py` with `CI=true`), as PLAN deviation row 3 states. (Geoffrey, 2026-11-09,
+  approved for the plan gate)
+- **Q-b — May the composites branch on the oracle to create their file?** — **A:** (A), yes, as PLAN deviation
+  row 2 states; either branch runs under parity. (Geoffrey, 2026-11-09, approved for the plan gate)
+- **Q-c — The floors.** — **A:** (A), scheduler 50 polled lagging, eviction 50 lagging, fsync 50, direct 17, one
+  lagging ancestor commit, and R2's per-seed minimum of 1, as PLAN deviation row 4 states. (Geoffrey, 2026-11-09,
+  approved for the plan gate)
+- **Q-d — The model's added run time.** — **A:** (A), accepted: about 6 s standalone, and AGENTS.md's suite time
+  goes from ~30 s to ~40 s. (Geoffrey, 2026-11-09, approved for the plan gate)
+- **Q-e — A second composite for M7.** — **A:** (A), yes, `move_out_rmdir_unlink`, so R6's M7 dies on the CI draw
+  and on random seeds, as PLAN deviation row 6 states. (Geoffrey, 2026-11-09, approved for the plan gate)
+
 ## Related materials
 
 - Seed: [`issues/model-commit-route-reach.md`](../../issues/model-commit-route-reach.md)
