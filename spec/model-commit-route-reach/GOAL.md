@@ -83,7 +83,7 @@ These terms hold throughout:
 - *An instrumented run* is a run of `tests/engine/test_model.py` that counts queued-rename commits per
   route by wrapping engine code from outside the test module. It leaves the committed
   `OverlayMachine` source, and so the draw, exactly as graded. It is committed as a gate under
-  `spec/model-commit-route-reach/verify/`. [NEEDS CLARIFICATION: Q5]
+  `spec/model-commit-route-reach/verify/`, not as a unit test (Q5).
 - *The mutants the model must fail* are the entries of `MUTANTS` in
   `spec/deferred-rename-source-orphan/verify/replay_gate.py` marked for the model: M1 (commit at the
   logical path), M2 (stale rows looked up by id alone), M3 (vacate ignores other holders) and M7 (an
@@ -99,22 +99,23 @@ The criteria:
   through the eviction route. *N* is at least 1, stated and justified in `PLAN.md`, and measured. The
   same instrumented run on the base is recorded as evidence of the starting point (0 and 0 per the
   seed, re-measured under this GOAL's definition). Re-measuring the base also settles how thin the
-  fsync route is today, which R3 depends on. [NEEDS CLARIFICATION: Q4] (Recommended: one count per
-  route, own and ancestor renames together, reported split.)
-- **R2 — reach is not one draw's luck.** [NEEDS CLARIFICATION: Q2] WHEN an instrumented run executes
+  fsync route is today, which R3 depends on. Each route has one count, own and ancestor renames
+  together, and the gate reports the split between them (Q4).
+- **R2 — reach is not one draw's luck** (Q2). WHEN an instrumented run executes
   without `CI` set, once for each `--hypothesis-seed` from 1 to 20, every run SHALL make at least one
   queued-rename commit through the scheduler route and at least one through the eviction route.
 - **R3 — no coverage traded away.** WHEN the instrumented run of R1 executes on the final tree, the
   fsync route and the direct route SHALL each make at least a floor stated in `PLAN.md`, justified
-  against the base's measured count for that route, and never zero. [NEEDS CLARIFICATION: Q7]
-- **R4 — a scheduler-route defect turns the model red.** [NEEDS CLARIFICATION: Q3] WHEN a mutant that
+  against the base's re-measured count for that route, and never zero (Q7).
+- **R4 — a scheduler-route defect turns the model red** (Q3). WHEN a mutant that
   breaks the engine's handling of a queued rename only on the scheduler route (the plan names it and
   plants it in a scratch copy of the final tree's `src/`) is planted, `test_model` SHALL fail under
   `CI=true`, and the same mutant SHALL fail `test_scheduler_poll_settles_data_before_rename`.
 - **R5 — the model is not weakened.** The model on the final tree SHALL keep every rule, invariant and
-  teardown check it has at the base. Its strategies SHALL be no narrower, and its `max_examples` and
-  `stateful_step_count` no lower (1000 and 50). It SHALL add no skip guard, `assume`, precondition,
-  filter or exception handler that retires coverage the model has at the base.
+  teardown check it has at the base. Its strategies SHALL be no narrower, and its settings no lower
+  than the base's `max_examples=1000` and `stateful_step_count=50` (`test_model.py:415`). It SHALL add
+  no skip guard, `assume`, precondition, filter or exception handler that retires coverage the model
+  has at the base.
 - **R6 — the required mutants still fail the model.** WHEN each of M1, M2, M3 and M7 is planted in a
   scratch copy of the final tree's `src/`, `test_model` SHALL fail under `CI=true`, with a falsifying
   example (shrinking may be off for that run).
@@ -124,7 +125,8 @@ The criteria:
   - The measured counts in `AGENTS.md` SHALL match the final tree wherever the change alters them:
     § Commands (`:70`), § Repository map (`:111`), the engine-test count (`:136`), § Conventions
     (`:693`) and § Verification (`:734`), including the test_model timing if it moves.
-  - Q1's home SHALL be written in this cycle, if Q1 gives it one.
+  - Q1's home SHALL be written in this cycle: `issues/model-source-served-reach.md`, `status:
+    unshaped`, carrying the history of the seed's 2026-11-06 note, and its `ROADMAP.md` entry.
   - The seed is `adopted:model-commit-route-reach` from this GOAL's commit. Once the roadmap step has
     retired it and its `ROADMAP.md` entry, no file outside `spec/` SHALL name
     `issues/model-commit-route-reach.md`.
@@ -140,13 +142,14 @@ The criteria:
 
 ## Non-goals (no-gos)
 
-- **A source-served configuration for the model** (a stage `bypass_size`). [NEEDS CLARIFICATION: Q1]
-  Recommended out, with a seed of its own written in this cycle.
+- **A source-served configuration for the model** (a stage `bypass_size`). Home:
+  `issues/model-source-served-reach.md`, written in this cycle (Q1, R7).
 - **Driving the real `EvictionManager` through a stage quota**, unless the plan finds R1's eviction
   route needs it. If it does, the quota goes through `dataclasses.replace` on the spec, as
   `fsync_policy` already does; `tests/engine/conftest.py` is an interface (`AGENTS.md` § Conventions)
   and stays unchanged.
-- **Any `src/` change.** This is a test cycle. [NEEDS CLARIFICATION: Q6, a defect the new reach finds]
+- **Any `src/` change.** This is a test cycle. A defect the new reach finds is a stop-and-ask
+  (Q6, Constraints).
 - **New deterministic tests in `tests/engine/test_replay.py`.** Both routes are pinned there already.
 - **A standing reach assertion in the unit suite** (Q5). The counts are a gate's evidence, not a test.
 - **The integration lane and real threads.** Coverage stays engine-level under `-m unit`. Homes:
@@ -163,6 +166,9 @@ The criteria:
   reach that holds only on one draw is what R2 rules out.
 - **No `src/` or `tests/` text cites an `issues/` seed** (Geoffrey's directive, 2026-11-09), and no
   feature-scoped spec id (`AGENTS.md` § Conventions).
+- **A defect the new reach finds is a stop-and-ask** (Q6). If the model goes red on the final tree for
+  an engine defect, the builder records the falsifying example and stops. It writes no `src/` change
+  and does not weaken the model. The foreman brings it to Geoffrey.
 - **Same-commit records** (R7, `AGENTS.md` § Conventions).
 - **Human sign-off at review is conditional.** This is a test-only cycle, so Geoffrey's sign-off is
   triggered only by a CONFIRMED review finding in a high-blast-radius path. `tests/engine/test_model.py`
@@ -191,55 +197,33 @@ Resolved:
   mutants, named) and R8 (the gate, with CI's four jobs added). R4 (detection), R7 (records) are new.
   (recorded 2026-11-09, shaper)
 
-Open, for the GOAL gate. Each carries the shaper's recommendation.
+Ruled at the GOAL gate. Each takes the shaper's recommended answer:
 
-- **Q1 — Is a source-served configuration for the model in scope?** The seed's 2026-11-06 note leaves
-  it with this cycle, since it edits the same class and redraws the same sample.
-  - **(A) Out, with a seed (recommended).** This cycle writes `issues/model-source-served-reach.md` and
-    its `ROADMAP.md` entry (R7). A `bypass_size` stage reaches the source-served `open`, `truncate` and
-    stat paths that cycles 4–6 changed, and a model serving files off the source would be a second
-    deliverable with its own oracle questions. That breaks `small`. The redraw it would share costs one
-    more re-grade, which this cycle's gate makes routine.
-  - (B) In. Appetite rounds up to `big`, and the GOAL gains reach and parity criteria for
-    source-served files.
-  - (C) Out with no seed. The idea is dropped when this seed retires.
-- **Q2 — Must the reach hold on random seeds too (R2)?**
-  - **(A) Yes, at least one commit per route on each of seeds 1–20 (recommended).** The deferred-rename
-    cycle found that a lucky or unlucky draw decides a fixed-sample result (its PLAN § 2.7 amendment).
-    A floor met only on the CI draw would hold until the next edit redraws it. Reach built into a rule
-    makes one commit per route per seed near certain, and R8 already runs those seeds.
-  - (B) No; R1 on the CI draw only. Drop R2.
-- **Q3 — Must a scheduler-route defect turn the model red (R4)?** A count shows reach, not detection.
-  - **(A) Yes, for the scheduler route (recommended).** `commit_row` is a distinct engine path, so a
-    mutant confined to it exists. The eviction route in the model shares `commit_upstream` with
-    `commit_entry`, so no `src/` mutant is confined to it without driving `EvictionManager`, a
-    non-goal; its detection rests on R1 and M1 (R6).
-  - (B) Yes, for both routes. The plan then drives `EvictionManager` (a stage quota) and the
-    second Non-goal goes.
-  - (C) No. Drop R4.
-- **Q4 — Do own and ancestor renames share one floor?**
-  - **(A) One floor per route, counting both, with the split reported (recommended).** The directory
-    case was its own class in the deferred-rename cycle (its R2), so the report shows it, but a
-    separate floor for each doubles R1's grading for a rarer state.
-  - (B) Separate floors for the entry's own rename and for an ancestor's.
-- **Q5 — Where does the reach evidence live?**
-  - **(A) A gate under `spec/model-commit-route-reach/verify/` (recommended)**, as every earlier cycle
-    committed its gate. It patches from outside, so the draw is untouched. A later edit to the model
-    can lose the reach without CI noticing; that is the trade.
-  - (B) A standing unit test that asserts the counts. It puts instrumentation in `tests/`, adds a
-    second model run to every `verify`, and must itself keep off the class source.
-- **Q6 — What if the new reach finds a real engine defect?** The model would go red on the final tree,
-  and R8 forbids that, while `src/` is out of scope.
-  - **(A) Stop and ask (recommended).** The builder records the falsifying example and writes no
-    `src/` change and no weakening of the model. Geoffrey decides whether the defect becomes a `fix`
-    seed this cycle waits on, or this cycle widens to `kind: fix`.
-  - (B) Write the seed and land the model with the failing route marked expected-to-fail. This
-    contradicts `AGENTS.md`'s rule that no test failure is tolerated, so it is not recommended.
-- **Q7 — How high must the fsync and direct routes stay (R3)?** Adding rules lowers each rule's share
-  of steps, so the existing routes' counts can fall by redraw alone.
-  - **(A) A floor the plan states and justifies against the base, never zero (recommended).**
-  - (B) No lower than the base's measured count for each route. A redraw can miss that by chance, which
-    would push the build to tune the draw.
+- **Q1 — Is a source-served configuration for the model in scope?** — **A:** (A), out. This cycle writes
+  `issues/model-source-served-reach.md` and its `ROADMAP.md` entry in P1's records (R7). The seed stays
+  `unshaped` and carries the history of this seed's 2026-11-06 note. A `bypass_size` stage reaches the
+  source-served `open`, `truncate` and stat paths cycles 4–6 changed: a second deliverable with its own
+  oracle questions, which `small` does not hold. (ruled 2026-11-09, foreman as gate judge)
+- **Q2 — Must the reach hold on random seeds too?** — **A:** (A), yes. Every one of seeds 1–20 reaches
+  each of the scheduler and eviction routes at least once (R2). A floor met only on the CI draw would
+  hold until the next edit redraws it. (ruled 2026-11-09, foreman as gate judge)
+- **Q3 — Must a defect be detected, not just reached?** — **A:** (A), for the scheduler route only (R4).
+  `commit_row` is a distinct engine path, so a mutant confined to it exists. The eviction route shares
+  `commit_upstream` with `commit_entry` in the model, so it is graded on reach (R1, R2) and on R6's
+  mutants. (ruled 2026-11-09, foreman as gate judge)
+- **Q4 — Do own and ancestor renames share one floor?** — **A:** (A), one floor per route, counting
+  both, with the own-rename and ancestor-rename split reported (R1). (ruled 2026-11-09, foreman as gate
+  judge)
+- **Q5 — Where does the reach evidence live?** — **A:** (A), a gate under
+  `spec/model-commit-route-reach/verify/`, patching from outside so the draw is untouched; no standing
+  unit test. A later edit to the model can lose the reach without CI noticing; that trade is accepted.
+  (ruled 2026-11-09, foreman as gate judge)
+- **Q6 — What if the new reach finds a real engine defect?** — **A:** (A), stop and ask. The builder
+  records the falsifying example, makes no `src/` edit and does not weaken the model; the foreman
+  brings it to Geoffrey (Constraints). (ruled 2026-11-09, foreman as gate judge)
+- **Q7 — How high must the fsync and direct routes stay?** — **A:** (A), a floor the plan states,
+  justified against the re-measured base, and never zero (R3). Requiring the base's count itself would
+  push the build to tune the draw. (ruled 2026-11-09, foreman as gate judge)
 
 ## Related materials
 
