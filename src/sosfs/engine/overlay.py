@@ -103,6 +103,7 @@ class OverlayEngine:
         # nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It is
         # re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
         self._source_lock = threading.RLock()
+        self._running: set[int] = set()                    # namespace rows on the source lock holder's stack
         # The open purge watches (`_watch`) and the lock guarding them and their ids: a leaf, below the SQLite write
         # lock, since `_purge` takes it inside its transaction. Nothing is acquired while holding it.
         self._watches: List[PurgeWatch] = []
@@ -447,10 +448,12 @@ class OverlayEngine:
         """
         Rename, replacing a live file (or empty directory) at `new`. Durable in
         the catalog immediately; staging copies move now; the source moves when
-        the queued op commits. The source lock is held from `_vacate` through the
-        catalog move, so the move never lands between a handle-less `truncate`'s
-        lookup under that lock and its recording, for a file below `old`; the
-        staging copies move after the lock is released.
+        the queued op commits. Every path the move takes is vacated first: `new`,
+        then each path below it where a tombstone sits in a moved descendant's
+        way. The source lock is held from `_vacate` through the catalog move, so
+        the move never lands between a handle-less `truncate`'s lookup under that
+        lock and its recording, for a file below `old`; the staging copies move
+        after the lock is released.
         """
         old, new = normalize(old), normalize(new)
         if old == '/' or new == '/':
@@ -481,6 +484,8 @@ class OverlayEngine:
                 self._remove(target, replaced=True)
             with self._source_lock:
                 self._vacate(new, mover=entry.id)
+                for path in self.catalog.collisions(old, new):
+                    self._vacate(path)                      # a tombstone below `new` where a moved descendant lands
                 now = self.clock()
                 with self.db.transaction():
                     self.catalog.rename(old, new)
@@ -1100,7 +1105,11 @@ class OverlayEngine:
         bytes; `mkdir` and a rename's destination resolve to the entry's target (`_target`).
         """
         with self._source_lock:
-            self._execute_namespace_locked(row)
+            self._running.add(row.id)
+            try:
+                self._execute_namespace_locked(row)
+            finally:
+                self._running.discard(row.id)
 
     def _execute_namespace_locked(self, row: Writeback) -> None:
         """The body of `_execute_namespace`, run with the source lock held."""
@@ -1112,6 +1121,8 @@ class OverlayEngine:
             # in the directory's object, its move or removal queued behind this row (removing an entry cancels
             # its queued rename and queues the removal last). Those rows run first, as in `_purge_source`.
             rows = self._holder_rows(entry.source_path, below=True, exclude=entry.id)
+            if rows & self._running:
+                return                                      # a row this replay is inside still holds a place below
             if rows:
                 self._replay_through(rows, skip=frozenset({row.id}))
                 if self.journal.current(row) is None:

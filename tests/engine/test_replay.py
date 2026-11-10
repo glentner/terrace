@@ -481,6 +481,115 @@ def test_new_file_where_a_removed_file_still_sits(engine: OverlayEngine, clock: 
     assert_converged(engine)
 
 
+# -- a directory rename first clears every path its subtree moves onto ---------------------------------------
+
+def mirrored(engine: OverlayEngine, oracle: Path, ops: list) -> OverlayEngine:
+    """
+    Run `ops` on the engine and on `oracle`, a plain directory tree, and return the engine (a new one after a
+    'restart'). 'write' creates a file with the given bytes; 'commit', 'flush' and 'restart' move nothing in a
+    plain tree.
+    """
+    plain = {'mkdir': os.mkdir, 'rmdir': os.rmdir, 'unlink': os.unlink, 'rename': os.rename}
+    for name, *args in ops:
+        if name == 'restart':
+            spec, clock = engine.spec, engine.clock
+            engine.stop()
+            engine = OverlayEngine(spec, clock=clock)
+            engine.start()
+        elif name == 'flush':
+            engine.flush()
+        elif name == 'commit':
+            engine.commit_upstream(*args)
+        elif name == 'write':
+            path, data = args
+            engine.create(path)
+            rewrite(engine, path, data)
+            (oracle / path.lstrip('/')).write_bytes(data)
+        else:
+            getattr(engine, name)(*args)
+            plain[name](*(oracle / path.lstrip('/') for path in args))
+    return engine
+
+
+# A file committed inside /d2, moved out and removed while its move is queued: the removal cancels the move,
+# and the tombstone the move left at the file's old path outlives it. The last two leave a tombstone below /d2
+# by other routes: a directory's rename carries a moved-out file's tombstone along, and a file moved in and
+# removed is a tombstone whose removal is queued at a source place outside /d2.
+REMOVED_CHILD = {
+    'removed target': [('mkdir', '/d2'), ('write', '/d2/a.dat', b'old'), ('commit', '/d2/a.dat'),
+                       ('rename', '/d2/a.dat', '/a.dat'), ('rmdir', '/d2'), ('unlink', '/a.dat')],
+    'empty target': [('mkdir', '/d2'), ('write', '/d2/a.dat', b'old'), ('commit', '/d2/a.dat'),
+                     ('rename', '/d2/a.dat', '/a.dat'), ('unlink', '/a.dat')],
+    'nested, removed target': [('mkdir', '/d2'), ('mkdir', '/d2/s'), ('write', '/d2/s/a.dat', b'old'),
+                               ('commit', '/d2/s/a.dat'), ('rename', '/d2/s/a.dat', '/a.dat'), ('rmdir', '/d2/s'),
+                               ('rmdir', '/d2'), ('unlink', '/a.dat')],
+    'nested, empty target': [('mkdir', '/d2'), ('mkdir', '/d2/s'), ('write', '/d2/s/a.dat', b'old'),
+                             ('commit', '/d2/s/a.dat'), ('rename', '/d2/s/a.dat', '/a.dat'), ('rmdir', '/d2/s'),
+                             ('unlink', '/a.dat')],
+    'renamed twice': [('mkdir', '/d2'), ('write', '/d2/a.dat', b'old'), ('commit', '/d2/a.dat'),
+                      ('rename', '/d2/a.dat', '/a.dat'), ('rename', '/a.dat', '/b.dat'), ('unlink', '/b.dat')],
+    'carried by its directory': [('mkdir', '/d3'), ('write', '/d3/a.dat', b'old'), ('commit', '/d3/a.dat'),
+                                 ('rename', '/d3/a.dat', '/d3/c.dat'), ('rename', '/d3', '/d2'),
+                                 ('unlink', '/d2/c.dat')],
+    'moved in, then removed': [('write', '/x.dat', b'old'), ('commit', '/x.dat'), ('mkdir', '/d2'),
+                               ('rename', '/x.dat', '/d2/a.dat'), ('unlink', '/d2/a.dat')],
+}
+
+BETWEEN = {'queued': [], 'drained': [('flush',)], 'restarted': [('restart',)],
+           'drained and restarted': [('flush',), ('restart',)]}
+
+MOVED = [('mkdir', '/d1'), ('write', '/d1/a.dat', b'new'), ('mkdir', '/d1/s'), ('write', '/d1/s/a.dat', b'deep'),
+         ('write', '/d1/s/b.dat', b'beside')]
+
+
+@mark.parametrize('between', BETWEEN)
+@mark.parametrize('trigger', REMOVED_CHILD)
+def test_directory_rename_onto_paths_a_removed_entry_held(tmp_path: Path, clock: Clock, trigger: str,
+                                                           between: str) -> None:
+    """
+    A directory renamed onto a name below which a removed entry's tombstone still sits, at any depth, behaves as
+    on a plain directory tree: the namespace and bytes match it at once, and the source holds the same tree once
+    the queue drains, with nothing under the old name and nothing the removal took.
+    """
+    seed(tmp_path / 'project', 'seeded.txt', b'initial-content')
+    oracle = tmp_path / 'oracle'
+    seed(oracle, 'seeded.txt', b'initial-content')
+    engine = OverlayEngine(dataclasses.replace(build_spec(tmp_path, tiers=3), fsync_policy='commit'), clock=clock)
+    engine.start()
+    walk(engine)
+    engine = mirrored(engine, oracle, REMOVED_CHILD[trigger] + BETWEEN[between] + MOVED + [('rename', '/d1', '/d2')])
+    try:
+        assert view(engine) == tree(oracle)
+        engine.flush()
+        assert tree(Path(engine.spec.tiers[0].path)) == tree(oracle)
+        assert_converged(engine)
+    finally:
+        if engine.started:
+            engine.stop()
+
+
+def test_directory_rename_carries_its_own_tombstone_onto_a_removed_entry(tmp_path: Path, clock: Clock) -> None:
+    """A tombstone inside the moved directory lands on a path where another removed entry's tombstone sits."""
+    seed(tmp_path / 'project', 'seeded.txt', b'initial-content')
+    oracle = tmp_path / 'oracle'
+    seed(oracle, 'seeded.txt', b'initial-content')
+    engine = OverlayEngine(dataclasses.replace(build_spec(tmp_path, tiers=3), fsync_policy='commit'), clock=clock)
+    engine.start()
+    walk(engine)
+    engine = mirrored(engine, oracle, REMOVED_CHILD['removed target'] + [
+        ('mkdir', '/d1'), ('write', '/d1/a.dat', b'moved'), ('commit', '/d1/a.dat'),
+        ('rename', '/d1/a.dat', '/d1/c.dat'),               # leaves a tombstone at /d1/a.dat, its move queued
+        ('rename', '/d1', '/d2')])
+    try:
+        assert view(engine) == tree(oracle)
+        engine.flush()
+        assert tree(Path(engine.spec.tiers[0].path)) == tree(oracle)
+        assert_converged(engine)
+    finally:
+        if engine.started:
+            engine.stop()
+
+
 # -- stale scheduler snapshots --------------------------------------------------------------------------------
 
 def test_scheduler_rows_made_moot_before_they_run(engine: OverlayEngine, clock: Clock) -> None:

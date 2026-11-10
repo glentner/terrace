@@ -182,6 +182,20 @@ class Catalog:
                 t'                 parent = {new} || substr(parent, {offset}) '
                 t'WHERE path >= {old + "/"} AND path < {old + "0"}')
 
+    def collisions(self, old: str, new: str) -> List[str]:
+        """
+        The paths below `new` that `rename(old, new)` would move a descendant of `old` (live or tombstoned) onto,
+        and that an entry already holds, ordered by path. Below a name that is absent or an empty directory, each
+        holder is a tombstone.
+        """
+        old, new = normalize(old), normalize(new)
+        offset = len(old) + 1
+        rows = self.db.execute(
+            t'SELECT dest.path FROM entry AS moved '
+            t'JOIN entry AS dest ON dest.path = {new} || substr(moved.path, {offset}) '
+            t'WHERE moved.path >= {old + "/"} AND moved.path < {old + "0"} ORDER BY dest.path')
+        return [row['path'] for row in rows]
+
     def advance_source_path(self, old_source: str, new: str) -> None:
         """
         Relocate the recorded committed source path from `old_source` to `new` — a source-tier

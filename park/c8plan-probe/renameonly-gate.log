@@ -1,0 +1,25 @@
+All checks passed!
+lint: OK    ruff E9,F63,F7,F82 over src tests
+lint: OK    import layering (nothing below engine/ imports above itself)
+lint: OK    SPDX header pair on all 75 .py files under src/ and tests/
+lint: OK    version single-source reads 0.1.0.dev0
+lint: OK    CLAUDE.md -> AGENTS.md is a symlink
+lint: all checks passed
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+........................................................................ [ 37%]
+........................................................................ [ 49%]
+.F..............................................F....................... [ 62%]
+........................................................................ [ 74%]
+...........F.........F.................................................. [ 87%]
+........................................................................ [ 99%]
+.                                                                        [100%]
+=========================== short test summary info ============================
+FAILED tests/engine/test_replay.py::test_directory_rename_onto_paths_a_removed_entry_held[nested, removed target-queued]
+FAILED tests/engine/test_replay.py::test_directory_rename_onto_paths_a_removed_entry_held[nested, removed target-drained]
+FAILED tests/engine/test_replay.py::test_directory_rename_onto_paths_a_removed_entry_held[nested, removed target-restarted]
+FAILED tests/engine/test_replay.py::test_directory_rename_onto_paths_a_removed_entry_held[nested, removed target-drained and restarted]
+4 failed, 573 passed in 34.18s

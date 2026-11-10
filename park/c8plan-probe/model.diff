@@ -1,0 +1,126 @@
+commit 87666941532432ce494422753edcbc1b1d00b8ed
+Author: Geoffrey Lentner <glentner@purdue.edu>
+Date:   Mon Nov 9 23:17:08 2026 -0500
+
+    park: model-commit-route-reach prototype at the Q6 stop
+
+diff --git a/tests/engine/test_model.py b/tests/engine/test_model.py
+index af21217..bc626fb 100644
+--- a/tests/engine/test_model.py
++++ b/tests/engine/test_model.py
+@@ -53,6 +53,10 @@ def snapshot(root: Path) -> Dict[str, object]:
+     return state
+ 
+ 
++LIFT = st.booleans()
++ROUTE = st.sampled_from(['poll', 'fsync', 'evict'])
++
++
+ class OverlayMachine(RuleBasedStateMachine):
+     """
+     Random VFS op sequences applied to both the engine (3-tier stack) and a
+@@ -71,9 +75,13 @@ class OverlayMachine(RuleBasedStateMachine):
+     committed (directly, by `fsync` under the commit policy, and before an
+     eviction), one scheduler poll after a clock jump or at the next deadline, the
+     pump's scan and a later commit of what it scanned with user ops between them,
+-    and three composites: a commit while a rename is queued, a commit at a name
+-    whose old object's move is queued, and a pump snapshot committed after a user
+-    op cancelled the rename it holds and a newer row took its id. A drain that
++    and five composites: a commit while a rename is queued, a commit at a name
++    whose old object's move is queued, a pump snapshot committed after a user op
++    cancelled the rename it holds and a newer row took its id, a rewrite that
++    reaches the source through a scheduler poll, `fsync` or an eviction while the
++    file's rename, or its directory's, is queued, and a file moved out of a
++    directory that is then removed, the file's removal queued behind the
++    directory's. A drain that
+     polls deadline by deadline must leave the source equal to the oracle; after
+     every step each source object but the never-adopted seed file has exactly one
+     catalog holder; and at teardown a fresh engine over the same roots reads the
+@@ -292,6 +300,87 @@ class OverlayMachine(RuleBasedStateMachine):
+ 
+         self.parity(engine_side, oracle_side)
+ 
++    def poll_data_due(self, path: str, to_source: bool) -> None:
++        """
++        One scheduler poll at the earliest deadline among `path`'s queued data rows bound for the source
++        (`to_source`) or bound for a stage, so exactly what is due by then commits; nothing when there is none.
++        """
++        source = self.engine.source.name
++        rows = [row for row in self.engine.journal.queued_for(path)
++                if row.op == 'data' and (row.to_tier == source) == to_source]
++        if rows:
++            self.clock.now = max(self.clock.now, min(self.scheduler.deadline(row) for row in rows))
++            self.scheduler.poll(self.clock.now)
++
++    @rule(path=FILE_PATHS, new=PATHS, data=DATA, lift=LIFT, route=ROUTE)
++    def write_rename_commit_through(self, path: str, new: str, data: bytes, lift: bool, route: str) -> None:
++        """
++        Commit a file (created first when absent), rewrite it through an open handle, rename it or (`lift`) its
++        parent directory, then commit the rewrite through one route while that rename is queued: a scheduler
++        poll (the copy is polled next to the source before the rename, so its data row falls due before the
++        rename row), `fsync` on the handle under the commit policy, or an eviction at the file's new path.
++        """
++        parent = path.rsplit('/', 1)[0]
++        moved = parent if lift and parent else path
++        landed = new + path[len(moved):]
++        fresh = not self.real(path).exists()
++
++        def engine_side():
++            if fresh:
++                self.engine.create(path)
++            self.engine.commit_upstream(path)
++            handle = self.engine.open(path, os.O_RDWR | os.O_TRUNC)
++            try:
++                self.engine.write(handle, data, 0)
++                if route == 'poll':
++                    self.poll_data_due(path, to_source=False)
++                self.engine.rename(moved, new)
++                if route == 'fsync':
++                    self.engine.fsync(handle)
++            finally:
++                self.engine.release(handle)
++            if route == 'poll':
++                self.poll_data_due(landed, to_source=True)
++            elif route == 'evict':
++                self.evict(landed)
++
++        def oracle_side():
++            fd = os.open(self.real(path), os.O_CREAT | os.O_RDWR | os.O_TRUNC, 0o644)
++            try:
++                os.pwrite(fd, data, 0)
++                os.rename(self.real(moved), self.real(new))
++            finally:
++                os.close(fd)
++
++        self.parity(engine_side, oracle_side)
++
++    @rule(path=FILE_PATHS, new=FILE_PATHS)
++    def move_out_rmdir_unlink(self, path: str, new: str) -> None:
++        """
++        Commit a file (created first when absent), move it out of its directory, remove the emptied directory,
++        then unlink the file: the unlink cancels the queued move and queues the removal behind the directory's,
++        whose object on the source still holds the file.
++        """
++        parent = path.rsplit('/', 1)[0]
++        fresh = not self.real(path).exists()
++
++        def engine_side():
++            if fresh:
++                self.engine.create(path)
++            self.engine.commit_upstream(path)
++            self.engine.rename(path, new)
++            self.engine.rmdir(parent)
++            self.engine.unlink(new)
++
++        def oracle_side():
++            if fresh:
++                os.close(os.open(self.real(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
++            os.rename(self.real(path), self.real(new))
++            os.rmdir(self.real(parent))
++            os.unlink(self.real(new))
++
++        self.parity(engine_side, oracle_side)
++
+     @rule(path=FILE_PATHS)
+     def commit_entry(self, path: str) -> None:
+         """One entry's data to the source; absent, clean and directory paths are a quiet no-op."""
