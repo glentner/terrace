@@ -118,6 +118,16 @@ bytes equal those of a plain directory tree that performed the same sequence of 
     replace-then-fail ordering in a seed, with the live-empty-target reproduction as evidence, and R6's
     live-empty-target variant shows the empty directory is renamed over, not lost. (ruled 2026-11-09,
     foreman as gate judge)
+- **Q3:** Planning stopped before the plan commit. A second base-engine defect lies inside R1 × R2 × R5:
+  with two nested removed directories and a grandchild moved out and then removed, replaying the nested
+  `rmdir` rows recurses until `RecursionError`. `flush`, drain and the scheduler all fail, and because
+  the queue persists, it never drains. The foreman reproduced it on `980f998`. How does this cycle
+  proceed?
+  - **A:** A separate fix cycle first, for the replay recursion, shaped on its own; it lands on `main`.
+    This cycle is parked unchanged and resumes on the new `main`: the rename fix, its tests and the
+    root cause (Q1's answer: the fix does not clear stranded rows outside a rename's path, from either
+    stranding route) carry over from the parked prototype. After this cycle lands,
+    `model-commit-route-reach` resumes. (Geoffrey, 2026-11-09, in the foreman's session)
 
 ## Related materials
 
