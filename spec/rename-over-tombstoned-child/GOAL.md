@@ -87,11 +87,10 @@ bytes equal those of a plain directory tree that performed the same sequence of 
 
 ## Clarifications
 
-- **Q1 (open):** After the trigger and a full drain, the catalog still holds a removed row at the
+- **Q1:** After the trigger and a full drain, the catalog still holds a removed row at the
   file's old path with no queued operation against it, and it survives a restart (seen 2026-11-09 at
   `980f998`). Nothing user-visible depends on it except this rename, but `sosfs audit` would have to
   explain it. Is clearing it part of this contract?
-  `[NEEDS CLARIFICATION: stranded removed rows in scope?]`
   - (a) Yes: add a criterion that after a drain following the trigger, no removed row remains for a
     path with nothing queued against it.
   - (b) No: Non-goal; record it in `issues/audit-command.md` as a state the audit must repair.
@@ -100,11 +99,13 @@ bytes equal those of a plain directory tree that performed the same sequence of 
   - **Recommended: (c).** The row may be the cause (then the fix clears it for free) or a harmless
     leftover (then a contract line pins a mechanism the diagnosis has not confirmed). Step 5 forbids
     a fix criterion that names the suspected mechanism.
-- **Q2 (open):** A rename that fails after replacing its target removes an existing empty directory
+  - **A:** (c). The plan root-causes first and states whether its fix clears the stranded row; if it
+    does not, the cycle's records phase files the row in a seed (`issues/audit-command.md` or a new one)
+    with this cycle's reproduction. (ruled 2026-11-09, foreman as gate judge)
+- **Q2:** A rename that fails after replacing its target removes an existing empty directory
   from the namespace and the source, as the live-empty-target variant shows. R1 removes this
   trigger. Should the contract also require failure atomicity: any `rename` that raises leaves both
   names as they were?
-  `[NEEDS CLARIFICATION: general rename failure atomicity in scope?]`
   - (a) Yes, for every failure path of `rename`.
   - (b) Only for the trigger's sequences. Once R1 holds, that is moot, so this is (c) in effect.
   - (c) No: Non-goal; the cycle records the replace-then-fail ordering in a seed
@@ -113,6 +114,10 @@ bytes equal those of a plain directory tree that performed the same sequence of 
     `rename` atomic against every later failure means reordering a replaced target's removal around
     the catalog move, a design change to high-blast-radius paths (`rename`, `_remove`, `_purge_source`)
     that a `small` appetite should not take on unbidden.
+  - **A:** (c). Failure atomicity of `rename` is a Non-goal. The cycle's records phase files the
+    replace-then-fail ordering in a seed, with the live-empty-target reproduction as evidence, and R6's
+    live-empty-target variant shows the empty directory is renamed over, not lost. (ruled 2026-11-09,
+    foreman as gate judge)
 
 ## Related materials
 
