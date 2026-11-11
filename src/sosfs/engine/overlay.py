@@ -101,7 +101,7 @@ class OverlayEngine:
         # then the purge-watch mutex below.
         # While holding it, nothing takes a path lock or calls `_ensure`, `getattr` or `readdir` (replay under a
         # nested path lock is the AB/BA deadlock), and nothing acquires it inside `db.transaction()`. It is
-        # re-entrant because replay nests: `_vacate` replays rows through `_execute_namespace`, which takes it.
+        # re-entrant for `rename` around `_vacate` and the cut around `_serve`; a replay runs under its caller's hold.
         self._source_lock = threading.RLock()
         # The open purge watches (`_watch`) and the lock guarding them and their ids: a leaf, below the SQLite write
         # lock, since `_purge` takes it inside its transaction. Nothing is acquired while holding it.
@@ -1073,7 +1073,10 @@ class OverlayEngine:
         """
         Push everything queued to the source now, ignoring policy clocks:
         namespace ops first in queue order (they shape the tree data lands in),
-        then data commits against current catalog paths.
+        then data commits against current catalog paths. Each namespace row it
+        reads starts its own replay, where that row never waits; a row that waits
+        inside another's replay runs when this call reaches it (`_replay_through`),
+        so one pass leaves none of them queued.
         """
         for row in self.journal.queued(self.source.name):
             if row.op != 'data':
@@ -1090,8 +1093,9 @@ class OverlayEngine:
 
     def _execute_namespace(self, row: Writeback) -> None:
         """
-        Apply one queued namespace op to the source, intent-bracketed and tolerant of no-ops. A row
-        that is no longer queued (run by a vacate, cancelled, cascaded away) does nothing.
+        Apply one queued namespace op to the source, intent-bracketed and tolerant of no-ops, after the
+        queued rows it needs first (`_replay_through`). A row that is no longer queued (run by a vacate,
+        cancelled, cascaded away) does nothing.
 
         The op resolves against the entry's current place, not the paths recorded when it was queued:
         the queue is a lossy history (removing an entry cancels its rows), so replaying recorded paths
@@ -1100,28 +1104,16 @@ class OverlayEngine:
         bytes; `mkdir` and a rename's destination resolve to the entry's target (`_target`).
         """
         with self._source_lock:
-            self._execute_namespace_locked(row)
+            self._replay_through(set(), row)
 
-    def _execute_namespace_locked(self, row: Writeback) -> None:
-        """The body of `_execute_namespace`, run with the source lock held."""
-        if self.journal.current(row) is None:
-            return                                          # already run by a vacate, cancelled, or cascaded away
-        entry = self.catalog.by_id(row.entry)
-        if entry is not None and row.op == 'rmdir' and entry.source_path is not None:
-            # Empty in the catalog is not empty on the source: a child moved out or removed since may still sit
-            # in the directory's object, its move or removal queued behind this row (removing an entry cancels
-            # its queued rename and queues the removal last). Those rows run first, as in `_purge_source`.
-            rows = self._holder_rows(entry.source_path, below=True, exclude=entry.id)
-            if rows:
-                self._replay_through(rows, skip=frozenset({row.id}))
-                if self.journal.current(row) is None:
-                    return
-                entry = self.catalog.by_id(row.entry)
+    def _execute_namespace_locked(self, row: Writeback, entry: Optional[Entry]) -> None:
+        """
+        The act of one queued namespace row, with the source lock held, once `_replay_through` has found it
+        still queued and run every row it needs first; `entry` is its entry as read after them.
+        """
         if entry is None:
             self.journal.settle_current(row)
             return
-        if row.op == 'rename' and entry.source_path is not None:
-            entry = self._clear_inner_target(row, entry)
         path = entry.path
         now = self.clock()
         detail = dict(row.detail or {})
@@ -1254,72 +1246,172 @@ class OverlayEngine:
                     self.journal.confirm(intent)
         return self._target(path)
 
-    def _holder_rows(self, physical: str, *, below: bool = False, exclude: Optional[int] = None) -> set[int]:
+    def _holder_rows(self, physical: str, *, below: bool = False, exclude: Optional[int] = None,
+                     queued: Optional[Callable[[], List[Writeback]]] = None) -> set[int]:
         """
         Ids of the queued namespace rows of every entry (tombstones included, `exclude` not) whose committed
-        source path is `physical`, or with `below`, lies under it.
+        source path is `physical`, or with `below`, lies under it. The catalog is read first, and the queue only
+        when some entry holds the place: `queued` gives it as a replay holds it, else it is read again.
         """
-        prefix = physical.rstrip('/') + '/'
-        rows = set()
-        for row in self.journal.queued(self.source.name):
-            if row.op == 'data' or row.entry == exclude:
-                continue
-            entry = self.catalog.by_id(row.entry)
-            held = entry.source_path if entry is not None else None
-            if held is None:
-                continue
-            if (held.startswith(prefix) if below else held == physical):
-                rows.add(row.id)
-        return rows
+        holders = self.catalog.held(physical, below=below) - {exclude}
+        if not holders:
+            return set()                                    # nothing holds the place, so no queued row does
+        rows = self.journal.queued(self.source.name) if queued is None else queued()
+        return {row.id for row in rows if row.op != 'data' and row.entry in holders}
 
-    def _clear_inner_target(self, row: Writeback, entry: Entry) -> Entry:
+    def _clear_inner_target(self, entry: Entry, queued: Callable[[], List[Writeback]]) -> set[int]:
         """
-        A directory whose target lies inside its own source object cannot move there. The places between
-        are held by entries that have since moved out of it logically (an ancestor-to-be that was placed
-        inside it); their queued rows run first, then the target is recomputed. One still inside raises
-        rather than settle the row with the source unmoved. The source lock is held.
+        The queued rows a directory's rename needs first when its target lies inside its own source object:
+        those of the entries holding the places between, which have since moved out of it logically (an
+        ancestor-to-be placed inside it). Empty when the target lies outside, without reading the queue, which
+        `queued` gives as a replay holds it. A target inside with no such row raises rather than settle the row
+        with the source unmoved. Reads only the catalog and the queue.
         """
         held = _pure(entry.source_path)
         target = _pure(self._target(entry.path))
         if target == held or not target.is_relative_to(held):
-            return entry
+            return set()
+        inside = self.catalog.held(entry.source_path, below=True) - {entry.id}
         rows = set()
-        for other in self.journal.queued(self.source.name):
-            if other.op == 'data' or other.entry == entry.id:
+        for other in queued():
+            if other.op == 'data' or other.entry not in inside:
                 continue
             holder = self.catalog.by_id(other.entry)
-            place = holder.source_path if holder is not None else None
-            if place is not None and _pure(place) != held and _pure(place).is_relative_to(held) \
-                    and target.is_relative_to(_pure(place)):
+            if holder is not None and target.is_relative_to(_pure(holder.source_path)):
                 rows.add(other.id)
-        self._replay_through(rows, skip=frozenset({row.id}))
-        entry = self.catalog.by_id(entry.id)
-        target = _pure(self._target(entry.path))
-        if target != _pure(entry.source_path) and target.is_relative_to(_pure(entry.source_path)):
+        if not rows:
             raise EngineError(f'Cannot move {entry.source_path} into its own subtree ({target})')
-        return entry
+        return rows
 
-    def _replay_through(self, rows: set[int], skip: frozenset[int] = frozenset()) -> None:
+    def _replay_through(self, rows: set[int], row: Optional[Writeback] = None) -> None:
         """
-        Run queued namespace rows in queue order until every row in `rows` has run: the one place a
-        namespace op jumps its policy clock. Running a prefix, never a row alone, keeps a parent's `mkdir`
-        or a child's move-out ahead of the row that needs it. The source lock is held.
+        Run queued namespace rows in queue order until every row in `rows` has run, or run `row`: the one
+        place a namespace op jumps its policy clock. A row acts only after the rows it needs: an `rmdir` row
+        the rows of the entries still held below its directory's object (`_holder_rows`), a rename row whose
+        target lies inside its own object the rows holding the places between (`_clear_inner_target`). It runs
+        the queue prefix through them first, never a row alone, so a parent's `mkdir` or a child's move-out
+        stays ahead of the row that needs it, then reads its needs again, until none is queued.
+
+        The rows being run form an explicit stack, walked in a loop, so no queue is too long or too nested to
+        replay. A row on the stack never runs again inside its own replay. A row reached inside the replay of
+        a row it needs (one on the stack) cannot act yet: it stays queued until a later visit reaches it; until
+        a row acts, or the rows it waited on leave the stack, it is not read again. A row whose pass through its
+        needs freed none of them waits too, unless it is at the bottom of the stack. `row`, and each row `rows`
+        reaches directly, starts there, where its needs never include a row on it, so it never waits. `flush`,
+        `drain` and a poll start a replay at each row they read, so a row that waited inside an earlier one's
+        runs when the same call reaches it. With `rows`, the replay stops once the last of them has run, and a
+        row that waited inside it and lies past that one stays queued for a later call. At the bottom, a pass
+        that frees none of its needs makes an `rmdir` act anyway (the source answers for what it still holds)
+        and a rename raise; needs are held strictly inside the needing row's place, so queues the engine writes
+        never get there.
+
+        A row is known by its mark (id, entry, op, first-dirty time), never by its id alone: ids are reused, and
+        a removal racing the replay (it takes no source lock) may queue its row under the id of one it cancelled.
+        The queue is read only when `rows` names some, or a row can need one (an `rmdir` whose directory's
+        object holds another entry, a rename whose target lies inside its own), so a row nothing stands in
+        costs no pass over it. The queue is read in full once; before each such row's needs, and when a prefix
+        reaches its end, the rows queued since are added, found by their marks rather than their order, since
+        the clock may step back. The source lock is held.
         """
-        remaining = set(rows)
-        for row in self.journal.queued(self.source.name):
-            if not remaining:
-                break
-            if row.op == 'data' or row.id in skip:
+        queue: List[Writeback] = []
+        known: set[Tuple[int, int, str, float]] = set()
+
+        def mark(row: Writeback) -> Tuple[int, int, str, float]:
+            """A row's identity: its id alone may since name a newer row (ids are reused)."""
+            return row.id, row.entry, row.op, row.first_dirty
+
+        def later() -> bool:
+            """Add to `queue` the rows queued since it was read (all of them, at first); whether there were any."""
+            fresh = self.journal.queued_marks(self.source.name) - known
+            if fresh:
+                queue.extend(other for other in self.journal.queued(self.source.name) if mark(other) in fresh)
+                known.update(fresh)
+            return bool(fresh)
+
+        def pending() -> List[Writeback]:
+            """The rows not yet run, those queued since added first (a removal racing the replay takes no lock)."""
+            later()
+            return [other for other in queue if mark(other) not in done]
+
+        frames = [_Frame(row, set() if row is not None else set(rows))]
+        stack = {mark(row)} if row is not None else set()
+        done: set[Tuple[int, int, str, float]] = set()       # rows this replay ran, or found gone
+        acts = 0                                            # how many rows have acted: places move only then
+        waiting: Dict[Tuple[int, int, str, float], Tuple[int, set]] = {}   # a waiting row: the acts then, its blockers
+        if row is None:
+            later()
+            frames[0].remaining = {mark(other) for other in queue if other.id in rows}
+        while frames:
+            frame = frames[-1]
+            if frame.remaining:
+                nested = None
+                while frame.remaining and nested is None:
+                    if frame.at == len(queue) and not later():
+                        break                               # the rows it still names have gone
+                    other = queue[frame.at]
+                    frame.at += 1
+                    if other.op == 'data' or mark(other) in stack:
+                        continue
+                    frame.remaining.discard(mark(other))
+                    held, on = waiting.get(mark(other), (-1, set()))
+                    if mark(other) not in done and not (held == acts and on & stack):
+                        nested = other                      # else it would wait again: nothing has moved since
+                if nested is not None:
+                    frames.append(_Frame(nested))
+                    stack.add(mark(nested))
+                    continue
+                frame.remaining.clear()
+            if frame.row is None:
+                frames.pop()                                # `rows` have all run
                 continue
-            self._execute_namespace(row)
-            remaining.discard(row.id)
+            current = frame.row
+            if self.journal.current(current) is None:
+                frames.pop()                                # run by a vacate, cancelled, or cascaded away
+                stack.discard(mark(current))
+                done.add(mark(current))
+                continue
+            entry = self.catalog.by_id(current.entry)
+            needs: set[Tuple[int, int, str, float]] = set()
+            if entry is not None and entry.source_path is not None and current.op in ('rmdir', 'rename'):
+                # Each reads the queue only when the row can need one of its rows: one nothing stands in costs no pass.
+                if current.op == 'rmdir':
+                    # Empty in the catalog is not empty on the source: a child moved out or removed since may still
+                    # sit in the directory's object, its move or removal queued behind this row (removing an entry
+                    # cancels its queued rename and queues the removal last).
+                    ids = self._holder_rows(entry.source_path, below=True, exclude=entry.id, queued=pending)
+                else:
+                    ids = self._clear_inner_target(entry, pending)
+                if ids:
+                    needs = {mark(other) for other in queue if other.id in ids and mark(other) not in done}
+            stuck = bool(needs) and frame.needs is not None and frame.needs <= needs
+            if needs & stack or (stuck and stack != {mark(current)}):
+                frames.pop()                                # waits: a row this replay is inside comes first
+                stack.discard(mark(current))
+                waiting[mark(current)] = (acts, needs & stack)
+                continue
+            if stuck:
+                if current.op == 'rename':
+                    raise EngineError(f'Cannot move {entry.source_path} into its own subtree '
+                                      f'({self._target(entry.path)})')
+                needs = set()
+            if needs:
+                frame.needs, frame.remaining, frame.at = needs, set(needs), 0
+                continue
+            self._execute_namespace_locked(current, entry)
+            acts += 1
+            frames.pop()
+            stack.discard(mark(current))
+            done.add(mark(current))
 
     def _vacate(self, path: str, mover: Optional[int] = None) -> None:
         """
         Clear `path` before a new or moved entry takes it. On the source that means the place `path`
         resolves to: the queued rows that free it run now, in queue order (a tombstone's removal at
         `path`, the queued move or removal of any other entry still holding that place). `mover`, the
-        entry being renamed onto `path`, is never one of them. The tombstone at `path` is then dropped.
+        entry being renamed onto `path`, is never one of them. The replay runs the queue in order through the
+        last of them, and each row it reaches directly starts its own replay, where it never waits. It stops
+        there, so a row that waited inside one of those replays and lies past the last stays queued for the
+        next `flush`, drain or poll (`_replay_through`). The tombstone at `path` is then dropped.
         """
         with self._source_lock:
             rows = self._holder_rows(self._target(path), exclude=mover)
@@ -1371,6 +1463,15 @@ class OverlayEngine:
                 self.journal.confirm(intent)
         log.trace(f'Evicted {path} from {tier} ({residency.size} bytes)')
         return True
+
+
+@dataclasses.dataclass
+class _Frame:
+    """A row on a replay's stack (`OverlayEngine._replay_through`), or, with no row, the replay's own needs."""
+    row: Optional[Writeback]
+    remaining: set = dataclasses.field(default_factory=set)         # needed rows its prefix has yet to reach
+    at: int = 0                                                     # where its prefix stands in the queue
+    needs: Optional[set] = None                                     # what it needed when its prefix last ran
 
 
 class PurgeWatch:

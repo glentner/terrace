@@ -43,6 +43,32 @@ model is the net for the next defect on those routes, and it is not reaching the
 coverage of source-served files, if wanted, is this cycle's too: it edits the same class and redraws
 the same sample.
 
+### The write-back scheduler dies on a source-only stack
+
+**Seed:** [`issues/source-only-writeback-scheduler.md`](issues/source-only-writeback-scheduler.md) · `fix` · appetite small
+
+On a stack with the source alone, `boundary_policies` has no entry for the source, so the scheduler's
+`deadline` raises `KeyError` at its first scan after any namespace op and the pump dies. Found while
+mapping the nested-rmdir replay shapes, and recorded there without a fix. Taken after
+`rename-over-tombstoned-child` and `model-commit-route-reach` land, then triaged like any seed.
+
+### A single replay's cost grows faster than its queue
+
+**Seed:** [`issues/replay-cost-at-scale.md`](issues/replay-cost-at-scale.md) · `fix` · appetite big
+
+Queues the nested-rmdir fix made drainable can take super-linear time to drain: hundreds of chains
+removed level by level, or one deep chain removed outermost first, run for minutes in one replay,
+holding the source lock throughout. Each row that can need another re-reads the whole queue. Found by
+that cycle's review as out of Scope; not yet triaged.
+
+### Replay decisions no test distinguishes
+
+**Seed:** [`issues/replay-defensive-branch-coverage.md`](issues/replay-defensive-branch-coverage.md) · `test` · appetite small
+
+Mutants of `_replay_through`'s performance-only skips, its bottom-of-stack branch and some of its
+bookkeeping survive every replay test. A coverage observation from the nested-rmdir review, not a
+defect; not yet triaged.
+
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big

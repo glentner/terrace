@@ -67,8 +67,8 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 548 tests, ~30 s — must pass before every commit
-uv run pytest -n auto -m unit                    # pytest-xdist; no faster, test_model dominates
+uv run pytest -m unit                            # 731 tests, ~60 s — must pass before every commit
+uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
 uv run pytest -m integration                     # 10 tests: real mounts (Linux) + MinIO
@@ -108,7 +108,7 @@ that way proves nothing; assert a pass count.
 | `src/sosfs/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/sosfs/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/sosfs/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 558 tests (548 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 42 files, 741 tests (731 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -133,7 +133,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 210 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 393 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -212,8 +212,8 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 |---|---|
 | `state/db.py` — `autocommit=True`, the four pragmas, `BEGIN IMMEDIATE`, `SCHEMA_VERSION` | Each one silently converts a durability guarantee into a performance characteristic. There is no schema migration machinery: a version bump makes every existing state database unopenable. |
 | `state/journal.py` — `mark_dirty`, `begin`, `confirm`, `_resolve` | Both sacred invariants live in about forty lines here. |
-| `state/journal.py` — `current`, `settle_current`, `settle`, `cancel` | Queue-row identity. Row ids are reused (no `AUTOINCREMENT`), so a replay or settle keyed by id alone acts on, or deletes, a newer op that took the id: silent loss behind a drained queue. |
-| `state/catalog.py` — `holder`, `advance_source_path`, `purge` | Who holds a physical place on the source, and the prefix rewrite a committed rename records. Replay's tombstone purge and every placement decision read them. `purge` returns the id the engine's purge watches record. |
+| `state/journal.py` — `current`, `settle_current`, `settle`, `cancel`, `queued_marks` | Queue-row identity. Row ids are reused (no `AUTOINCREMENT`), so a replay or settle keyed by id alone acts on, or deletes, a newer op that took the id: silent loss behind a drained queue. |
+| `state/catalog.py` — `holder`, `held`, `advance_source_path`, `purge` | Who holds a physical place on the source, and the prefix rewrite a committed rename records. Replay's tombstone purge and every placement decision read them. `purge` returns the id the engine's purge watches record. |
 | `state/schema.sql` — the cascades, the `CHECK` vocabularies, `source_path` | A cascade eats unresolved intent rows; a `CHECK` is the only thing keeping `shutdown_state` a three-valued flag. |
 | `state/lifecycle.py` — `begin_mount`, `Marker.write` | The crash gate and the managed-location identity. |
 | `state/registry.py` — `_attach` | The only thing standing between an evaporated tier and silent re-adoption of its residency rows. |
@@ -244,7 +244,7 @@ review; where its grain differs from the table above, the table governs.
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
 | `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
-| `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`; `state/catalog.py` — `holder`/`advance_source_path`/`purge` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
+| `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`/`queued_marks`; `state/catalog.py` — `holder`/`held`/`advance_source_path`/`purge` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
 | `tier/posix.py`, `s3.py`, `archive.py`, `spec.py` | Adapter atomicity, and the last gate before the engine instantiates tiers. |
@@ -452,9 +452,33 @@ review; where its grain differs from the table above, the table governs.
   `rmdir`). It runs the queue *prefix* in order through the rows that free a physical place — a
   tombstone's removal, and the queued move or removal of any other entry still holding the place the
   name resolves to, which can take other entries' renames, mkdirs and meta rows with it — so a
-  parent's `mkdir` or a child's move-out always runs before the row that needs it. Anything that makes
-  namespace ops lazier must keep that escape hatch, or `create` over a tombstone races the source and a
-  new name lands on an object another entry's queued op has yet to take away.
+  parent's `mkdir` or a child's move-out always runs before the row that needs it. A row acts only once
+  the rows it needs have run: an `rmdir` row the rows of the entries its directory's object still holds
+  (`_holder_rows`, one indexed read through `Catalog.held`), a rename row whose target lies inside its
+  own object the rows holding the places between (`_clear_inner_target`); after its prefix ran it reads
+  its needs again, until none is queued, since a move can leave a target still inside. The rows being
+  replayed form an explicit stack walked in a loop, never a recursion, so neither a long queue nor
+  hundreds of directories whose replays reach one another can exhaust the interpreter's stack. A row on
+  the stack never runs again inside its own replay. A row reached inside the replay of a row it needs
+  (one on the stack) cannot act yet: it returns, stays queued, and waits for a later visit to reach it.
+  While no row has acted and the rows it waited on are still on the stack, it is not read again. The row
+  a replay starts with, and each row `_vacate`'s or `_purge_source`'s replay reaches directly, sits at
+  the bottom of the stack, where its needs never include a row on it, so it never waits. `flush` and
+  `drain` start a replay at every queued row they read, so a row that waited inside an earlier row's
+  replay runs when the same call reaches it, and one pass leaves none of the rows they read queued; a
+  scheduler poll does the same for the rows it reads, the due ones. `_vacate` and `_purge_source` run
+  every row up to the last they need and stop there: a row that waited inside their replay and lies past
+  that row stays queued after the user call returns, like any other, for the next `flush`, drain or poll.
+  A row whose pass through its needs freed none of them waits too, unless it is at the bottom; there a
+  rename raises and an `rmdir` acts, which queues the engine writes never reach, since every need is held
+  strictly inside the needing row's place. A row is known by its mark (id, entry, op, first-dirty time),
+  never by its id alone (ids are reused). The queue is read only for a row that can need one: an `rmdir`
+  whose directory's object still holds another entry, or a rename whose target lies inside its own
+  object. A pass over other rows reads the queue a fixed number of times, not once per row. Before such
+  a row's needs, the rows a removal queues while a replay runs (it takes no source lock) are found by
+  their marks (`Journal.queued_marks`). Anything that makes namespace ops lazier must keep that escape
+  hatch, or `create` over a tombstone races the source and a new name lands on an object another entry's queued op has yet to
+  take away.
 - **A `meta` op never dirties content.** It writes the attribute to the catalog and queues a `meta`
   row in one transaction, then applies to every staged holder; it never calls `mark_dirty` and never
   touches residency `state`. If it did, every `touch(1)` would schedule a whole-file re-copy of a
@@ -611,10 +635,10 @@ review; where its grain differs from the table above, the table governs.
   long. Lock order: **path locks → source
   mutex → `_handles_mutex` → SQLite write lock → purge-watch mutex.** Nothing holding it calls `locks.hold`, `_ensure`,
   `getattr` or `readdir` (replay never takes a path lock; a nested `hold()` inside replay is the AB/BA
-  deadlock above). Nothing acquires it inside `db.transaction()`. It is re-entrant because replay
-  nests: `flush` → `_execute_namespace`, and `_vacate` → `_replay_through` → `_execute_namespace`;
+  deadlock above). Nothing acquires it inside `db.transaction()`. It is re-entrant because
   `rename` takes it around its `_vacate`, and the cut around `_serve`, which takes it again to promote
-  off the source.
+  off the source; a replay does not nest it, since it runs every row it reaches under the hold its caller
+  took, through `_execute_namespace_locked`.
 - **The purge-watch mutex** (`OverlayEngine._watches_mutex`) guards the open purge watches and the ids
   recorded in them (§ 5). It is a leaf, last in the order. Its holders: `_purge`, inside its transaction,
   after the SQLite write lock, to record a purged id; `_adopt`, inside its insert's transaction, to clear
@@ -690,7 +714,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 548 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 731 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -731,8 +755,8 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **548 unit tests in ~30 s serial, no faster under
-`-n auto`** (the stateful model is most of it). Four layers; a `verify:` should use at least one and
+The suite is the gate, and it is fast enough to be one: **731 unit tests in ~60 s serial, ~30 s under
+`-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
 - **Static** — `tools/lint.sh`: the ruff selection CI runs, the layering assertion, SPDX headers,

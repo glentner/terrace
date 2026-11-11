@@ -21,6 +21,15 @@ recorded when it was queued. The classes guarded here:
 * `flush` converges when later ops reused or removed a path an earlier queued op names (a
   directory moved out and back, a child moved out of a removed parent, a name reused by a file,
   a moved-out child removed after its old parent, whose queued removal runs first);
+* one pass of `flush`, `drain` or a scheduler poll drains entries moved out of nested directories, or of sibling
+  ones, five hundred chains side by side included, and removed after them: each row runs once, a directory's
+  removal after the entries its object still holds (a removal queued while the replay runs included, under an id
+  it reused too), also from a queue a restarted engine reads and for a directory a rename replaces, and a file
+  the catalog never saw still stops a directory's removal with ENOTEMPTY. The replay a new name triggers runs
+  the rows up to the last its name needs, at the outer directory's name or the moved entry's, beside the
+  neighbouring shapes too; a row that waited inside it past that one stays queued, and one flush then drains it;
+* a pass over namespace rows nothing stands in (no entry held where an `rmdir` or a rename needs a place) reads
+  the queue a fixed number of times, however many rows it runs;
 * re-creating a name, or renaming onto it, first runs the queued rows that still occupy its place
   on the source (a child's queued removal, another entry's queued move or removal);
 * a scheduler snapshot made stale by a user op (its row run, cancelled, or its id reused by a newer
@@ -56,7 +65,9 @@ recorded when it was queued. The classes guarded here:
   a file that took the id before the cut's first lookup read the path is the file the cut names;
 * a rename row's tombstone purge leaves another entry's tombstone and queued removal alone;
 * a directory whose target lies inside its own source object moves only once the entries placed
-  there have moved out.
+  there have moved out; directory renames that move into or out of each other's subtrees drain in the first
+  pass, a rename reached inside the replay of one it needs waiting for it, and a user rename or mkdir that
+  meets them succeeds.
 
 The newer tests list the whole tree before acting and end in `assert_converged`: the queue drained,
 the source tree equal to the overlay view, every reported size equal to its file's byte count, and a
@@ -68,16 +79,17 @@ from __future__ import annotations
 
 # Standard libs
 import os
+import time
 import errno
 import threading
 import dataclasses
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # External libs
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import QuotaSpec
+from sosfs.tier.spec import QuotaSpec, WritebackSpec
 from sosfs.engine.drain import drain
 from sosfs.engine.evict import EvictionManager
 from sosfs.engine.overlay import OverlayEngine
@@ -428,6 +440,574 @@ def test_flush_removes_a_moved_out_child_before_its_old_parent(engine: OverlayEn
     assert [row.op for row in engine.journal.queued()] == ['rmdir', 'unlink']   # the removal queued last
     engine.flush()                                           # the rmdir row ran first and raised ENOTEMPTY
     assert 'd2' not in tree(Path(engine.spec.tiers[0].path))
+    assert_converged(engine)
+
+
+# -- nested directories removed after a move-out drain in one pass --------------------------------------------
+
+def nested_removal(tmp_path: Path, clock: Clock, *, depth: int = 2, moved: str = 'file', origin: str = 'adopted',
+                   tiers: int = 1, order: str = 'after', **tier_kwargs) -> tuple[OverlayEngine, Path]:
+    """
+    A chain of `depth` nested directories, /d1 down, with entries below it, each moved out to the root; then the
+    directories removed innermost first, and the moved entries removed `after` them, `before` them, `between` the
+    innermost and the rest, or `kept`. `moved` is a 'file' or an empty 'dir' in the innermost directory, a 'tree'
+    (a directory holding a file) there, 'levels' (a file there and one in /d1), or 'inplace' (a file there, removed
+    where it is). `origin` puts the chain and its entries on the source by adoption or by a flush; 'unplaced'
+    adopts the chain and leaves the entries on a stage, never flushed. The same calls run with plain `os` on a copy
+    of the starting tree. Returns the started engine, every directory listed, and that copy's root.
+    """
+    chain = ['/' + '/'.join(f'd{level}' for level in range(1, top + 1)) for top in range(1, depth + 1)]
+    inner = chain[-1]
+    entries = {'file': [(inner + '/m.dat', 'file')], 'dir': [(inner + '/m', 'dir')], 'tree': [(inner + '/m', 'tree')],
+               'levels': [(inner + '/m.dat', 'file'), ('/d1/n.dat', 'file')],
+               'inplace': [(inner + '/m.dat', 'file')]}[moved]
+    files = [(path, b'moved:' + path.encode()) for path, kind in entries if kind == 'file']
+    files += [(path + '/f.dat', b'inside:' + path.encode()) for path, kind in entries if kind == 'tree']
+    folders = chain + [path for path, kind in entries if kind != 'file']
+    oracle = tmp_path / 'oracle'
+    for path in folders:
+        (oracle / path.lstrip('/')).mkdir(parents=True)
+    for path, data in files:
+        (oracle / path.lstrip('/')).write_bytes(data)
+    project = tmp_path / 'project'
+    for path in (folders if origin == 'adopted' else chain if origin == 'unplaced' else []):
+        (project / path.lstrip('/')).mkdir(parents=True)
+    if origin == 'adopted':
+        for path, data in files:
+            seed(project, path.lstrip('/'), data)
+    engine = OverlayEngine(build_spec(tmp_path, tiers=tiers, **tier_kwargs), clock=clock)
+    engine.start()
+    walk(engine)
+    for path in (folders if origin == 'flushed' else folders[len(chain):] if origin == 'unplaced' else []):
+        engine.mkdir(path)
+    for path, data in (files if origin != 'adopted' else []):
+        engine.create(path)
+        rewrite(engine, path, data)
+    if origin == 'flushed':
+        engine.flush()
+    walk(engine)
+
+    def both(name: str, *paths: str) -> None:
+        getattr(engine, name)(*paths)
+        getattr(os, name)(*(oracle / path.lstrip('/') for path in paths))
+
+    def remove(path: str, kind: str) -> None:
+        if kind == 'tree':
+            both('unlink', path + '/f.dat')
+        both('unlink' if kind == 'file' else 'rmdir', path)
+
+    if moved == 'inplace':
+        for path, kind in entries:
+            remove(path, kind)
+        out = []
+    else:
+        out = [('/' + PurePosixPath(path).name, kind) for path, kind in entries]
+        for (path, _), (name, _) in zip(entries, out):
+            both('rename', path, name)
+    removals = [] if order == 'kept' else out
+    if order == 'before':
+        for path, kind in removals:
+            remove(path, kind)
+    both('rmdir', chain[-1])
+    if order == 'between':
+        for path, kind in removals:
+            remove(path, kind)
+    for path in reversed(chain[:-1]):
+        both('rmdir', path)
+    if order == 'after':
+        for path, kind in removals:
+            remove(path, kind)
+    return engine, oracle
+
+
+def source_tree(engine: OverlayEngine) -> dict:
+    """The source tier's tree."""
+    return tree(Path(engine.spec.tiers[0].path))
+
+
+@mark.parametrize('origin', ['adopted', 'flushed'])
+@mark.parametrize('moved', ['file', 'dir', 'tree', 'levels'])
+@mark.parametrize('depth', [2, 3])
+@mark.parametrize('tiers', [1, 3])
+@mark.parametrize('call', ['flush', 'drain'])
+def test_one_pass_drains_nested_directories_removed_before_their_moved_out_entries(
+        tmp_path: Path, clock: Clock, call: str, tiers: int, depth: int, moved: str, origin: str) -> None:
+    """
+    An entry moved out of a directory nested in another, both directories removed, then the entry: one `flush` or
+    one `drain` runs every queued row, the entry's removal ahead of the directories that held it, and the source
+    holds what plain directories would.
+    """
+    engine, oracle = nested_removal(tmp_path, clock, depth=depth, moved=moved, origin=origin, tiers=tiers)
+    if call == 'flush':
+        engine.flush()
+    else:
+        assert drain(engine).complete
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+@mark.parametrize('moved', ['file', 'tree', 'levels'])
+@mark.parametrize('depth', [2, 3])
+def test_one_scheduler_poll_runs_every_namespace_row_of_nested_removals(tmp_path: Path, clock: Clock, depth: int,
+                                                                         moved: str) -> None:
+    """One poll with every row due leaves no namespace row of the nested removals queued."""
+    engine, oracle = nested_removal(tmp_path, clock, depth=depth, moved=moved, tiers=3)
+    WritebackScheduler(engine).poll(clock.now + 10_000)
+    assert [row.op for row in engine.journal.queued() if row.op != 'data'] == []
+    engine.flush()
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+def test_the_writeback_pump_outlives_nested_removals(tmp_path: Path, clock: Clock) -> None:
+    """The scheduler's thread commits the nested removals, stays alive, and commits an op made after them."""
+    passthrough = WritebackSpec(mode='passthrough', delay=0.0)
+    engine, oracle = nested_removal(tmp_path, clock, tiers=3, scratch_writeback=passthrough)
+    pump = WritebackScheduler(engine, tick=0.01)
+    pump.start()
+    try:
+        deadline = time.monotonic() + 10
+        while engine.journal.queued() and pump.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pump.is_alive() and engine.journal.queued() == []
+        engine.mkdir('/after')
+        os.mkdir(oracle / 'after')
+        while 'after' not in source_tree(engine) and pump.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pump.is_alive() and source_tree(engine) == tree(oracle)
+    finally:
+        pump.stop(timeout=10)                                # re-raises whatever killed the thread
+    assert not pump.is_alive()
+    assert_converged(engine)
+
+
+@mark.parametrize('tiers', [1, 3])
+@mark.parametrize('target', ['/d1', '/m.dat'])
+@mark.parametrize('call', ['mkdir', 'create', 'rename'])
+def test_a_new_name_over_nested_removals(tmp_path: Path, clock: Clock, call: str, target: str, tiers: int) -> None:
+    """A name the outer removed directory or the removed moved entry held takes a new entry; one flush then drains."""
+    engine, oracle = nested_removal(tmp_path, clock, tiers=tiers)
+    if call == 'mkdir':
+        engine.mkdir(target)
+        os.mkdir(oracle / target.lstrip('/'))
+    else:
+        made = target if call == 'create' else '/fresh.dat'
+        engine.create(made)
+        rewrite(engine, made, b'fresh')
+        (oracle / made.lstrip('/')).write_bytes(b'fresh')
+        if call == 'rename':
+            engine.rename(made, target)
+            os.rename(oracle / made.lstrip('/'), oracle / target.lstrip('/'))
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+# The rows the base engine queues for nested_removal's default shape: (op, entry path, its committed source path).
+STUCK = [('rmdir', '/d1/d2', '/d1/d2'), ('rmdir', '/d1', '/d1'), ('unlink', '/m.dat', '/d1/d2/m.dat')]
+
+
+def queue_of(engine: OverlayEngine) -> list:
+    """The queued rows as (op, entry path, committed source path)."""
+    entries = [engine.catalog.by_id(row.entry) for row in engine.journal.queued()]
+    return [(row.op, entry.path, entry.source_path) for row, entry in zip(engine.journal.queued(), entries)]
+
+
+@mark.parametrize('raised', [False, True])
+@mark.parametrize('call', ['flush', 'drain'])
+def test_a_queue_left_by_nested_removals_drains_on_the_first_pass_after_a_restart(
+        tmp_path: Path, clock: Clock, call: str, raised: bool) -> None:
+    """
+    The rows the nested removals queue, read by a new engine from the state directory, drain in its first pass,
+    also after an earlier replay raised out of the first row's pre-replay before acting, as recursion did.
+    """
+    engine, oracle = nested_removal(tmp_path, clock)
+    assert queue_of(engine) == STUCK
+    if raised:
+        def recursed(*args, **kwargs):
+            delattr(engine, '_holder_rows')                  # once: the engine's own method again
+            raise RecursionError('maximum recursion depth exceeded')
+
+        engine._holder_rows = recursed
+        with raises(RecursionError):
+            engine.flush()
+        assert queue_of(engine) == STUCK and engine.journal.pending() == []
+    spec = engine.spec
+    engine.stop()
+    engine = OverlayEngine(spec, clock=clock)
+    engine.start()
+    assert queue_of(engine) == STUCK
+    if call == 'flush':
+        engine.flush()
+    else:
+        assert drain(engine).complete
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+NEIGHBOURS = {'one directory': dict(depth=1), 'entry kept': dict(order='kept'),
+              'removed in place': dict(moved='inplace'), 'entry removed first': dict(order='before'),
+              'entry removed between': dict(order='between'), 'entry never placed': dict(origin='unplaced', tiers=3)}
+
+
+@mark.parametrize('call', ['flush', 'drain', 'poll', 'mkdir', 'create', 'rename'])
+@mark.parametrize('shape', NEIGHBOURS)
+def test_shapes_beside_nested_removals_still_drain(tmp_path: Path, clock: Clock, shape: str, call: str) -> None:
+    """The neighbouring shapes drain as before under every route that replays them, a new outer name included."""
+    engine, oracle = nested_removal(tmp_path, clock, **{'tiers': 3 if call == 'poll' else 1, **NEIGHBOURS[shape]})
+    if call == 'drain':
+        assert drain(engine).complete
+    elif call == 'poll':
+        WritebackScheduler(engine).poll(clock.now + 10_000)
+        assert [row.op for row in engine.journal.queued() if row.op != 'data'] == []
+    elif call == 'mkdir':
+        engine.mkdir('/d1')
+        os.mkdir(oracle / 'd1')
+    elif call in ('create', 'rename'):
+        made = '/d1' if call == 'create' else '/fresh.dat'
+        engine.create(made)
+        (oracle / made.lstrip('/')).write_bytes(b'')
+        if call == 'rename':
+            engine.rename(made, '/d1')
+            os.rename(oracle / 'fresh.dat', oracle / 'd1')
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+@mark.parametrize('call', ['mkdir', 'create', 'rename'])
+@mark.parametrize('shape', NEIGHBOURS)
+def test_shapes_beside_nested_removals_take_a_new_name_where_the_moved_entry_was(tmp_path: Path, clock: Clock,
+                                                                                 shape: str, call: str) -> None:
+    """
+    The neighbouring shapes under a new name at the moved entry's name after its removal: the call succeeds (an entry
+    kept live still raises EEXIST for `mkdir` and `create`, and is replaced by `rename`), and one flush then drains.
+    """
+    engine, oracle = nested_removal(tmp_path, clock, **{'tiers': 1, **NEIGHBOURS[shape]})
+    if shape == 'entry kept' and call != 'rename':
+        with raises(FileExistsError):
+            getattr(engine, call)('/m.dat')
+    elif call == 'mkdir':
+        engine.mkdir('/m.dat')
+        os.mkdir(oracle / 'm.dat')
+    else:
+        made = '/m.dat' if call == 'create' else '/fresh.dat'
+        engine.create(made)
+        rewrite(engine, made, b'fresh')
+        (oracle / made.lstrip('/')).write_bytes(b'fresh')
+        if call == 'rename':
+            engine.rename(made, '/m.dat')
+            os.rename(oracle / 'fresh.dat', oracle / 'm.dat')
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+def test_a_new_name_over_a_kept_moved_entry_still_raises_eexist(tmp_path: Path, clock: Clock) -> None:
+    """A moved entry kept live still holds its name: `create` there raises EEXIST, and one flush then drains."""
+    engine, oracle = nested_removal(tmp_path, clock, order='kept')
+    with raises(FileExistsError):
+        engine.create('/m.dat')
+    engine.flush()
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+@mark.parametrize('order', ['before', 'after'])
+def test_a_child_the_catalog_never_saw_still_stops_the_rmdir_row_with_enotempty(tmp_path: Path, clock: Clock,
+                                                                                  order: str) -> None:
+    """A file put into a removed directory's object behind the engine's back makes its rmdir row raise ENOTEMPTY."""
+    engine, oracle = nested_removal(tmp_path, clock, order=order)
+    stray = Path(engine.spec.tiers[0].path) / 'd1' / 'd2' / 'stray.dat'
+    stray.write_bytes(b'out of band')
+    with raises(OSError) as error:
+        engine.flush()
+    assert error.value.errno == errno.ENOTEMPTY
+    os.unlink(stray)
+    engine.flush()
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+def sibling_chains(tmp_path: Path, clock: Clock, *, count: int, depth: int, order: str,
+                   tiers: int) -> tuple[OverlayEngine, Path]:
+    """
+    `count` chains side by side, /c0000 down `depth` nested directories, each with a file in its innermost one
+    moved out to the root; then every directory removed, innermost first, chain after chain; then every moved file,
+    in chain order (`ascending`) or the reverse. The same calls run with plain `os` on a copy of the starting tree.
+    """
+    oracle = tmp_path / 'oracle'
+    chains = [['/' + '/'.join([f'c{index:04d}'] + [f'd{level}' for level in range(1, top)]) for top in
+               range(1, depth + 1)] for index in range(count)]
+    for index, chain in enumerate(chains):
+        data = f'chain {index}'.encode()
+        seed(tmp_path / 'project', chain[-1].lstrip('/') + '/m.dat', data)
+        (oracle / chain[-1].lstrip('/')).mkdir(parents=True)
+        (oracle / chain[-1].lstrip('/') / 'm.dat').write_bytes(data)
+    engine = OverlayEngine(build_spec(tmp_path, tiers=tiers), clock=clock)
+    engine.start()
+    walk(engine)
+
+    def both(name: str, *paths: str) -> None:
+        getattr(engine, name)(*paths)
+        getattr(os, name)(*(oracle / path.lstrip('/') for path in paths))
+
+    for index, chain in enumerate(chains):
+        both('rename', chain[-1] + '/m.dat', f'/m{index:04d}.dat')
+    for chain in chains:
+        for path in reversed(chain):
+            both('rmdir', path)
+    for index in (range(count) if order == 'ascending' else reversed(range(count))):
+        both('unlink', f'/m{index:04d}.dat')
+    return engine, oracle
+
+
+# Each call and stack at each depth, and each order at each depth: eight runs, not sixteen, at a few seconds each.
+CHAINS = [('flush', 1, 1, 'ascending'), ('flush', 3, 1, 'descending'), ('drain', 1, 1, 'descending'),
+          ('drain', 3, 1, 'ascending'), ('flush', 1, 2, 'descending'), ('flush', 3, 2, 'ascending'),
+          ('drain', 1, 2, 'ascending'), ('drain', 3, 2, 'descending')]
+
+
+@mark.parametrize('call, tiers, depth, order', CHAINS)
+def test_one_pass_drains_hundreds_of_chains_removed_before_their_moved_out_entries(
+        tmp_path: Path, clock: Clock, call: str, tiers: int, depth: int, order: str) -> None:
+    """
+    Five hundred chains side by side, each a directory (or two, nested) whose file moved out, every directory
+    removed and then every file: each directory's row reaches the next chain's in its replay, five hundred deep,
+    and one pass still runs every row once.
+    """
+    engine, oracle = sibling_chains(tmp_path, clock, count=500, depth=depth, order=order, tiers=tiers)
+    if call == 'flush':
+        engine.flush()
+    else:
+        assert drain(engine).complete
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+def crossing(tmp_path: Path, clock: Clock, paths: list, ops: list, tiers: int = 1) -> tuple[OverlayEngine, Path]:
+    """
+    Seed `paths` (a trailing '/' marks an empty directory) on the source and on a plain copy, list the tree, and
+    run `ops` on the engine and the copy.
+    """
+    oracle = tmp_path / 'oracle'
+    for path in paths:
+        if path.endswith('/'):
+            (tmp_path / 'project' / path).mkdir(parents=True, exist_ok=True)
+            (oracle / path).mkdir(parents=True, exist_ok=True)
+            continue
+        seed(tmp_path / 'project', path, b'held:' + path.encode())
+        (oracle / path).parent.mkdir(parents=True, exist_ok=True)
+        (oracle / path).write_bytes(b'held:' + path.encode())
+    engine = OverlayEngine(build_spec(tmp_path, tiers=tiers), clock=clock)
+    engine.start()
+    walk(engine)
+    for name, *args in ops:
+        getattr(engine, name)(*args)
+        getattr(os, name)(*(oracle / path.lstrip('/') for path in args))
+    return engine, oracle
+
+
+# Queued directory renames whose targets lie inside objects other renames have yet to move. 'listed': a rename
+# moves a directory into the one it held; 'growing': the first move leaves the target inside, and the rows newly
+# between must run too; 'nested': each rename's replay reaches the other's; 'inverted': a chain turned inside out,
+# where a rename reached inside another's replay frees nothing on its first pass and must wait for a later visit.
+CROSSINGS = {
+    'listed': (['c/a/a/f.dat', 'c/a/d/b/g.dat'], [
+        ('rename', '/c/a', '/c/d'), ('rename', '/c/d/d/b', '/c/d/a/c'), ('rename', '/c/d/a', '/a'),
+        ('rename', '/c/d', '/a/c/c')]),
+    'growing': (['a/b/a/a/f.dat', 'a/b/a/d/g.dat', 'a/b/e/h.dat'], [
+        ('rename', '/a/b', '/e'), ('rename', '/e/e', '/a/a'), ('rename', '/a', '/e/a/d/a'),
+        ('rename', '/e/a/d', '/e/a/e'), ('rename', '/e/a/e/a/a', '/e/a/a/e'), ('mkdir', '/e/a/a/a'),
+        ('rename', '/e/a/a/a', '/b'), ('rename', '/e/a/a', '/b/a'), ('rename', '/e', '/b/a/e/b')]),
+    'nested': (['a/b/c/f.dat', 'x/m.dat', 'b/n.dat'], [
+        ('mkdir', '/x/x'), ('rename', '/a', '/b/y'), ('rename', '/b', '/x/a'), ('rename', '/x/a', '/x/x/c'),
+        ('rename', '/x/x/c/y/b/c', '/x/b'), ('rename', '/x/x', '/x/b/a')]),
+    'inverted': (['y/l1/l2/l3/f.dat'], [
+        ('rename', '/y/l1/l2', '/l2'), ('rename', '/y/l1', '/l2/l1'), ('rename', '/y', '/l2/l1/y'),
+        ('rename', '/l2/l3', '/l3'), ('rename', '/l2', '/l3/l2')]),
+}
+
+
+@mark.parametrize('call, tiers', [('flush', 1), ('flush', 3), ('drain', 1), ('drain', 3), ('poll', 3)])
+@mark.parametrize('case', CROSSINGS)
+def test_one_pass_drains_renames_crossing_each_others_subtrees(tmp_path: Path, clock: Clock, case: str, call: str,
+                                                               tiers: int) -> None:
+    """Directory renames that move into or out of each other's subtrees drain in the first pass, as plain renames."""
+    engine, oracle = crossing(tmp_path, clock, *CROSSINGS[case], tiers=tiers)
+    if call == 'flush':
+        engine.flush()
+    elif call == 'drain':
+        assert drain(engine).complete
+    else:
+        WritebackScheduler(engine).poll(clock.now + 10_000)
+        assert [row.op for row in engine.journal.queued() if row.op != 'data'] == []
+        engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+# A user call whose vacate replays such renames: 'rename' meets a crossing in its own replay; 'mkdir' reaches a
+# rename inside the rename it needs, which waits for it.
+CROSSED_NAMES = {
+    'rename': (['d/d/c/', 'd/c/e/', 'd/c/d/d/', 'd/c/d/e/', 'e/b/'], [
+        ('rename', '/d/c', '/d/d/c/d'), ('rename', '/d/d', '/e/b/b'), ('rename', '/e/b/b/c/d/e', '/e/b/b/c/d/d/d/b'),
+        ('mkdir', '/e/b/b/c/d/d/e/d'), ('rename', '/e/b/b/c/d/d/d', '/e/b/b/a'),
+        ('rename', '/e/b/b/c/d', '/e/b/b/a/b/e'), ('rename', '/e/b/b/a/b/e/d/e/d', '/e/b/b/a/b/e/d/d')]),
+    'mkdir': (['a/b/g.dat', 'x/y/k.dat', 'b/n.dat'], [
+        ('mkdir', '/y'), ('rename', '/y', '/b/c'), ('rename', '/a', '/b/c/b'), ('rename', '/x/y', '/b/c/b/b/b'),
+        ('rename', '/b/c/b', '/b/y'), ('rename', '/x', '/b/y/a'), ('rename', '/b/y/b', '/b/a'),
+        ('rename', '/b/y', '/b/a/b/a'), ('mkdir', '/b/a/b/a/a/y')]),
+}
+
+
+@mark.parametrize('case', CROSSED_NAMES)
+def test_a_new_name_over_renames_crossing_each_others_subtrees(tmp_path: Path, clock: Clock, case: str) -> None:
+    """A user rename or mkdir whose name such renames free succeeds, and one flush then drains."""
+    engine, oracle = crossing(tmp_path, clock, *CROSSED_NAMES[case])
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+@mark.parametrize('reused', [False, True])
+def test_a_removal_queued_during_a_replay_runs_before_the_directory_it_holds(engine: OverlayEngine,
+                                                                             reused: bool) -> None:
+    """
+    Two files moved out of a directory, which is removed, then re-created: while the vacate's replay moves the
+    first file, a user removes the second, cancelling its queued move (and, `reused`, its later `chmod`, the newest
+    row, whose id its removal then takes) and queuing its removal after the replay read the queue. That removal
+    still runs before the directory's own, and the new directory takes the name.
+    """
+    root = Path(engine.spec.tiers[0].path)
+    seed(root, 'd/b.dat', b'B')
+    seed(root, 'd/c.dat', b'C')
+    walk(engine)
+    directory_sequence(engine, [('rename', '/d/b.dat', '/b.dat'), ('rename', '/d/c.dat', '/c.dat'), ('rmdir', '/d')]
+                       + ([('chmod', '/c.dat', 0o600)] if reused else []))
+    newest = engine.journal.queued()[-1].id
+    queue = unlink_during_next(engine, 'rename', '/c.dat')
+    engine.mkdir('/d')
+    assert [op for _, op in queue] == ['rename', 'rmdir', 'unlink']   # the removal queued behind the replay's read
+    assert (queue[-1][0] == newest) is reused                          # it took the cancelled newest row's id
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert {k: v for k, v in tree(root).items() if k.split('/')[0] in ('b.dat', 'c.dat', 'd')} == {
+        'b.dat': b'B', 'd': 'DIR'}
+    assert_converged(engine)
+
+
+@mark.parametrize('tiers', [1, 3])
+def test_a_rename_over_a_directory_whose_object_holds_nested_removals(tmp_path: Path, clock: Clock,
+                                                                      tiers: int) -> None:
+    """
+    A directory renamed over an empty one whose object still holds nested removals (a file moved out of /t/d1/d2,
+    both directories removed, then the file): the replaced directory's removal first runs those rows, in one pass.
+    """
+    engine, oracle = crossing(tmp_path, clock, ['t/d1/d2/m.dat'], [
+        ('rename', '/t/d1/d2/m.dat', '/m.dat'), ('rmdir', '/t/d1/d2'), ('rmdir', '/t/d1'), ('unlink', '/m.dat'),
+        ('mkdir', '/fresh'), ('rename', '/fresh', '/t')], tiers=tiers)
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+@mark.parametrize('tiers', [1, 3])
+def test_a_row_waiting_inside_a_new_names_replay_past_its_last_need_stays_queued_for_the_next_flush(
+        tmp_path: Path, clock: Clock, tiers: int) -> None:
+    """
+    A file moved out of /q/p, then /q/p, /z and /q removed and the file after them, then /z made again: its vacate
+    runs the queue through /z's removal, starting with /q/p's, inside whose replay /q's removal waits for it. /q's
+    row lies past /z's, the last the vacate needs, so it stays queued when `mkdir` returns; one flush then drains it.
+    """
+    engine, oracle = crossing(tmp_path, clock, ['q/p/c.dat', 'z/'], [
+        ('rename', '/q/p/c.dat', '/c.dat'), ('rmdir', '/q/p'), ('rmdir', '/z'), ('rmdir', '/q'), ('unlink', '/c.dat'),
+        ('mkdir', '/z')], tiers=tiers)
+    assert [(op, path) for op, path, _ in queue_of(engine)] == [('rmdir', '/q'), ('mkdir', '/z')]
+    assert source_tree(engine) == {'q': 'DIR'}
+    engine.flush()
+    assert engine.journal.queued() == [] and engine.journal.pending() == []
+    assert source_tree(engine) == tree(oracle)
+    assert_converged(engine)
+
+
+def plain_rows(tmp_path: Path, clock: Clock, count: int, tiers: int) -> tuple[OverlayEngine, Path]:
+    """
+    `count` of each namespace row nothing stands in, on adopted entries: a file renamed, a directory renamed, a file
+    removed, an empty directory removed, a directory made and its mode changed. The same calls run on a plain copy.
+    """
+    oracle = tmp_path / 'oracle'
+    for index in range(count):
+        for name in (f'f{index:03d}', f'u{index:03d}'):
+            seed(tmp_path / 'project', name, name.encode())
+            (oracle / name).parent.mkdir(parents=True, exist_ok=True)
+            (oracle / name).write_bytes(name.encode())
+        for name in (f'd{index:03d}', f'k{index:03d}'):
+            (tmp_path / 'project' / name).mkdir(parents=True)
+            (oracle / name).mkdir(parents=True)
+    engine = OverlayEngine(build_spec(tmp_path, tiers=tiers), clock=clock)
+    engine.start()
+    walk(engine)
+    for index in range(count):
+        for name, *args in (('rename', f'/f{index:03d}', f'/g{index:03d}'),
+                            ('rename', f'/d{index:03d}', f'/e{index:03d}'), ('unlink', f'/u{index:03d}'),
+                            ('rmdir', f'/k{index:03d}'), ('mkdir', f'/n{index:03d}'),
+                            ('chmod', f'/n{index:03d}', 0o700)):
+            getattr(engine, name)(*args)
+            getattr(os, name)(*(oracle / path.lstrip('/') if isinstance(path, str) else path for path in args))
+    return engine, oracle
+
+
+def queue_passes(engine: OverlayEngine) -> list:
+    """
+    Record each statement the engine runs from now on that reads every queued row (no entry or id narrows it), as
+    `Journal.queued` and `Journal.queued_marks` do, by its SQL text.
+    """
+    passes = []
+    real = engine.db.execute
+
+    def counted(template):
+        text = ''.join(template.strings)
+        if "FROM writeback WHERE state = 'queued'" in text:
+            passes.append(text)
+        return real(template)
+
+    engine.db.execute = counted
+    return passes
+
+
+@mark.parametrize('call', ['flush', 'drain', 'poll'])
+def test_a_pass_over_rows_nothing_stands_in_reads_the_queue_a_fixed_number_of_times(tmp_path: Path, clock: Clock,
+                                                                                     call: str) -> None:
+    """
+    One `flush`, `drain` or poll over namespace rows nothing stands in makes as many full reads of the queue for
+    sixty rows as for six: no row's replay reads it, so the reads grow with the queue only linearly.
+    """
+    counted = {}
+    for count in (1, 10):
+        engine, oracle = plain_rows(tmp_path / f'rows{count}', clock, count, tiers=3 if call == 'poll' else 1)
+        passes = queue_passes(engine)
+        if call == 'flush':
+            engine.flush()
+        elif call == 'drain':
+            assert drain(engine).complete
+        else:
+            WritebackScheduler(engine).poll(clock.now + 10_000)
+        counted[count] = len(passes)
+        assert engine.journal.queued() == [] and engine.journal.pending() == []
+        assert source_tree(engine) == tree(oracle)
+        if count == 1:
+            assert_converged(engine)
+    assert counted[10] == counted[1], f'queue passes grew with the queue: {counted}'
     assert_converged(engine)
 
 

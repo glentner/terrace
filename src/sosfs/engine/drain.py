@@ -86,9 +86,9 @@ def drain(engine: OverlayEngine, *, cancel: Optional[Callable[[], bool]] = None)
     SIGINT: it returns with `complete=False` and leaves the remaining queue for a
     later `sosfs commit`.
 
-    The engine must be quiescent — the write-back and eviction pumps stopped and
-    no new writes arriving — so a single pass converges; the shutdown handler
-    stops the pumps before calling this.
+    The engine must be quiescent (pumps stopped, no new writes; shutdown stops the
+    pumps first) so one pass converges: each namespace row it reads starts its own
+    replay, where it never waits, so a `complete` pass leaves none of them queued.
     """
     stopped = cancel or (lambda: False)
     namespace = 0

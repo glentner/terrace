@@ -308,3 +308,12 @@ class Journal:
         scope = t'' if tier is None else t' WHERE tier = {tier}'
         rows = self.db.execute(t'SELECT * FROM intent{scope} ORDER BY id')
         return [Intent.from_row(row) for row in rows]
+
+    def queued_marks(self, to_tier: Optional[str] = None) -> set[tuple[int, int, str, float]]:
+        """
+        `(id, entry, op, first_dirty)` of each queued row, optionally for one boundary: enough to tell a row read
+        earlier from a newer one that took its id (`current` compares more), in one read that decodes no row.
+        """
+        boundary = t'' if to_tier is None else t' AND to_tier = {to_tier}'
+        rows = self.db.execute(t"SELECT id, entry, op, first_dirty FROM writeback WHERE state = 'queued'{boundary}")
+        return {(row['id'], row['entry'], row['op'], row['first_dirty']) for row in rows}

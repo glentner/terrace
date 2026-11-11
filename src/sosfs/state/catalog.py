@@ -142,6 +142,20 @@ class Catalog:
         row = self.db.execute(t'SELECT * FROM entry WHERE source_path = {normalize(source_path)}').fetchone()
         return None if row is None else Entry.from_row(row)
 
+    def held(self, source_path: str, *, below: bool = False) -> set[int]:
+        """
+        Ids of the entries, live or tombstoned, whose committed source path is `source_path`, or with `below`,
+        lies under it: one indexed read, where a lookup per queued row would make replaying a long queue quadratic
+        in catalog reads.
+        """
+        if below:
+            prefix = source_path.rstrip('/') + '/'
+            rows = self.db.execute(
+                t'SELECT id FROM entry WHERE source_path >= {prefix} AND source_path < {prefix[:-1] + "0"}')
+        else:
+            rows = self.db.execute(t'SELECT id FROM entry WHERE source_path = {source_path}')
+        return {row['id'] for row in rows}
+
     def children(self, path: str) -> List[Entry]:
         """Direct children of a directory, tombstones masked, ordered by path."""
         rows = self.db.execute(
