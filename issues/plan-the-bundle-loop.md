@@ -51,29 +51,35 @@ Draft R-IDs, to be firmed up at promotion. Each is a decision recorded with its 
 alternative turned down.
 
 - **R1** — **The story.** `PLAN.md` SHALL open with it.
-- **R2** — **The tier model.** Every stage tier has a size limit, a count limit and a delay. Pressure
-  and delay each move a copy one tier up. What happens to a clean copy under pressure
-  ([`issues/eviction-one-hop.md`](eviction-one-hop.md)).
-- **R3** — **The durable tier.** What it holds (staged bundles, their indexes, altered files, the
-  record of removals), what is authoritative for it, which steps change it and why each is atomic,
-  and what its limits count.
-- **R4** — **How a source catches up.** A bundle is rebuilt from the durable tier: unchanged members
-  from the staged bundle, changed ones from the files beside it, removed ones left out. Its triggers
-  are its delay, pressure on the durable tier, and a commit. What a rename inside a bundle is.
-- **R5** — **The lifecycle.** A signal commits node-local changes to the durable tier and releases the
-  node. A commit run from any host that sees the durable tier rebuilds what changed and leaves the
-  staged bundles in place for the next mount. What a mount does after a kill.
+- **R2** — **The tier model.** Every stage tier has a size limit, a count limit and a delay. Pressure and
+  delay each move a copy one tier up and no further. A clean copy under pressure is kept one tier up when
+  that tier has room (ruled 2026-11-11, [`issues/eviction-one-hop.md`](eviction-one-hop.md)).
+- **R3** — **The durable tier and the database.** The maintainer's word of 2026-11-11: the database
+  tracks every copy, knows where the fastest one is, and negotiates every move between tiers. That
+  settles what decides while a mount is live. This criterion settles the rest: what the durable tier
+  holds (staged bundles, their indexes, altered files, the record of removals); where the database itself
+  lives; what a process on another host reads when the mount is gone; which steps change the durable tier
+  and why each is atomic; and what its limits count.
+- **R4** — **How a source catches up.** A bundle is rebuilt from the durable tier: unchanged members from
+  the staged bundle, changed ones from the files beside it, removed ones left out. Its triggers are its
+  delay, pressure on the durable tier, and a commit. What a rename inside a bundle is.
+- **R5** — **The lifecycle.** A soft unmount, asked for directly or by a signal, commits every modified
+  file to the first durable tier and halts, and the database then records every modified file there and
+  nothing on any tier below it, so a mount on another node starts
+  ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)). A commit run from any host that sees the
+  durable tier rebuilds what changed and leaves the staged bundles in place for the next mount. What a
+  mount does after a kill.
 - **R6** — **Identity and local state.** Row ids that are never reused, as a schema bump taken before
   anything is deployed. What a mount's database holds once the durable tier describes itself.
 - **R7** — **Many nodes.** Designed for and not built: the five choices in
   [`issues/multi-node-mounts.md`](multi-node-mounts.md), and the non-goals rewritten to match.
-- **R8** — **What the tree does not yet do.** Each decision the code contradicts SHALL be listed with
-  the seed that owns the change, and `AGENTS.md` § *Known open violations* SHALL gain a row for each
+- **R8** — **What the tree does not yet do.** Each decision the code contradicts SHALL be listed with the
+  seed that owns the change, and `AGENTS.md` § *Known open violations* SHALL gain a row for each
   invariant a decision overturns, so a review of a later cycle grades against the new rule.
-- **R9** — **Two prototypes** on the local loop's helper, measured against a plain-directory oracle
-  and thrown away afterwards: a rebuild of one bundle after members are changed, created, renamed and
-  removed, a directory rename among them; and two processes sharing one durable tier that pull one
-  bundle once.
+- **R9** — **Two prototypes** on the local loop's helper, measured against a plain-directory oracle and
+  thrown away afterwards: a rebuild of one bundle after members are changed, created, renamed and
+  removed, a directory rename among them; and two processes sharing one durable tier that pull one bundle
+  once.
 
 ## Notes
 
@@ -90,6 +96,14 @@ alternative turned down.
   re-aggregation into compressed bundles on a remote source, many bundles, and the batch lifecycle.
 - This cycle absorbs most of [`issues/plan-md-reconciliation.md`](plan-md-reconciliation.md)'s
   residue; what it leaves is that seed's.
+- **Where the database lives is the open half of R3.** Two shapes fit the maintainer's words. The
+  database on the durable tier itself: one file every later process can open, on a filesystem where
+  SQLite's documentation says its journal mode does not work and where the locks it needs are not
+  always enabled, and with every change of state paid at shared-filesystem latency. Or the database
+  on node-local storage while mounted, written to the durable tier at a soft unmount and at
+  intervals, with the durable tier's own files enough to rebuild it after a kill. The second keeps
+  SQLite where it is supported, keeps the hot path local, and gives each node of a later multi-node
+  mode a database of its own.
 - It writes no engine code. R9's prototypes exist to stop a decision being made by reading, which is
   how the last seven cycles were steered.
 - Sources: Linux kernel documentation, *Overlay Filesystem*,

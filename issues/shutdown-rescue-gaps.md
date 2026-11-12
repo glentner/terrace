@@ -195,5 +195,24 @@ the KB's EARS notes).
   lead time as a minimum, and a vendor ticket reports it not arriving, so the pattern wants testing where
   it will run. Sources: <https://documentation.sigma2.no/jobs/guides/cleanup_timeout.html>,
   <https://support.schedmd.com/show_bug.cgi?id=333>.
+- 2026-11-11 (the maintainer's definition of a soft unmount): he defines a soft unmount, requested
+  directly or by a signal: commit every modified file up to the first durable tier, then halt, "recording
+  in the database that all modified files are in that tier (nothing in the lower tiers because of the
+  unmount)". The tree does the first half and not the second. After a complete rescue the database still
+  records a copy on every node-local tier the file passed through, and a mount that starts where those
+  tiers are empty, which is every later job on another node, is refused. Reproduced at `64faf27` through
+  the engine API on a four-tier POSIX stack (source, one shared stage, two node-scope stages), tmpdir
+  tiers, Python 3.15.2 on macOS: write a file, `rescue`, `stop('detached')`, remove the two node-scope
+  tier roots, start a second engine.
+  ```
+  rescue        : RescueResult(rescued=1, stranded=0, complete=True)
+  after rescue  : {project: clean, scratch: dirty, tmp: clean, shm: clean}
+  next mount    : EngineError: Tier 'tmp' marker is missing — audit required
+  ```
+  The marker check is right to refuse a tier that vanished under a live record
+  (`src/sosfs/state/registry.py:118-139`). What is missing is the unmount's own step: a soft unmount
+  leaves nothing a node-scope tier is needed for, so it should end with no residency recorded on one, and
+  a mount should treat an empty node-scope tier with no residency against it as a fresh tier and not as a
+  loss. This is the detach lifecycle's main path, and today it ends in an audit that does not exist.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — FUSE/CLI
   layering brief, divergences 1 and 2, and the engine-policy brief, divergences 1, 2 and 3.

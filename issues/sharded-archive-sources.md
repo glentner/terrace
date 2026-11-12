@@ -171,6 +171,12 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   it; one with altered files beside it is rebuilt and pushed first. Pulling and decompressing a bundle is
   work that must happen once, which is where a second mount first meets the first
   ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
+- 2026-11-11 (the maintainer, on reading from a staged bundle): reading a member back from its staged
+  bundle should be cheap, in his words because "we would already have a complete mapping of the inside of
+  the bundle (maybe with a pool of open handles to recent bundles so as to not negotiate a new open too
+  often)". As built, `_extract` opens the working archive again for every member read
+  (`src/sosfs/tier/archive.py:402-410`). A bounded pool of open descriptors on recently used bundles
+  belongs with the streaming read.
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed
   by the invariant audit run during the software-factory port (2026-08-22) — tier-layer review.

@@ -44,13 +44,18 @@ that argument. Argued from the code; no test drives eviction across several pres
 
 **Eviction of a clean copy drops it.** `evict_copy` deletes the bytes and the residency
 (`overlay.py:1430-1465`), and a later read goes back to wherever the next copy is, which after a
-promotion straight from the durable tier to the RAM tier is the durable tier again. As the model is
-read here, a clean copy pushed out of a tier is kept one tier up when that tier does not already
-hold it, so node-local disk catches what falls out of RAM and a second read does not go back to the
-shared filesystem. **That reading wants the maintainer's confirmation**: "pushes up the stack and may
-cause similar eviction in the above tier" says it of the read-only path, where every copy is clean,
-and a drop could cause nothing above. At the durable tier the rule needs no special case. A member
-the staged bundle holds is already one tier up, so its copy is dropped.
+promotion straight from the durable tier to the RAM tier is the durable tier again. **Ruled by the
+maintainer on 2026-11-11: a clean copy pushed out of a tier is kept one tier up.** Reading it again
+from the staged bundle would not be ruinous, since the bundle's member map is complete by then, but
+"there's no reason not to use faster tiers (node-local /tmp) if we have the quota available". The
+database tracks every copy, knows where the fastest one is, and negotiates each of these moves. At
+the durable tier the rule needs no special case: a member the staged bundle holds is already one
+tier up, so its copy is dropped.
+
+**Why one tier, in his words of the same date.** The cases he has in mind are bioinformatics and
+genomics codes that make rapid edits in the middle of files. "There is no benefit of using the
+product if we trigger a repack on every write-back." A changed file moves one tier up when its delay
+expires, and the bundle is rebuilt on the bundle's own terms.
 
 The delay half is as built. `_commit_hop` moves one hop and queues the next boundary on its own clock
 (`src/sosfs/engine/writeback.py`), which is the cascade the model describes.
@@ -74,7 +79,7 @@ Draft R-IDs, to be firmed up at promotion.
   it is clean, and SHALL make no request to any tier above that one.
 - **R2** — WHEN eviction reclaims a clean copy and the tier above holds no copy of it, the copy SHALL
   be placed there before it is dropped; WHEN the tier above already holds it, it SHALL be dropped.
-  (Subject to the confirmation above.)
+  After either, the catalog's fastest copy of the entry SHALL be the one in the tier above.
 - **R3** — WHEN a copy has gone unchanged for its tier's delay, it SHALL be committed one tier up, and
   the tier above SHALL start its own delay for it.
 - **R4** — WHEN every stage tier of a four-tier stack is over its high watermark at once, a reclaim
@@ -95,9 +100,13 @@ Draft R-IDs, to be firmed up at promotion.
 - Open question — **a full neighbour.** A push into a tier that is itself full moves the pressure up.
   The model accepts the cascade. `_commit_hop` checks no quota today, and admission for a pushed copy
   has no rule.
-- Open question — **eviction does I/O.** Moving a clean copy up is a write on the tier above, paid
-  under pressure. It buys a second read from node-local disk; a workload that never re-reads pays it
-  for nothing. A per-tier switch is possible and is one more knob.
+- Open question — **a clean copy and a full neighbour.** The ruling keeps a clean copy one tier up
+  "if we have the quota available". When the tier above has none, either the push cascades, as it does
+  for a changed copy, or the clean copy is dropped, since a tier further up still holds it. Dropping
+  is cheaper and loses nothing.
+- Moving a clean copy up is a write on the tier above, paid under pressure. After the first such move
+  the tier above keeps its copy when the file is read back down, so a second eviction of the same
+  file is a drop.
 - Related: `AGENTS.md` § *Invariants* § 6, § 7, § 8 ("Rescue stops at the first shared tier");
   [`issues/sharded-archive-sources.md`](sharded-archive-sources.md) (a staged bundle as a unit the
   durable tier's limits count); [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md).

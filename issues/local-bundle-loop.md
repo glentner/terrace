@@ -46,6 +46,11 @@ reading the result from the bucket.
   tier, so the mount can stop and the node be released. Later, from a login node, a full commit
   rebuilds the bundles that changed, and does not delete the staged bundles, so the next mount does
   not pull them again;
+- a clean copy pushed out of a tier is kept one tier up when that tier has room, so a second read
+  comes from node-local disk and not from the bundle. The database tracks every copy and knows where
+  the fastest one is;
+- a soft unmount, asked for directly or by a signal, ends with the database recording every modified
+  file on the first durable tier and nothing on any tier below it;
 - mounting one spec on many nodes at once is wanted and is not a goal for the first release
   ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
 
@@ -101,7 +106,8 @@ Draft R-IDs, to be firmed up at promotion.
   stage SHALL make no write to the source.
 - **R2b** — THE scenario SHALL include a release stage: after changes in the fastest tier, the
   engine is told to detach, and every change SHALL then be on the durable tier with the source
-  untouched. A second process, given the spec and the durable tier and nothing of the first
+  untouched, and no copy recorded on any node-scope tier. A second process, given the spec and the
+  durable tier and nothing of the first
   process's node-local tiers, SHALL run the full commit; the bundle's object SHALL then match the
   oracle, and the staged bundle SHALL still be on the durable tier, so a mount after it pulls
   nothing.

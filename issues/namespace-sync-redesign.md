@@ -140,13 +140,14 @@ before any code, under the plan-drift rule.
      rename takes alone; or stage copies addressed by entry id, so a rename moves no stage object.
      The second gives up stage trees a person can read by name, which matters when a state database is
      lost.
-  5. **What is authoritative for the durable tier.** The state database, as built; or the tier itself,
-     with the staged bundle, its index, the altered files and the record of removals all kept as
-     files there, and the database an index of the node-local tiers and a cache of the rest. The
-     second is what lets a halted job recover from scratch alone, a commit run on a host that never
-     saw the mount, and a later mount on a second node
-     ([`issues/multi-node-mounts.md`](multi-node-mounts.md)). It also takes SQLite off the shared
-     filesystem, where its own documentation says its journal mode does not work.
+  5. **The database and the durable tier.** The maintainer's word of 2026-11-11: the database tracks
+     every copy and negotiates every move, which settles what decides while a mount is live. Open:
+     where the database lives, and what a process on another host reads once the mount is gone. The
+     database on the durable tier; or local while mounted and written there at a soft unmount, with
+     the staged bundle, its index, the altered files and the record of removals kept as files a
+     reader can rebuild it from. The second is what a commit on a host that never saw the mount, a
+     recovery after a kill and a later mount on a second node
+     ([`issues/multi-node-mounts.md`](multi-node-mounts.md)) all need.
 - **R2** — WHEN an entry is purged, its id SHALL never name another entry in the same state database.
 - **R3** — WHEN a removed or moved-away entry's former name is taken by a create, a mkdir or a rename
   at any depth, the call SHALL succeed as it does on a plain directory. The reproduction above SHALL

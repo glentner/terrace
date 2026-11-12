@@ -48,12 +48,12 @@ down.
   finish the write-back transaction machinery first; or drive a thin slice of the whole bundle loop
   locally and harden outward from it. The sections below are the third, and the maintainer agreed
   the direction on 2026-11-11.
-- **What is authoritative for the durable tier.** The state database, as built; or the tier itself,
-  holding the staged bundles, their indexes, the altered files and the record of removals as files.
-  The second is what a halted job's recovery, a commit from a login node and a later multi-node mode
-  all need, and it takes SQLite off the shared filesystem. It is the largest decision here.
-- **What pressure does to a clean copy.** Drop it, as built, or keep it one tier up when that tier
-  lacks it ([`issues/eviction-one-hop.md`](issues/eviction-one-hop.md)).
+- **Where the database lives.** Ruled on 2026-11-11: the database tracks every copy and negotiates
+  every move between tiers. Open: whether it sits on the durable tier itself, or on node-local
+  storage while mounted and is written to the durable tier at a soft unmount, with that tier's own
+  files enough to rebuild it. A halted job's recovery, a commit from a login node and a later
+  multi-node mode all turn on it, and SQLite's documentation rules its journal mode out on a network
+  filesystem. It is the largest decision here.
 - **How a source catches up.** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)
   lists the choices. For a bundle source one is forced: mark the bundle dirty and rebuild it from
   state. Adopting the seed holds four others and folds two parked cycles into it; declining it
@@ -173,13 +173,13 @@ namespace work, and how wide the second route is on a production kernel is one m
 
 **Seed:** [`issues/eviction-one-hop.md`](issues/eviction-one-hop.md) · `fix` · appetite small
 
-The maintainer's tier model: every stage tier has a size limit, a count limit and a delay, and either
-one moves a copy exactly one tier up, which may cascade. The tree differs twice. Eviction commits a
-dirty copy all the way to the source, which `AGENTS.md` § 7 states as a rule on a reason the code does
-not bear out; for a bundle source that turns pressure in the RAM tier into a re-aggregation and a
-push per evicted file. And eviction drops a clean copy, where the model as read keeps it one tier up,
-so node-local disk catches what falls out of RAM. That second reading wants the maintainer's word.
-Small, and settled before the re-aggregation is built on it.
+The maintainer's tier model: every stage tier has a size limit, a count limit and a delay, and either one
+moves a copy exactly one tier up, which may cascade. The tree differs twice. Eviction commits a dirty
+copy all the way to the source, which `AGENTS.md` § 7 states as a rule on a reason the code does not bear
+out; for a bundle source that turns pressure in the RAM tier into a re-aggregation and a push per evicted
+file. And eviction drops a clean copy, where the maintainer's ruling of 2026-11-11 keeps it one tier up,
+so node-local disk catches what falls out of RAM. Small, and built before the re-aggregation that depends
+on it.
 
 ### Rebuild how the namespace reaches the source
 
@@ -297,8 +297,10 @@ Two related gaps travel with it: `umount --detach` is bounded by `drain_timeout`
 it completes, because the daemon cannot distinguish it from a scheduler's SIGTERM; and an incomplete
 rescue's stranded count is discarded rather than recorded. A note of 2026-11-11 adds that a forced
 unmount settles the same state by design, so the state cannot carry the promise as written, and that
-the shutdown is a state machine held in three flags. Reaching the documented semantics is a design
-change and belongs in `PLAN.md` first.
+the shutdown is a state machine held in three flags. A second note of that date records a defect on
+the main path: after a complete rescue the database still records copies on the node-local tiers, so
+the next mount on another node is refused with "audit required". Reaching the documented semantics is
+a design change and belongs in `PLAN.md` first.
 
 ### Small gaps behind inaccurate invariants
 
