@@ -3,15 +3,15 @@ slug: racing-write-marked-clean
 title: A write racing a commit is never recorded clean
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/racing-write-marked-clean
 base: main
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: A hop records the changes that meet it, and goes clean only on that record
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -25,7 +25,7 @@ phases:
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/verify/racing_gate.py base suite records ledger
 review:
   last_reviewed_commit: ''
@@ -116,15 +116,15 @@ behaviour the blind reviewer can drive.
 **The names.** This branch is rebased onto the rename before the build. Paths below use the new
 names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
 
-- [ ] **Preflight.** `git merge-base HEAD origin/main` is the rename's commit or later and
+- [x] **Preflight.** `git merge-base HEAD origin/main` is the rename's commit or later and
       `src/terrace/engine/overlay.py` exists. If not, stop: the rebase has not happened.
-- [ ] **Tests first.** Copy `spec/racing-write-marked-clean/verify/test_racing.py.draft` to
+- [x] **Tests first.** Copy `spec/racing-write-marked-clean/verify/test_racing.py.draft` to
       `tests/engine/test_racing.py` (it already imports `terrace`). Keep the test names: the gate's
       lists name them, and a test added or renamed changes `BASE_FAILS`, `BASE_PASSES` or `MECHANISM`
       in `verify/racing_gate.py` in the same commit. Four tests reach into `engine._handles_mutex`,
       `engine._hops`, `handle.changing` and `engine.locks._locks`; keep those names, or change the
       tests with them.
-- [ ] **Show them red before the fix.** With the engine still untouched, run the gate's `base` mode
+- [x] **Show them red before the fix.** With the engine still untouched, run the gate's `base` mode
       alone. It adds a detached worktree of the base commit at
       `<main checkout>/.worktrees/racing-write-marked-clean-base`, runs the new module there by
       absolute path against the base's package, requires every `BASE_FAILS` test to fail with
@@ -133,7 +133,7 @@ names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
       `git worktree remove`. It writes `verify/base.txt`.
       If the worktree is left behind, close it with `git worktree remove`, never by force or by
       deleting it.
-- [ ] **`src/terrace/engine/overlay.py`**, as PLAN § 2 gives it:
+- [x] **`src/terrace/engine/overlay.py`**, as PLAN § 2 gives it:
   - `Handle` gains the slot `changing` (0 at open).
   - `OverlayEngine.__init__` gains `_hops`, with a comment saying the mutex guards it, the handle
     table and each handle's `marked_dirty` and `changing`.
@@ -153,16 +153,19 @@ names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
     recording transaction is not edited.
   - `commit_row`, `commit_upstream`, `commit_to_shared`, `evict_copy`, `release` and `_record` are
     not edited.
-- [ ] **`src/terrace/engine/transfer.py`**: `copy` takes `before_read` and calls it inside its `try`,
+- [x] **`src/terrace/engine/transfer.py`**: `copy` takes `before_read` and calls it inside its `try`,
       immediately before `source.stat(...)`. `submit` is not edited.
-- [ ] **Docstrings and comments** the change makes untrue: `Handle`, `write`, `truncate` (its first
+- [x] **Docstrings and comments** the change makes untrue: `Handle`, `write`, `truncate` (its first
       sentence and the handle branch), `_mark_handle_dirty`, `_commit_hop` (it says a racing write
       "shows in the holder's stat"), `TransferPool.copy` (the new keyword). No spec ids in `src/` or
       `tests/`.
-- [ ] **`AGENTS.md`**, in the same commit (drafts of each edit, as the prototype carried them, are in
+- [x] **`AGENTS.md`**, in the same commit (drafts of each edit, as the prototype carried them, are in
       `verify/records.draft.md`):
   - § *Known open violations*: remove the row that names `issues/racing-write-marked-clean.md`. The
     seed file and its `ROADMAP.md` entry stay; `code terrace roadmap` retires them after landing.
+    Add a row for `issues/stage-handle-outlives-its-file.md`, citing the seed, and correct the count
+    of rows the section's first sentence gives (amendment 1).
+  - § 1: `write` reaches `_mark_handle_dirty` through `_change`; say so (amendment 3).
   - § 6: replace the bullet "After a copy, `changed` detection re-arms rather than settles" with the
     rule the code keeps: the record opens at `before_read`, every change writes it under
     `_handles_mutex`, the stat only vetoes, the reset comes after the stat in the hold that reads the
@@ -176,28 +179,30 @@ names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
   - The counts: the unit count in § *Commands*, § *Repository map* (with the file count and the
     total), § *Conventions* and § *Verification*, each equal to what the gate's `suite` mode
     measures.
-- [ ] **Deferred, with its home.** Measuring the contention of the engine-wide mutex on the write
+- [x] **Deferred, with its home.** Measuring the contention of the engine-wide mutex on the write
       path under the free-threaded build is left for `issues/freethreaded-concurrency-stress.md`
       (`ROADMAP.md` lists it). Append one dated line to that seed's notes naming
       `racing-write-marked-clean` and `_handles_mutex`: `marked_dirty` is now guarded, `changing` and
       the hop records are new, `written` is still unguarded, and every change through a handle takes
-      the mutex twice.
-- [ ] **Deferred, with its home.** Bounding `commit_upstream` while an admitted change is in flight
+      the mutex twice. The same cost goes in a dated note to `issues/read-path-metadata-writes.md`
+      (`ROADMAP.md` lists it), so it is measured when that cycle runs (amendment 1).
+- [x] **Deferred, with its home.** Bounding `commit_upstream` while an admitted change is in flight
       (PLAN, deviation row 7) is left for `issues/pump-liveness-and-loss-windows.md` (`ROADMAP.md`
       lists it). Append one dated line to that seed's notes naming `racing-write-marked-clean` and
       `commit_upstream`: the loop copies again for as long as a change is in flight on the holder,
       with the path lock held, and the measured case (26 copies for a write held across 25).
-- [ ] **Already filed by the plan.** `issues/stage-handle-outlives-its-file.md` and its `ROADMAP.md`
-      entry record the defect the design review reproduced (PLAN § 5). The build does not fix it and
-      adds no `AGENTS.md` row for it; the gate's `ledger` mode checks the seed is still there.
-- [ ] **Deferral ledger.** Walk this file and the build's own notes for "do not fix here", "known
+- [x] **Already filed by the plan.** `issues/stage-handle-outlives-its-file.md` and its `ROADMAP.md`
+      entry record the defect the design review reproduced (PLAN § 5). The build does not fix it. It
+      adds a row for it to `AGENTS.md` § *Known open violations*, citing the seed (amendment 1); the
+      gate's `ledger` mode checks the seed is still there.
+- [x] **Deferral ledger.** Walk this file and the build's own notes for "do not fix here", "known
       limitation", "left for" or "follow-up". Each one names an `issues/{slug}.md`, pre-shaped from
       the ISSUE template when it is new, and `ROADMAP.md` lists it. An unrecorded deferral fails the
       phase. The gate's `ledger` mode checks the item above.
-- [ ] **Run the verify.** It runs `base` again (the record must come from the final test file), then
+- [x] **Run the verify.** It runs `base` again (the record must come from the final test file), then
       `suite`, `records` and `ledger`. `suite` writes `verify/final.txt`. Stage `verify/base.txt` and
       `verify/final.txt` with the phase.
-- [ ] **Fail it once.** Build's fail-once mutation targets this phase's own decision: with the
+- [x] **Fail it once.** Build's fail-once mutation targets this phase's own decision: with the
       `met or` dropped from `changed` in `_commit_hop`, the `suite` mode must go red on both
       reproductions. `records` and `ledger` run alone in seconds for a mutation of the records.
 - **Verify:** `uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/verify/racing_gate.py base suite records ledger`
@@ -206,9 +211,28 @@ names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
   failed, 0 errors, passed above the base's count; `AGENTS.md` states the measured count.
 - **Touches:** `src/terrace/engine/overlay.py`, `src/terrace/engine/transfer.py`,
   `tests/engine/test_racing.py`, `AGENTS.md`, `issues/freethreaded-concurrency-stress.md`,
-  `issues/pump-liveness-and-loss-windows.md`,
-  `spec/racing-write-marked-clean/verify/{base.txt,final.txt,racing_gate.py}`,
-  `spec/racing-write-marked-clean/TECH.md`.
+  `issues/pump-liveness-and-loss-windows.md`, `issues/read-path-metadata-writes.md`,
+  `spec/racing-write-marked-clean/verify/{base.txt,final.txt}`,
+  `spec/racing-write-marked-clean/TECH.md`. The gate, `verify/racing_gate.py`, is frozen at the plan
+  commit and is not edited.
+
+**Amendments (build, 2026-11-12).**
+
+1. *The foreman's rulings at the plan sign-off.* PLAN's seven deviation rows stand as written. The
+   defect in `issues/stage-handle-outlives-its-file.md` is reproduced and pre-existing, so
+   `AGENTS.md` § *Known open violations* gains a row for it in this phase's commit, beside the removal
+   of this cycle's own row; PLAN § 5 had left that to the foreman, and the checklist above first said
+   no row. Row 4's cost (two holds of the engine-wide mutex per change through a handle) is noted in
+   `issues/read-path-metadata-writes.md` as well as `issues/freethreaded-concurrency-stress.md`.
+2. *The record's key.* The prototype read the entry once before the branch for the key and again
+   under the source lock. The build takes the key in `before_read`, from the entry its branch read,
+   as the checklist says; a hop whose copy never calls `before_read` has no key and is read as met.
+3. *Records the checklist did not list.* § 1's sentence on `write` now names `_change`. § 6 carries
+   the rule as three bullets, and names the two costs PLAN's rows 5 and 7 accept and the premise
+   PLAN § 2 states (a handle's fd names its tier's current file). § 10's bullet says `Handle.written`
+   is still unguarded and that the mutex's contention is not measured.
+4. *The fail-once mutation* ran `suite` alone, as the checklist says; `records` and `ledger` were
+   not mutated.
 
 ---
 
