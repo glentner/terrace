@@ -3,7 +3,7 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/local-bundle-loop
 base: main
 current_phase: done
@@ -48,10 +48,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 85e67c97dea79b39afea520b11fdd8ffcb5f4e57
+  verdict: changes-requested
+  blocked_reason: 'F1: tap chunked-refusal test races the client; verify fails at random on a clean tree'
+  cycle: 1
 ---
 
 # TECH.md — Drive the bundle loop end to end on a local object store
