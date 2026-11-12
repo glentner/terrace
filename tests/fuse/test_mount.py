@@ -19,11 +19,11 @@ from pathlib import Path
 from pytest import mark, raises, fixture
 
 # Internal libs
-from sosfs.state.db import Database, DatabaseLocked
-from sosfs.state.lifecycle import Lifecycle
-from sosfs.tier.spec import WritebackSpec
-from sosfs.engine.overlay import DB_NAME
-from sosfs.fuse.mount import Mount, Shutdown, MountError, read_pidfile, request_shutdown, PIDFILE_NAME
+from terrace.state.db import Database, DatabaseLocked
+from terrace.state.lifecycle import Lifecycle
+from terrace.tier.spec import WritebackSpec
+from terrace.engine.overlay import DB_NAME
+from terrace.fuse.mount import Mount, Shutdown, MountError, read_pidfile, request_shutdown, PIDFILE_NAME
 from tests.engine.conftest import Clock, build_spec, seed
 from tests.engine.test_drain import dirty_new
 
@@ -256,7 +256,7 @@ def test_request_shutdown_detach_sends_sigterm(spec, monkeypatch) -> None:
 def test_request_shutdown_force_unmounts_directly(spec, monkeypatch) -> None:
     """`--force` unmounts the recorded mount point rather than signalling the daemon."""
     unmounted, killed = [], []
-    monkeypatch.setattr('sosfs.fuse.mount.unmount', lambda mp: unmounted.append(str(mp)))
+    monkeypatch.setattr('terrace.fuse.mount.unmount', lambda mp: unmounted.append(str(mp)))
     monkeypatch.setattr(os, 'kill', lambda pid, sig: killed.append(pid))
     put_pidfile(spec.state, mountpoint='/mnt/space')
     request_shutdown(spec, force=True, wait=False)

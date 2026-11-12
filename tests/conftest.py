@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared fixtures for the sosfs test suite."""
+"""Shared fixtures for the Terrace test suite."""
 
 # Type annotations
 from __future__ import annotations

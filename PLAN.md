@@ -497,7 +497,7 @@ Decided 2026-07-01 with rationale; alternatives noted.
 | Archives | **stdlib `zipfile`/`tarfile`** | ZIP/uncompressed-TAR direct-update via atomic in-place re-pack (temp+fsync+rename; compaction implicit, no tombstones). tar.gz/remote: staged re-sync — decompress once to a durable `.tar`, offset-read, reconstruct+recompress+atomic-push, rate-limited. Sharded sources (`*.tar.gz`) and SFTP/Globus inner backings are post-v0.1.0 (Phase 12). Optimization path (true append-supersede, indexed gzip random access) is future work. |
 | S3 testing | **moto-server** (unit, pure Python, real S3 HTTP → works with obstore) + **MinIO** container behind `@mark.integration` | Matches the unit/integration marker split. |
 | CLI / config / logging / style | cmdkit `ApplicationGroup`; layered TOML + `SOSFS_*`; hypershell `Logger` w/ `TRACE`; `src/` layout, SPDX Apache-2.0 headers, 120-char lines, `from __future__ import annotations`, FSM + `Thread` idioms | House style per hypershell. hatchling + uv; Sphinx/furo docs; Keep-a-Changelog + SemVer. |
-| Package / entry point | **`sosfs`** | Per GOAL.md; repo name is a placeholder and unimportant. |
+| Package / entry point | **`terrace`** | The project is Terrace, and its distribution, import package and console script are `terrace`. This overturns the earlier row, which recorded the placeholder name as the package and called the name unimportant: GOAL.md kept that name only "until a better name is chosen", and one was chosen on 2026-11-11, before any release and before any overlay was deployed. Renamed in one cycle with no compatibility code; CHANGELOG.md lists what moved. |
 
 
 Testing strategy

@@ -15,10 +15,10 @@ from pathlib import Path, PurePosixPath
 from pytest import mark
 
 # Internal libs
-from sosfs.state.journal import Writeback
-from sosfs.tier.spec import WritebackSpec
-from sosfs.engine.overlay import OverlayEngine, Handle
-from sosfs.engine.writeback import WritebackScheduler, boundary_policies
+from terrace.state.journal import Writeback
+from terrace.tier.spec import WritebackSpec
+from terrace.engine.overlay import OverlayEngine, Handle
+from terrace.engine.writeback import WritebackScheduler, boundary_policies
 from tests.engine.conftest import Clock, build_spec, seed
 
 

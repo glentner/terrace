@@ -89,11 +89,11 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import QuotaSpec, WritebackSpec
-from sosfs.engine.drain import drain
-from sosfs.engine.evict import EvictionManager
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.writeback import WritebackScheduler
+from terrace.tier.spec import QuotaSpec, WritebackSpec
+from terrace.engine.drain import drain
+from terrace.engine.evict import EvictionManager
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.writeback import WritebackScheduler
 from tests.engine.conftest import Clock, build_spec, seed
 
 

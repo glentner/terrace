@@ -44,7 +44,7 @@ jobs:
       - name: Assert free-threading is active
         if: ${{ endsWith(matrix.python, 't') }}
         # An extension that doesn't declare free-threaded support silently re-enables the GIL
-        run: uv run python -c "import sys, sosfs, obstore; assert not sys._is_gil_enabled(), 'GIL re-enabled'"
+        run: uv run python -c "import sys, terrace, obstore; assert not sys._is_gil_enabled(), 'GIL re-enabled'"
       # -rfEs keeps pytest's default FAILED and ERROR lines and adds one `SKIPPED [n] file:line: reason`
       # line per skip location, folding the n tests skipped there
       - name: Unit tests

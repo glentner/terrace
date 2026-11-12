@@ -21,8 +21,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, rule, invariant
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.writeback import WritebackScheduler
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.writeback import WritebackScheduler
 from tests.engine.conftest import Clock, build_spec, seed
 
 
@@ -82,7 +82,7 @@ class OverlayMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.root = Path(tempfile.mkdtemp(prefix='sosfs-model-'))
+        self.root = Path(tempfile.mkdtemp(prefix='terrace-model-'))
         seed(self.root / 'project', 'seeded.txt', b'initial-content')
         self.oracle = self.root / 'oracle'
         self.oracle.mkdir()

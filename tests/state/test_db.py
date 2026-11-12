@@ -15,7 +15,7 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database, ExclusiveLock, SCHEMA_VERSION, DatabaseLocked, DatabaseUninitialized, \
+from terrace.state.db import Database, ExclusiveLock, SCHEMA_VERSION, DatabaseLocked, DatabaseUninitialized, \
     SchemaMismatch
 
 

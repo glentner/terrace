@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "sosfs"
+name = "terrace"
 version = "0.1.0.dev0"
-description = "Simple overlay service: managed data tiering for research computing over FUSE."
+description = "Terrace: managed data tiering for research computing over FUSE."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.15"
@@ -32,10 +32,10 @@ dependencies = [
 ]
 
 [project.scripts]
-sosfs = "sosfs:main"
+terrace = "terrace:main"
 
 [project.urls]
-Repository = "https://github.com/glentner/simple-overlay-service"
+Repository = "https://github.com/glentner/terrace"
 
 [dependency-groups]
 dev = [
@@ -64,4 +64,4 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sosfs"]
+packages = ["src/terrace"]

@@ -1,4 +1,4 @@
-# S3-compatible MinIO for the sosfs integration suite (tests/tier/test_s3_integration.py).
+# S3-compatible MinIO for the Terrace integration suite (tests/tier/test_s3_integration.py).
 #
 # The test harness never launches a server itself: it looks for one at the
 # SOSFS_TEST_MINIO_* endpoint (defaulting to this service) and skips when none is

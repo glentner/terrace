@@ -19,12 +19,12 @@ from pathlib import Path, PurePosixPath as P
 from pytest import fixture, mark, raises, approx
 
 # Internal libs
-from sosfs.core.units import parse_rate
-from sosfs.state.db import Database
-from sosfs.state.registry import TierRegistry
-from sosfs.tier.protocol import Tier, FileMeta, TierUsage
-from sosfs.tier.spec import S3Spec, LocationSpec
-from sosfs.tier.archive import (ArchiveTier, InnerLocation, PosixInnerLocation, S3InnerLocation,
+from terrace.core.units import parse_rate
+from terrace.state.db import Database
+from terrace.state.registry import TierRegistry
+from terrace.tier.protocol import Tier, FileMeta, TierUsage
+from terrace.tier.spec import S3Spec, LocationSpec
+from terrace.tier.archive import (ArchiveTier, InnerLocation, PosixInnerLocation, S3InnerLocation,
                                 inner_location, _zip_mtime)
 
 

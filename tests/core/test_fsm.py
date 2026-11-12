@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for sosfs.core.fsm: the merged FSM/Thread idiom."""
+"""Unit tests for terrace.core.fsm: the merged FSM/Thread idiom."""
 
 # Type annotations
 from __future__ import annotations
@@ -15,7 +15,7 @@ from enum import auto
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.core.fsm import State, StateThread
+from terrace.core.fsm import State, StateThread
 
 
 pytestmark = mark.unit

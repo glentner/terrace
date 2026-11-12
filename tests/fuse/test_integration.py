@@ -19,11 +19,11 @@ from pathlib import Path
 from pytest import mark, skip
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.lifecycle import Lifecycle
-from sosfs.tier.spec import OverlaySpec, WritebackSpec
-from sosfs.engine.overlay import DB_NAME
-from sosfs.fuse.mount import Mount, Shutdown, unmount, request_shutdown, MountError
+from terrace.state.db import Database
+from terrace.state.lifecycle import Lifecycle
+from terrace.tier.spec import OverlaySpec, WritebackSpec
+from terrace.engine.overlay import DB_NAME
+from terrace.fuse.mount import Mount, Shutdown, unmount, request_shutdown, MountError
 from tests.engine.conftest import build_spec, seed
 
 
@@ -67,7 +67,7 @@ def start_mount(tmp_path: Path, *, tiers: int = 2,
     overrides = {'scratch_writeback': FROZEN, 'tmp_writeback': FROZEN}
     spec = build_spec(tmp_path, tiers=tiers, **overrides)
     mount = Mount(spec, point, foreground=True, writeback_tick=0.2, evict_tick=0.5)
-    server = threading.Thread(target=mount.serve, name='sosfs-serve', daemon=True)
+    server = threading.Thread(target=mount.serve, name='terrace-serve', daemon=True)
     server.start()
     deadline = time.time() + MOUNT_TIMEOUT
     while time.time() < deadline and not os.path.ismount(point):

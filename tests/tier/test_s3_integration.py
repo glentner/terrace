@@ -23,10 +23,10 @@ from pathlib import PurePosixPath as P
 from pytest import fixture, mark
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
-from sosfs.tier.s3 import S3Tier
-from sosfs.tier.protocol import FileMeta
-from sosfs.engine.overlay import OverlayEngine
+from terrace.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
+from terrace.tier.s3 import S3Tier
+from terrace.tier.protocol import FileMeta
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock
 
 
@@ -61,7 +61,7 @@ pytestmark = [mark.integration,
 @fixture
 def minio_stack(tmp_path) -> Iterator[Tuple[OverlaySpec, S3Tier]]:
     """A fresh bucket, an overlay spec (MinIO source -> POSIX stage), and a seeding tier; bucket removed after."""
-    bucket = f'sosfs-it-{uuid4().hex[:12]}'
+    bucket = f'terrace-it-{uuid4().hex[:12]}'
     client = _minio_client()
     client.create_bucket(Bucket=bucket)
     url = f's3://{bucket}/space'

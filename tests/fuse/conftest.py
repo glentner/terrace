@@ -14,11 +14,11 @@ from pathlib import Path
 from pytest import Config, Item, fixture, mark
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock, build_spec, seed
 
 if TYPE_CHECKING:
-    from sosfs.fuse.adapter import OverlayOperations
+    from terrace.fuse.adapter import OverlayOperations
 
 # mfusepy loads libfuse at import and raises OSError both when it finds no library and when dlopen fails.
 try:
@@ -50,7 +50,7 @@ def clock() -> Clock:
 @fixture
 def operations(tmp_path: Path, clock: Clock) -> Iterator[OverlayOperations]:
     """A started two-tier engine (project -> scratch) behind the FUSE adapter."""
-    from sosfs.fuse.adapter import OverlayOperations
+    from terrace.fuse.adapter import OverlayOperations
     seed(tmp_path / 'project', 'top.txt', b'top-level')
     seed(tmp_path / 'project', 'data/a.txt', b'alpha', mode=0o640)
     seed(tmp_path / 'project', 'data/b.txt', b'beta-content')

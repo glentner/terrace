@@ -23,8 +23,8 @@ except ImportError as error:
     S3_UNAVAILABLE = f'S3 tier tests need {error.name}: {error}'
 
 # Internal libs
-from sosfs.tier.s3 import S3Tier
-from sosfs.tier.spec import S3Spec
+from terrace.tier.s3 import S3Tier
+from terrace.tier.spec import S3Spec
 
 
 CREDENTIALS = {'aws_access_key_id': 'test', 'aws_secret_access_key': 'test'}
@@ -48,7 +48,7 @@ def moto_endpoint() -> Iterator[str]:
 @fixture
 def s3_bucket(moto_endpoint: str) -> str:
     """A fresh, uniquely named bucket per test (moto state is shared across the session)."""
-    name = f'sosfs-test-{uuid4().hex[:12]}'
+    name = f'terrace-test-{uuid4().hex[:12]}'
     client = boto3.client('s3', endpoint_url=moto_endpoint, region_name=REGION, **CREDENTIALS)
     client.create_bucket(Bucket=name)
     return name

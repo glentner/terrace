@@ -14,9 +14,9 @@ from pathlib import Path, PurePosixPath
 from pytest import mark
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.rescue import rescue, node_dirty
+from terrace.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.rescue import rescue, node_dirty
 from tests.engine.conftest import Clock, build_spec, seed
 
 

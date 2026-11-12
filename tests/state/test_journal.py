@@ -14,9 +14,9 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog
-from sosfs.state.journal import Journal, temp_name, is_temp_name
+from terrace.state.db import Database
+from terrace.state.catalog import Catalog
+from terrace.state.journal import Journal, temp_name, is_temp_name
 
 
 pytestmark = mark.unit

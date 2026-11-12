@@ -6,12 +6,12 @@ appetite: big
 status: in_progress
 branch: refactor/rename-to-terrace
 base: main
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The package, the distribution and the console script are terrace
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -131,14 +131,14 @@ classes are `TerraceApp` and `TerraceError`, and the suite is green at the base 
 names written to a tier root, the environment prefix, the path components and the attribute
 namespace are held back for P2 (`PLAN.md` § 2, the contract forms).
 
-- [ ] `python3 -I spec/rename-to-terrace/rename.py p1`. It moves `src/sosfs` to `src/terrace`,
+- [x] `python3 -I spec/rename-to-terrace/rename.py p1`. It moves `src/sosfs` to `src/terrace`,
   rewrites `PLAN.md`'s technology row first, applies the nineteen proper-noun sites, then rules 2, 4
   and 5 over the code scope.
-- [ ] `uv lock`, then `uv sync`. `uv.lock` changes only in the project's own entry.
-- [ ] Read `git status` and `git diff --stat`: the 34 tracked files of the package now under
+- [x] `uv lock`, then `uv sync`. `uv.lock` changes only in the project's own entry.
+- [x] Read `git status` and `git diff --stat`: the 34 tracked files of the package now under
   `src/terrace/`, and modifications only in the code scope, `PLAN.md` and `uv.lock`. Read the diff of `pyproject.toml`,
   `src/terrace/__init__.py`, `tools/lint.sh` and `.github/workflows/ci.yml` in full.
-- [ ] Stage by name: `src tests tools pyproject.toml docker-compose.yml .github uv.lock PLAN.md`.
+- [x] Stage by name: `src tests tools pyproject.toml docker-compose.yml .github uv.lock PLAN.md`.
 - **Verify:** `rename_gate.py identity suite`. Dry-run green on the prototype's P1 tree: 731 passed.
   `contracts` and `census` are red on this tree, as they should be.
 - **Touches:** every file under `src/` (moved), most of `tests/`, `tools/lint.sh`,

@@ -64,18 +64,18 @@ fi
 # tier/protocol and tier/posix.py imports state/journal, both by design. A naive
 # core < state < tier < engine rank check fails on day one; this one permits the cycle.
 
-below=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+sosfs\.(engine|fuse|control)' \
-        src/sosfs/core src/sosfs/state src/sosfs/tier --include='*.py' || true)
+below=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+terrace\.(engine|fuse|control)' \
+        src/terrace/core src/terrace/state src/terrace/tier --include='*.py' || true)
 [ -z "$below" ] || fail "a below-engine module imports upward:
 $below"
 
-up=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+sosfs\.(fuse|control)' \
-     src/sosfs/engine --include='*.py' || true)
+up=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+terrace\.(fuse|control)' \
+     src/terrace/engine --include='*.py' || true)
 [ -z "$up" ] || fail "engine imports the FUSE/control layer:
 $up"
 
-core=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+sosfs\.(state|tier|engine|fuse|control)' \
-       src/sosfs/core --include='*.py' || true)
+core=$(grep -rEn '^[[:space:]]*(from|import)[[:space:]]+terrace\.(state|tier|engine|fuse|control)' \
+       src/terrace/core --include='*.py' || true)
 [ -z "$core" ] || fail "core imports a higher layer:
 $core"
 
@@ -101,7 +101,7 @@ fi
 
 # ---- 4. version single-source ----------------------------------------------
 #
-# pyproject.toml is the only source; sosfs.__version__ reads it through
+# pyproject.toml is the only source; terrace.__version__ reads it through
 # importlib.metadata. Report it so a release drive can assert against it, and catch
 # the line going missing under a refactor. A literal __version__ assignment in src/
 # would be a second source.

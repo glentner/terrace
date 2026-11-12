@@ -13,8 +13,8 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.lifecycle import (Lifecycle, Marker, MarkerStatus, verify_marker,
+from terrace.state.db import Database
+from terrace.state.lifecycle import (Lifecycle, Marker, MarkerStatus, verify_marker,
                                    LifecycleError, CrashDetected, MarkerError)
 
 

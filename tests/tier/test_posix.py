@@ -16,10 +16,10 @@ from pathlib import Path, PurePosixPath
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.journal import PARTIAL_DIR, is_temp_name
-from sosfs.state.lifecycle import Marker
-from sosfs.tier.protocol import Tier, FileMeta
-from sosfs.tier.posix import PosixTier
+from terrace.state.journal import PARTIAL_DIR, is_temp_name
+from terrace.state.lifecycle import Marker
+from terrace.tier.protocol import Tier, FileMeta
+from terrace.tier.posix import PosixTier
 
 
 pytestmark = mark.unit

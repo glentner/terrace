@@ -14,10 +14,10 @@ from pathlib import Path, PurePosixPath as P
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.state.lifecycle import Marker
-from sosfs.tier.protocol import Tier, FileMeta
-from sosfs.tier.s3 import S3Tier
-from sosfs.tier.spec import S3Spec
+from terrace.state.lifecycle import Marker
+from terrace.tier.protocol import Tier, FileMeta
+from terrace.tier.s3 import S3Tier
+from terrace.tier.spec import S3Spec
 
 
 pytestmark = mark.unit

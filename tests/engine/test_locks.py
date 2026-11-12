@@ -14,7 +14,7 @@ import threading
 from pytest import mark
 
 # Internal libs
-from sosfs.engine.locks import LockRegistry
+from terrace.engine.locks import LockRegistry
 
 
 pytestmark = mark.unit

@@ -14,9 +14,9 @@ from pathlib import Path, PurePosixPath
 from pytest import mark
 
 # Internal libs
-from sosfs.tier.spec import QuotaSpec, WritebackSpec
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.drain import drain, dirty_copies, tier_volatility
+from terrace.tier.spec import QuotaSpec, WritebackSpec
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.drain import drain, dirty_copies, tier_volatility
 from tests.engine.conftest import Clock, build_spec, seed
 
 
@@ -149,6 +149,6 @@ def test_second_signal_downgrades_to_detach(tmp_path: Path, clock: Clock) -> Non
         assert (result.data, result.complete) == (1, False)
         assert engine.source.read(PurePosixPath('/vol')) == b'!!'   # volatile data rescued first
         assert engine.catalog.get_residency('/dur', 'scratch').state == 'dirty'
-        assert engine.journal.queued() != []                # remainder left for `sosfs commit`
+        assert engine.journal.queued() != []                # remainder left for `terrace commit`
     finally:
         engine.stop()

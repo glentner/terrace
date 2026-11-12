@@ -14,8 +14,8 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog, normalize, parent_of
+from terrace.state.db import Database
+from terrace.state.catalog import Catalog, normalize, parent_of
 
 
 pytestmark = mark.unit

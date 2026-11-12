@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Test helpers for sosfs."""
+"""Test helpers for Terrace."""
 
 # Type annotations
 from __future__ import annotations
@@ -18,9 +18,9 @@ __all__ = ['main', 'main_lines', 'assert_output']
 
 
 def main(argv: List[str], env: Optional[Dict[str, str]] = None, timeout: float = 30) -> Tuple[int, str, str]:
-    """Run the sosfs CLI in a subprocess; returns (returncode, stdout, stderr)."""
+    """Run the Terrace CLI in a subprocess; returns (returncode, stdout, stderr)."""
     base_env = {name: value for name, value in os.environ.items() if not name.startswith('SOSFS_')}
-    result = subprocess.run([sys.executable, '-m', 'sosfs', *argv],
+    result = subprocess.run([sys.executable, '-m', 'terrace', *argv],
                             env={**base_env, **(env or {})},
                             capture_output=True, text=True, timeout=timeout)
     return result.returncode, result.stdout, result.stderr

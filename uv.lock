@@ -642,57 +642,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sosfs"
-version = "0.1.0.dev0"
-source = { editable = "." }
-dependencies = [
-    { name = "cmdkit", extra = ["toml"] },
-    { name = "mfusepy" },
-    { name = "obstore" },
-    { name = "rich" },
-    { name = "tomlkit" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "boto3" },
-    { name = "flask" },
-    { name = "flask-cors" },
-    { name = "hypothesis" },
-    { name = "moto", extra = ["s3"] },
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-]
-docs = [
-    { name = "furo" },
-    { name = "sphinx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cmdkit", extras = ["toml"], specifier = ">=2.7.7" },
-    { name = "mfusepy", specifier = ">=3.0" },
-    { name = "obstore", specifier = ">=0.6" },
-    { name = "rich", specifier = ">=13.7" },
-    { name = "tomlkit", specifier = ">=0.13" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "boto3" },
-    { name = "flask" },
-    { name = "flask-cors" },
-    { name = "hypothesis", specifier = ">=6" },
-    { name = "moto", extras = ["s3"], specifier = ">=5" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-xdist", specifier = ">=3" },
-]
-docs = [
-    { name = "furo" },
-    { name = "sphinx", specifier = ">=8" },
-]
-
-[[package]]
 name = "soupsieve"
 version = "2.8.4"
 source = { registry = "https://pypi.org/simple" }
@@ -793,6 +742,57 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/3b/44/6716b257b0aa6bfd51a1b31665d1c205fb12cb5ad56de752dfa15657de2f/sphinxcontrib_serializinghtml-2.0.0.tar.gz", hash = "sha256:e9d912827f872c029017a53f0ef2180b327c3f7fd23c87229f7a8e8b70031d4d", size = 16080, upload-time = "2024-07-29T01:10:09.332Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/a7/d2782e4e3f77c8450f727ba74a8f12756d5ba823d81b941f1b04da9d033a/sphinxcontrib_serializinghtml-2.0.0-py3-none-any.whl", hash = "sha256:6e2cb0eef194e10c27ec0023bfeb25badbbb5868244cf5bc5bdc04e4464bf331", size = 92072, upload-time = "2024-07-29T01:10:08.203Z" },
+]
+
+[[package]]
+name = "terrace"
+version = "0.1.0.dev0"
+source = { editable = "." }
+dependencies = [
+    { name = "cmdkit", extra = ["toml"] },
+    { name = "mfusepy" },
+    { name = "obstore" },
+    { name = "rich" },
+    { name = "tomlkit" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "boto3" },
+    { name = "flask" },
+    { name = "flask-cors" },
+    { name = "hypothesis" },
+    { name = "moto", extra = ["s3"] },
+    { name = "pytest" },
+    { name = "pytest-xdist" },
+]
+docs = [
+    { name = "furo" },
+    { name = "sphinx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cmdkit", extras = ["toml"], specifier = ">=2.7.7" },
+    { name = "mfusepy", specifier = ">=3.0" },
+    { name = "obstore", specifier = ">=0.6" },
+    { name = "rich", specifier = ">=13.7" },
+    { name = "tomlkit", specifier = ">=0.13" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "boto3" },
+    { name = "flask" },
+    { name = "flask-cors" },
+    { name = "hypothesis", specifier = ">=6" },
+    { name = "moto", extras = ["s3"], specifier = ">=5" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-xdist", specifier = ">=3" },
+]
+docs = [
+    { name = "furo" },
+    { name = "sphinx", specifier = ">=8" },
 ]
 
 [[package]]

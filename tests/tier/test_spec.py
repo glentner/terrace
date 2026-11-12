@@ -13,7 +13,7 @@ from pathlib import Path
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, LocationSpec, SpecError
+from terrace.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, LocationSpec, SpecError
 
 
 pytestmark = mark.unit

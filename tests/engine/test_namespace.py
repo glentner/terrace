@@ -13,8 +13,8 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.state.lifecycle import Marker, CrashDetected
-from sosfs.engine.overlay import OverlayEngine
+from terrace.state.lifecycle import Marker, CrashDetected
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock, build_spec, seed
 
 

@@ -16,10 +16,10 @@ from pathlib import PurePosixPath as P
 from pytest import fixture, mark
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
-from sosfs.tier.s3 import S3Tier
-from sosfs.tier.protocol import FileMeta
-from sosfs.engine.overlay import OverlayEngine
+from terrace.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
+from terrace.tier.s3 import S3Tier
+from terrace.tier.protocol import FileMeta
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock
 
 

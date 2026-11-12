@@ -16,8 +16,8 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.core.exceptions import SOSFSError
-from sosfs.tier.protocol import Tier, TierStat, TierEntry, TierUsage, FileMeta, TierError
+from terrace.core.exceptions import TerraceError
+from terrace.tier.protocol import Tier, TierStat, TierEntry, TierUsage, FileMeta, TierError
 
 
 pytestmark = mark.unit
@@ -101,7 +101,7 @@ def test_types_are_frozen() -> None:
 
 def test_tier_error_is_domain_error() -> None:
     """TierError participates in the shared exception mapping."""
-    assert issubclass(TierError, SOSFSError)
+    assert issubclass(TierError, TerraceError)
 
 
 def test_structural_conformance() -> None:
