@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:local-bundle-loop
 kind: test
 appetite: small
 lane: public
