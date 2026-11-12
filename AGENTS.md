@@ -730,9 +730,10 @@ Violations are HIGH, not auto-CRITICAL.
 
 ### Known open violations
 
-Defects the harness port's audit found and reproduced, each recorded so a reviewer neither re-files
-it nor mistakes it for an accepted standard. **These are violations, not exceptions.** Each names the
-seed that owns the repair; a cycle that touches the region should either fix it or say why not.
+Defects the harness port's audit found and reproduced, and four a review of the whole tree reproduced
+on 2026-11-11, each recorded so a reviewer neither re-files it nor mistakes it for an accepted
+standard. **These are violations, not exceptions.** Each names the seed that owns the repair; a cycle
+that touches the region should either fix it or say why not.
 
 | § | Violation | Seed |
 |---|---|---|
@@ -748,6 +749,10 @@ seed that owns the repair; a cycle that touches the region should either fix it 
 | Conventions | The **integration suite runs on no automated machine**; CI has no integration job. | `issues/ci-integration-lane.md` |
 | — | Smaller measured gaps: `residency.checksum` is never written though the spec parses the flag; `tier.generation` never advances in production; `intent.temp_name` is dead and the archive's sibling `.tmp` is outside the orphan convention; `statfs` reports 100% full for an unquota'd non-POSIX source; no directory `fsync` anywhere; `S3Tier.rename`'s docstring claims an atomicity S3 does not have. | `issues/invariant-audit-gaps.md` |
 | — | The daemonized (default) mount **fails on a first-ever mount** — the log file is opened before the state directory exists. No test covers the daemonized branch. | `issues/daemonized-mount-first-run.md` |
+| 1, 6, 7 | A **write racing a commit is recorded clean**. `_commit_hop` clears a copy from a flag it resets and a stat it compares; a write that read the flag before the reset and lands after the stat, or one of the same size inside one timestamp tick, leaves the holder clean with bytes its upstream lacks, and the next eviction deletes them. Both routes reproduced by injection. | `issues/racing-write-marked-clean.md` |
+| 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
+| 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
+| 5, 9 | **Entries created through the mount are recorded `0:0`.** `create` and `mkdir` default the owner to root and the FUSE adapter passes no caller identity, so the catalog disagrees with the source it commits to. The engine half is measured; the adapter half is read from the code. | `issues/posix-surface-gaps.md` |
 
 Several of these are also `PLAN.md` inaccuracies rather than pure code defects. Under the repository's
 plan-drift rule the reconciliation belongs in `PLAN.md` first, with the maintainer; that work is
