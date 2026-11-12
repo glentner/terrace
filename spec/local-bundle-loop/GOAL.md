@@ -174,6 +174,16 @@ stage 5 unless the plan finds a deterministic stage for one, which it may add un
   changes them, under the repository's same-commit rule (the foreman's ruling, 2026-11-11).
 - **Q:** What is out of scope? — **A:** Any change under `src/`; making any stage pass by changing
   the engine; many bundles at scale; SFTP (the foreman's ruling, 2026-11-11).
+- **Q:** R5 says stage 1 fails at the parser's refusal. For the documented archive form the parser
+  stops at its unknown-key check, before the type check. Which refusal does the stage pin? — **A:**
+  The refusal of the archive tier as the parser gives it for the documented form: the unknown-key
+  message naming the archive keys. The type refusal already has its own test. (The foreman's ruling
+  at the plan sign-off; resolved 2026-11-12.)
+- **Q:** Does the re-aggregation stage also assert that nothing is pushed before the interval
+  expires? — **A:** Yes. Stage 5 SHALL assert that no object is written to the source between the
+  change and the interval's expiry, and one object after it. A write-back that repacks on every
+  change is the behaviour the delay exists to prevent. (The foreman's ruling at the plan sign-off;
+  resolved 2026-11-12.)
 
 ## Related materials
 
