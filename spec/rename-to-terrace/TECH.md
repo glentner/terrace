@@ -3,10 +3,10 @@ slug: rename-to-terrace
 title: Rename the project to Terrace
 kind: refactor
 appetite: big
-status: in_progress
+status: in_review
 branch: refactor/rename-to-terrace
 base: main
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
   verify: uv run --no-project --python 3.15 python -I spec/rename-to-terrace/verify/rename_gate.py contracts suite
 - id: P3
   name: Documents, seeds, roadmap and changelog, then the census and the ledger
-  status: pending
+  status: done
   satisfies:
   - R1
   - R10
@@ -176,24 +176,24 @@ overlay written before the rename is refused and left as it was. The state store
 **Goal:** no tracked file inside the census spells an old name, `CHANGELOG.md` announces the break and
 lists what moved, `AGENTS.md` describes the tree as it is, and every deferral has a record.
 
-- [ ] `python3 -I spec/rename-to-terrace/rename.py p3`. It applies the document sites (`PLAN.md` § 2
+- [x] `python3 -I spec/rename-to-terrace/rename.py p3`. It applies the document sites (`PLAN.md` § 2
   lists them), rules 2 to 5 over the document scope, the one correction after the rules, and the two
   dated notes.
-- [ ] Read the diff of `AGENTS.md`, `README.md`, `ROADMAP.md`, `CHANGELOG.md` and `PLAN.md` in full,
+- [x] Read the diff of `AGENTS.md`, `README.md`, `ROADMAP.md`, `CHANGELOG.md` and `PLAN.md` in full,
   and of `issues/config-command.md`, `issues/hpc-deployment.md` and `issues/audit-command.md`. Skim
   the other seeds for a sentence the rules made false; none was found on the prototype.
-- [ ] Stage by name: `AGENTS.md PLAN.md README.md ROADMAP.md CHANGELOG.md issues`.
-- [ ] R11 and R8's record are graded from committed text: `CHANGELOG.md`, `PLAN.md` and `AGENTS.md`
+- [x] Stage by name: `AGENTS.md PLAN.md README.md ROADMAP.md CHANGELOG.md issues`.
+- [x] R11 and R8's record are graded from committed text: `CHANGELOG.md`, `PLAN.md` and `AGENTS.md`
   by any reviewer, and the **not run** statement in `spec/rename-to-terrace/PLAN.md` by the
   orchestrator, since a blind reviewer does not read `spec/`.
-- [ ] Deferral ledger. Walk P1 to P3 for anything left unfixed and confirm each has its record:
+- [x] Deferral ledger. Walk P1 to P3 for anything left unfixed and confirm each has its record:
   - an empty or relative `XDG_*_HOME` is deferred to `issues/xdg-empty-and-relative-values.md`,
     which `ROADMAP.md` lists;
   - `issues/audit-command.md` gains a dated note for a known limitation: a refused attach leaves
     the crash flag set, so a second mount attempt stops at the crash gate;
   - `issues/config-command.md` gains a dated note for a known limitation: the environment prefix
     is matched without its underscore.
-- [ ] Before the push, `rename_gate.py prepush` on the clean, committed tree.
+- [x] Before the push, `rename_gate.py prepush` on the clean, committed tree.
 - **Verify:** `rename_gate.py census docs ledger identity contracts suite`. Dry-run green on the
   prototype's P3 tree, 731 passed.
 - **Touches:** `AGENTS.md` (§ Invariants and § Factory included: names and paths only, and the

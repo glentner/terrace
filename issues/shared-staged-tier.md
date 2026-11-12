@@ -39,9 +39,9 @@ stranded lock blocks no one.
 **What forbids it today:**
 
 - a tier root carries a marker naming one overlay, and a second overlay reads it as `FOREIGN`
-  (`src/sosfs/state/lifecycle.py:197-198`) and is refused at start;
+  (`src/terrace/state/lifecycle.py:197-198`) and is refused at start;
 - a bundle's member index lives in the overlay's own database (`archive_index`,
-  `src/sosfs/state/schema.sql:135-145`), so a second mount would scan every bundle again;
+  `src/terrace/state/schema.sql:135-145`), so a second mount would scan every bundle again;
 - a tier's limits and its eviction assume one owner;
 - a bundle's working copy sits at a path of its own outside every tier
   ([`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md)).

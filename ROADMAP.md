@@ -77,19 +77,19 @@ put back to its source on its own delay or under pressure on scratch. A signal c
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
 
-### Rename `sosfs` to Terrace
+### Rename the project to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
 First, because the cost grows with every later cycle and the tree is quiet only while the parked cycles
 are held: 498 occurrences across 83 files at `6419966`, before the factory added its own. The mechanical
 two-thirds — distribution name, package directory, imports, class names, test modules, CI, prose — is a
-rename. The other third is not: the `SOSFS_*` environment prefix, the `user.sosfs.*` xattr namespace, the
-`.sosfs/marker` and `.sosfs/partial` directories in every managed tier root, and the default state path
-are **on-disk and user-visible contracts**, and changing the marker directory without a decision about
+rename. The other third is not: the environment prefix, the xattr namespace, the marker and partial
+directories in every managed tier root, and the default state path are **on-disk and user-visible
+contracts**, and changing the marker directory without a decision about
 existing overlays turns every managed location into an evaporated tier on the next mount. Nothing is
 deployed, which is what makes that decision cheap now. Stable row ids were ruled in on 2026-11-11, and
-the schema bump can ride with this format break. `PLAN.md` records `sosfs` as a technology decision
+the schema bump can ride with this format break. `PLAN.md` records the old name as a technology decision
 rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before it touches
 code.
 
@@ -304,7 +304,7 @@ durable even though its data is — a design decision rather than a drive-by fix
 docstring claims an atomicity S3 does not have. Placed before the audit, which reads several of these
 columns.
 
-### `sosfs audit` — reconcile the state database against the tiers
+### `terrace audit` — reconcile the state database against the tiers
 
 **Seed:** [`issues/audit-command.md`](issues/audit-command.md) · `feature` · appetite big
 
@@ -317,7 +317,7 @@ counters); whichever of the two is taken first builds it. It also defines what "
 fault-injection suite and unblocks the commit cycle. High-blast-radius as a whole, being the only
 component licensed to delete residency rows and quarantine files on its own reading of the world.
 
-### `sosfs commit` — finalize the source offline
+### `terrace commit` — finalize the source offline
 
 **Seed:** [`issues/offline-commit-command.md`](issues/offline-commit-command.md) · `feature` · appetite big
 
@@ -333,7 +333,7 @@ its calling thread; the seed carries that contradiction.
 
 **Seed:** [`issues/control-channel-and-status.md`](issues/control-channel-and-status.md) · `feature` · appetite small
 
-`src/sosfs/control/` does not exist. A unix-domain socket in the state directory serving
+`src/terrace/control/` does not exist. A unix-domain socket in the state directory serving
 line-oriented JSON, wired into the mount daemon, with a client library; `status` reading it live and
 falling back to a direct database read when no mount is running; `flush` forcing an upstream commit
 for the whole overlay or a subtree. The first cheap entry after two big ones, and it reuses the
@@ -489,7 +489,7 @@ detach-then-commit pattern depends on the lifecycle section and joins when that 
 
 What turns the sections above into a tagged version.
 
-### `sosfs config`
+### `terrace config`
 
 **Seed:** [`issues/config-command.md`](issues/config-command.md) · `feature` · appetite small
 

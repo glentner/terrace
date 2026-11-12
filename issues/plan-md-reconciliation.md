@@ -20,18 +20,18 @@ promise as coverage that exists. The audit found `PLAN.md` internally inconsiste
 behind the code in several others. All citations below were re-verified while writing this seed.
 
 **1. `fsck` versus `audit` — `PLAN.md` contradicting itself.** `PLAN.md:50` summarizes the CLI as
-`sosfs mount|umount|status|flush|fsck|config`. Its own CLI-surface table a hundred lines later
+`terrace mount|umount|status|flush|fsck|config`. Its own CLI-surface table a hundred lines later
 (`PLAN.md:452-465`) lists seven commands including `audit` and no `fsck`, and the code implements
-`AuditApp` (`src/sosfs/__init__.py:167-171`, registered at `:219-224`). No `fsck` command exists or
+`AuditApp` (`src/terrace/__init__.py:167-171`, registered at `:219-224`). No `fsck` command exists or
 is planned. The same line also omits `commit`, which is the project's differentiating feature. This
 one needs no judgment about code: the document disagrees with itself, and the table is right.
 
 **2. `umount` takes a spec file, not a mountpoint, and the code is the better design.** The CLI table
-reads `sosfs umount <mountpoint>`. The implementation takes `<spec>` (`src/sosfs/__init__.py:104-108`
+reads `terrace umount <mountpoint>`. The implementation takes `<spec>` (`src/terrace/__init__.py:104-108`
 usage, `:128-129` argument) and resolves the daemon through the pidfile in `spec.state`. That
 indirection is what makes the cross-host guard possible — `fuse/mount.py:125-127` reads the recorded
 host out of the pidfile and refuses with `Overlay 'name' is mounted on <host>, not this host —
-unmount it there, or finalize with 'sosfs commit'`. Reconciling in the other direction would delete a
+unmount it there, or finalize with 'terrace commit'`. Reconciling in the other direction would delete a
 working guard, so `PLAN.md` is the document that is wrong and the reconciliation has to record *why*,
 or a later reviewer holding the plan as the contract will file the working behavior as a defect.
 
@@ -119,7 +119,7 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
 `git grep`; none needs a mount.
 
 - **R1** — `git grep -n fsck PLAN.md` SHALL return nothing, and the summary line and the CLI-surface
-  table SHALL name the same subcommands as `uv run sosfs --help` — including `commit`.
+  table SHALL name the same subcommands as `uv run terrace --help` — including `commit`.
 - **R2** — The CLI table's `umount` row SHALL name a spec file, and SHALL state that the pidfile in
   `spec.state` is what makes the cross-host guard possible, so the design decision is recorded and
   not merely overwritten.

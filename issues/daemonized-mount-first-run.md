@@ -13,19 +13,19 @@ lane: public
 
 ## Problem
 
-`sosfs mount spec.toml /mnt/space` — no flags, the documented happy path, the default of the only
+`terrace mount spec.toml /mnt/space` — no flags, the documented happy path, the default of the only
 fully-implemented subcommand — exits 1 with a `FileNotFoundError` the first time an overlay is mounted
 against a state directory that does not exist yet.
 
-The ordering is four lines apart. `MountApp.run` (`src/sosfs/__init__.py:101`) passes
+The ordering is four lines apart. `MountApp.run` (`src/terrace/__init__.py:101`) passes
 `foreground=self.foreground or self.debug`, so without `-f` or `-d` `Mount.run` takes
-`_daemonize_and_serve` (`src/sosfs/fuse/mount.py:364`). That method double-forks, then calls
+`_daemonize_and_serve` (`src/terrace/fuse/mount.py:364`). That method double-forks, then calls
 `self._detach_streams()` at `mount.py:383` — *before* `self.start()` at `mount.py:385`.
 `_detach_streams` (`mount.py:394`) opens `Path(self.spec.state) / LOG_NAME` with
 `O_WRONLY | O_CREAT | O_APPEND` at `mount.py:400`. `O_CREAT` creates the file; it does not create the
 directory holding it, and nothing has created that directory yet. The two places that do are both
 downstream of `Mount.start()` (`mount.py:205`): `ExclusiveLock.acquire()` at
-`src/sosfs/state/db.py:181` and `OverlayEngine.start()` at `src/sosfs/engine/overlay.py:98`, each
+`src/terrace/state/db.py:181` and `OverlayEngine.start()` at `src/terrace/engine/overlay.py:98`, each
 calling `mkdir(parents=True, exist_ok=True)`.
 
 Measured: against a fresh `state =` path the documented command exits **1** with
@@ -65,7 +65,7 @@ covers the daemonized branch."
 
 ## Outcome / vision
 
-A first-ever `sosfs mount spec.toml /mnt/space` mounts. The daemonized path is exercised by a test, so
+A first-ever `terrace mount spec.toml /mnt/space` mounts. The daemonized path is exercised by a test, so
 the next edit to the double-fork sequence has something to break. And when the daemon genuinely cannot
 open its log, the launching process says so instead of exiting 1 on a closed pipe.
 
@@ -73,7 +73,7 @@ open its log, the launching process says so instead of exiting 1 on a closed pip
 
 Draft R-IDs, to be firmed up at promotion.
 
-- **R1** — When `sosfs mount <spec> <mountpoint>` runs without `-f` and `spec.state` names a directory
+- **R1** — When `terrace mount <spec> <mountpoint>` runs without `-f` and `spec.state` names a directory
   that does not exist, the mount command shall exit 0, the overlay shall be mounted, and `mount.log`
   shall exist inside the created state directory.
 - **R2** — While the state directory already holds a `mount.log` from a previous run, a subsequent

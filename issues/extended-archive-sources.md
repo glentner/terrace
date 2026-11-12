@@ -20,7 +20,7 @@ Sharded sources and the transfer priority lane were split out on 2026-11-04 into
 [`issues/sharded-archive-sources.md`](sharded-archive-sources.md) and
 [`issues/transfer-priority-lane.md`](transfer-priority-lane.md).
 
-**SFTP and Globus inner locations.** `InnerLocation` (`src/sosfs/tier/archive.py:53-75`) is a
+**SFTP and Globus inner locations.** `InnerLocation` (`src/terrace/tier/archive.py:53-75`) is a
 `runtime_checkable` Protocol with one attribute and three methods — `signature()`, `open_read()`,
 `atomic_write()` — and `inner_location()` (`archive.py:162-166`) is the two-branch selector that
 builds one from a parsed `location` spec. Both backings are additive: a class and a branch. Globus is

@@ -14,8 +14,8 @@ lane: public
 ## Problem
 
 The engine's contract is written down twice. `OverlayEngine`'s docstring
-(`src/sosfs/engine/overlay.py:74-76`) says failures "raise standard `OSError` subclasses so the
-adapter maps errno directly", and `OverlayOperations`' docstring (`src/sosfs/fuse/adapter.py:44-46`)
+(`src/terrace/engine/overlay.py:74-76`) says failures "raise standard `OSError` subclasses so the
+adapter maps errno directly", and `OverlayOperations`' docstring (`src/terrace/fuse/adapter.py:44-46`)
 draws the conclusion: "the engine raises standard `OSError` subclasses, which mfusepy turns into
 `-errno`, so error mapping needs no code here." The adapter is built on that promise — its only
 errno-raising sites are the unknown-handle `EBADF` at `adapter.py:75` and the missing-xattr `ENOATTR`
@@ -25,18 +25,18 @@ Three paths break the promise.
 
 **`_serve` raises `EngineError` when no resident copy exists.** `overlay.py:627` raises
 `EngineError(f'No resident copy of {entry.path}')` when `catalog.fastest_copy` returns `None` for a
-cataloged entry. `EngineError` subclasses `SOSFSError`, which subclasses `Exception`
-(`overlay.py:46`, `src/sosfs/core/exceptions.py:32`) — not `OSError`. It reaches libfuse through
+cataloged entry. `EngineError` subclasses `TerraceError`, which subclasses `Exception`
+(`overlay.py:46`, `src/terrace/core/exceptions.py:32`) — not `OSError`. It reaches libfuse through
 `open` as an unhandled exception, and what the application sees is the binding's fallback rather than
 an errno the engine chose. Found by reading the call graph, not reproduced: it requires a catalog
-entry whose residency rows have all vanished, which is a state `sosfs audit` is meant to repair and
+entry whose residency rows have all vanished, which is a state `terrace audit` is meant to repair and
 today nothing repairs.
 - 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
 
 **Writing through a handle to an unlinked file raises `LookupError`.** `write` calls
 `_mark_handle_dirty` before the bytes land (`overlay.py:650-651`, the metadata-before-acknowledgment
 ordering), which calls `journal.mark_dirty` at `overlay.py:662`. Once the entry's residency rows are
-gone, the residency `UPDATE` at `src/sosfs/state/journal.py:149-150` matches zero rows and
+gone, the residency `UPDATE` at `src/terrace/state/journal.py:149-150` matches zero rows and
 `journal.py:152` raises `LookupError(f'No copy of {path} in tier {tier}')`. Reproduced: against a file
 that already exists in the source, the sequence open → unlink → write yields
 `LookupError('No copy of /x.dat in tier scratch')`.
@@ -66,7 +66,7 @@ tested and does not work.
 A fourth site belongs to the same fix, found by inspection while writing this seed: `eligible_tier`
 raises `EngineError` at `overlay.py:200` when no tier is passthrough-capable, and it is called from
 both `create` (`overlay.py:337`) and `_serve` (`overlay.py:629`) — callback paths.
-`OverlaySpec._validate_stack` (`src/sosfs/tier/spec.py:304`) does not require an S3 or archive source
+`OverlaySpec._validate_stack` (`src/terrace/tier/spec.py:304`) does not require an S3 or archive source
 to be backed by a POSIX staging tier, so that configuration parses and then throws a non-`OSError` out
 of the first `open`.
 - 2026-11-09: the `overlay.py` line numbers above hold at `6a046b4`.
@@ -81,7 +81,7 @@ GOAL's Non-goal).
   `truncate` at the new path whose `_serve` promotes the file from a slower stage to a faster one that
   admits it copies from the logical new path, and `transfer.copy` raises
   `TierError('No file at /moved/s.txt in tier scratch')` (`engine/transfer.py:91`). `TierError` is a
-  `SOSFSError`, not an `OSError`. Nothing is marked dirty and no intent is left open. Reproduced by
+  `TerraceError`, not an `OSError`. Nothing is marked dirty and no intent is left open. Reproduced by
   injection on a three-tier stack at `9169405`, and identically with `overlay.py` as at `630a406`.
 
 ## Why it was deferred

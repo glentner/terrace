@@ -47,7 +47,7 @@ from the list rather than rediscovering it.
    saved, and pays nothing for data movement — and it needs its own R-ID rather than being inferred
    from the signal handlers.
 5. **The job-script usage pattern.** Mount at the top, run, then either `umount` (drain), `umount
-   --detach` (rescue and stop), or let the time limit do it, with `sosfs commit` from a cheap job or
+   --detach` (rescue and stop), or let the time limit do it, with `terrace commit` from a cheap job or
    a login node afterwards. Whether the mount runs in the foreground under the script's control or
    daemonized, and where its state directory lives so that the later commit can see it, is unwritten.
 
@@ -68,15 +68,14 @@ On a cluster whose center has installed it, a researcher's batch script reads:
 
 ```bash
 module load terrace
-sosfs mount spec.toml "$MOUNT"
+terrace mount spec.toml "$MOUNT"
 python train.py --data "$MOUNT/dataset"
-sosfs umount --detach spec.toml
+terrace umount --detach spec.toml
 ```
 
-(the entry point under its current name; [`issues/rename-to-terrace.md`](rename-to-terrace.md)
-changes it) and works the first time. If the job hits its time limit instead of reaching the last line, the
+and works the first time. If the job hits its time limit instead of reaching the last line, the
 scheduler's SIGTERM rescues node-local dirty data to shared storage before SIGKILL, and a later
-`sosfs commit` finalizes the source off the allocation. The center maintains one module; nobody files
+`terrace commit` finalizes the source off the allocation. The center maintains one module; nobody files
 a ticket to make it work.
 
 ## Sketch of the acceptance criteria
@@ -90,9 +89,9 @@ or a faithful stand-in; none is checkable in CI as it stands.
 - **R2** — WHEN the batch scheduler sends SIGTERM at a job's time limit, the mount SHALL complete the
   rescue of node-local dirty data to the nearest shared tier and settle `shutdown_state = detached`
   before the site's grace period expires, with `drain_timeout` derived from or bounded by that grace
-  period; and WHEN SIGKILL lands before the rescue completes, the next `sosfs commit` SHALL report
+  period; and WHEN SIGKILL lands before the rescue completes, the next `terrace commit` SHALL report
   exactly which files were not rescued.
-- **R3** — WHEN a job that detached is followed by `sosfs commit` from a different host that sees the
+- **R3** — WHEN a job that detached is followed by `terrace commit` from a different host that sees the
   shared tiers and the state directory, the source SHALL hold every byte the job wrote.
 - **R4** — THE documentation SHALL carry a job-script example and a modulefile example that run
   verbatim on a reference cluster, naming no site-specific path.
@@ -103,10 +102,10 @@ or a faithful stand-in; none is checkable in CI as it stands.
   internal hostnames or site tool names into this seed or the cycle that adopts it. "HPC center" and
   "batch scheduler" are the vocabulary.
 - Open question — **foreground or daemonized in a job.** A foreground mount backgrounded by the job
-  script (`sosfs mount -f … &`) keeps the daemon in the job's process tree, where the scheduler's
+  script (`terrace mount -f … &`) keeps the daemon in the job's process tree, where the scheduler's
   signal can reach it; the daemonized default may escape it. Which one the documentation recommends
   follows from finding 4.
-- Open question — **where the state directory lives.** It must survive the job for `sosfs commit` to
+- Open question — **where the state directory lives.** It must survive the job for `terrace commit` to
   run later, so it cannot sit on node-local storage alone, and `begin_mount` records the host so a
   crash report can name the node (`AGENTS.md` § *Invariants* § 8).
 - Related: the toolchain repair (landed 2026-11-05, `spec/toolchain-repair/`) — setgid project

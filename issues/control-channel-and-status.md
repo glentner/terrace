@@ -5,7 +5,7 @@ appetite: small
 lane: public
 ---
 
-# Control channel, `sosfs status` and `sosfs flush`
+# Control channel, `terrace status` and `terrace flush`
 
 > **Candidate, not a contract.** `code terrace feature` promotes this into a `spec/{slug}/GOAL.md`, and
 > that promotion is where appetite, non-goals and the R-IDs get negotiated. `status: unshaped` means
@@ -14,26 +14,26 @@ lane: public
 ## Problem
 
 A mounted overlay is opaque. There is no way to ask a running mount what it is doing, and no way to
-tell it to commit now. `sosfs status` and `sosfs flush` are both stubs (`src/sosfs/__init__.py:146`
-and `:153`) that raise `RuntimeError('Not implemented: …')`, and `src/sosfs/control/` — the package
+tell it to commit now. `terrace status` and `terrace flush` are both stubs (`src/terrace/__init__.py:146`
+and `:153`) that raise `RuntimeError('Not implemented: …')`, and `src/terrace/control/` — the package
 `AGENTS.md` lists in the repository layout and `PLAN.md` § *Control channel* specifies — does not
 exist on disk. An operator debugging a mount that is not committing has one instrument: the log file.
 
 `PLAN.md` asks for a Unix domain socket in the overlay's state directory serving a small
-line-oriented JSON protocol, with `sosfs status` and `sosfs flush [path]` talking to the live mount
+line-oriented JSON protocol, with `terrace status` and `terrace flush [path]` talking to the live mount
 through it, and `status` also able to read the SQLite state directly when no mount is running. Every
 piece of data those two commands need is already queryable: `TierRegistry.usage`
-(`src/sosfs/state/registry.py:161`) gives per-tier bytes and file counts, `Journal.queued`
-(`src/sosfs/state/journal.py:187`) gives the pending write-back rows, `Journal.pending`
+(`src/terrace/state/registry.py:161`) gives per-tier bytes and file counts, `Journal.queued`
+(`src/terrace/state/journal.py:187`) gives the pending write-back rows, `Journal.pending`
 (`journal.py:275`) gives unresolved intents, and `OverlayEngine.flush`
-(`src/sosfs/engine/overlay.py:870`) already pushes everything queued to the source ignoring policy
+(`src/terrace/engine/overlay.py:870`) already pushes everything queued to the source ignoring policy
 clocks, namespace ops first. Nothing in this cycle invents a new engine capability; it exposes the
 ones that exist.
 - 2026-11-06: the `journal.py` and `overlay.py` line numbers above hold at `141aa86`;
   `deferred-rename-source-orphan` moved the code. On its tree `Journal.queued` is at `journal.py:188`,
-  `Journal.pending` at `journal.py:306` and `OverlayEngine.flush` at `src/sosfs/engine/overlay.py:926`.
+  `Journal.pending` at `journal.py:306` and `OverlayEngine.flush` at `src/terrace/engine/overlay.py:926`.
 
-The server has a natural home and a defined shape. `Mount.start` (`src/sosfs/fuse/mount.py:205-224`)
+The server has a natural home and a defined shape. `Mount.start` (`src/terrace/fuse/mount.py:205-224`)
 already starts two `StateThread` pumps after the pidfile is written, and a third fits the same slot.
 `core/fsm.py:28` defines the contract those threads follow — a nested `states` enum containing
 `START` and `FINAL`, one `on_<state>` method per non-`FINAL` member checked at class-definition time,
@@ -54,13 +54,13 @@ without `lifecycle.begin_mount`, which `OverlayEngine.start` calls unconditional
 `issues/audit-command.md` builds. Building it twice is the failure mode this cycle's position in the
 queue is meant to avoid.
 - 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-  the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
+  the `begin_mount` call is at `src/terrace/engine/overlay.py:117`.
 
 ## Why it was deferred
 
 Unbuilt work, scheduled as Phase 10 and never reached. Not a defect: nothing regresses because the
-control channel is absent, and the observability xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`,
-`src/sosfs/fuse/adapter.py:32-33`) cover the per-file case for tests today. It stays queued behind the
+control channel is absent, and the observability xattrs (`user.terrace.tiers`, `user.terrace.dirty`,
+`src/terrace/fuse/adapter.py:32-33`) cover the per-file case for tests today. It stays queued behind the
 audit and commit cycles because its offline read path is theirs, and because a `flush` command is
 most useful once the write-back defects ahead of it in the queue are fixed — a `flush` that reports
 success while a queued rename orphaned its source object (fixed by the
@@ -69,30 +69,30 @@ all.
 
 ## Outcome / vision
 
-`sosfs status spec.toml` prints a per-tier table — used bytes against quota, file count, dirty count,
+`terrace status spec.toml` prints a per-tier table — used bytes against quota, file count, dirty count,
 transfer activity — sourced over the socket when a mount is live and read straight from SQLite when
 one is not, with the offline form additionally reporting the recorded `shutdown_state` and mounting
-host so an operator can tell "cleanly unmounted" from "crashed on node042". `sosfs flush spec.toml
+host so an operator can tell "cleanly unmounted" from "crashed on node042". `terrace flush spec.toml
 [/sub/tree]` forces the upstream commit now, for the whole overlay or one subtree, and reports what
 it settled. The socket server is a `StateThread` started and stopped with the other pumps, and the
-client is a small library in `src/sosfs/control/` that both commands and future tooling use.
+client is a small library in `src/terrace/control/` that both commands and future tooling use.
 
 ## Sketch of the acceptance criteria
 
 Draft R-IDs, to be firmed up at promotion.
 
-- **R1** — WHILE a mount is live, `sosfs status spec.toml` SHALL exit 0 and print one row per tier
+- **R1** — WHILE a mount is live, `terrace status spec.toml` SHALL exit 0 and print one row per tier
   carrying used bytes, quota, file count and dirty count, sourced over the control socket. "Live"
   here can mean a `Mount` started without FUSE; if the criterion is instead graded against a real
   mount it is Linux-only and CI runs no integration job, so name the pass count rather than the exit
   status.
-- **R2** — WHILE no mount is running, `sosfs status spec.toml` SHALL exit 0 and print the same table
+- **R2** — WHILE no mount is running, `terrace status spec.toml` SHALL exit 0 and print the same table
   read directly from SQLite, plus the recorded `shutdown_state` and mounting host. Gradeable
   mount-free against a state directory built by the engine API.
-- **R3** — WHEN `sosfs flush spec.toml /sub/tree` is invoked against a live mount, the command SHALL
+- **R3** — WHEN `terrace flush spec.toml /sub/tree` is invoked against a live mount, the command SHALL
   report the number of rows settled, and every file under that subtree SHALL be present at the source
   with its current contents when the command returns.
-- **R4** — IF the control socket is absent, THEN `sosfs flush` SHALL exit non-zero saying no mount is
+- **R4** — IF the control socket is absent, THEN `terrace flush` SHALL exit non-zero saying no mount is
   running; IF the socket exists but no process accepts on it, THEN it SHALL exit non-zero saying the
   mount is unreachable. The two messages SHALL differ.
 - **R5** — WHEN the mount shuts down by any path — drain, detach or force — the socket file SHALL be
@@ -120,7 +120,7 @@ Draft R-IDs, to be firmed up at promotion.
   the two commands their one-line contracts. Anything this cycle settles about framing, the socket
   location or the payload shape is a design decision and belongs back in `PLAN.md`.
 - **CLI wiring.** Two subcommands, four places each: the `Application` subclass, `APP_HELP`
-  (`src/sosfs/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
+  (`src/terrace/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
   one is silent in exactly one direction — a command in `commands` but absent from `APP_HELP` fails
   `tests/test_cli.py:31`, while one added to `APP_HELP` and not to `commands` passes and fails only at
   invocation. `tests/test_cli.py:42` parametrizes the stub list `['status', 'flush', 'commit',
@@ -131,7 +131,7 @@ Draft R-IDs, to be firmed up at promotion.
 - Open questions for shaping, each with its real trade-off:
   - Where does the socket live? `PLAN.md` says the state directory, alongside `mount.pid` — but the
     state directory is required to be durable and is *recommended* to be on shared storage so
-    `sosfs commit` can run from another host, and a Unix domain socket on NFS or Lustre is not
+    `terrace commit` can run from another host, and a Unix domain socket on NFS or Lustre is not
     portable. Moving it to a host-local runtime directory makes it work everywhere and creates a
     discovery problem the client has to solve, probably by recording the path in the pidfile the
     daemon already writes.

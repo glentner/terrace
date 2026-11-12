@@ -5,7 +5,7 @@ appetite: big
 lane: public
 ---
 
-# `sosfs commit` — finalize the source offline
+# `terrace commit` — finalize the source offline
 
 > **Candidate, not a contract.** `code terrace feature` promotes this into a `spec/{slug}/GOAL.md`, and
 > that promotion is where appetite, non-goals and the R-IDs get negotiated. `status: unshaped` means
@@ -18,28 +18,28 @@ This is the feature the whole detach lifecycle was built for, and it does not ex
 tiers, computation finishes, and the write-back clocks have not pushed the recent outputs upstream. A
 full drain would finalize the source but burn expensive allocation time on data movement — worse when
 the source is an S3 bucket or an archive that has to be re-packed. So the job ends with
-`sosfs umount --detach spec.toml`, which rescues node-local dirty data one hop to a shared tier and
-stops in seconds, and a later single-CPU job runs `sosfs commit spec.toml` to finalize the source off
+`terrace umount --detach spec.toml`, which rescues node-local dirty data one hop to a shared tier and
+stops in seconds, and a later single-CPU job runs `terrace commit spec.toml` to finalize the source off
 the GPU bill.
 
-The first half ships. `sosfs umount --detach` works, `rescue()` works, and `shutdown_state =
+The first half ships. `terrace umount --detach` works, `rescue()` works, and `shutdown_state =
 'detached'` is written to say metadata is trusted. The second half is `CommitApp(StubApp)`
-(`src/sosfs/__init__.py:160-164`), which raises `RuntimeError('Not implemented: sosfs commit (see
+(`src/terrace/__init__.py:160-164`), which raises `RuntimeError('Not implemented: terrace commit (see
 ROADMAP.md, Phase 9)')`. The documented job-script pattern therefore terminates in a detach that
 nothing can finalize, and the data sits on scratch indefinitely with the source stale. An operator
 who follows `PLAN.md` today gets the cheap half of a two-command workflow.
 
-The moves themselves are built and tested. `drain()` (`src/sosfs/engine/drain.py:74-109`) commits
+The moves themselves are built and tested. `drain()` (`src/terrace/engine/drain.py:74-109`) commits
 namespace ops first and then dirty files; `dirty_copies()` (`drain.py:50-71`) computes the loss-risk
 ordering — most volatile holder first, scope dominating position — and is shared with the rescue path
-so the two cannot drift; `commit_upstream` (`src/sosfs/engine/overlay.py:811`) does the hop. What is
+so the two cannot drift; `commit_upstream` (`src/terrace/engine/overlay.py:811`) does the hop. What is
 missing is everything around them:
 - 2026-11-06: `overlay.py:811` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-  `commit_upstream` is at `src/sosfs/engine/overlay.py:867`.
+  `commit_upstream` is at `src/terrace/engine/overlay.py:867`.
 
 * **The exclusive lock and the offline construction path.** `ExclusiveLock`
-  (`src/sosfs/state/db.py:157`) records the holder as `host:pid` in the lockfile (`db.py:192`), and
-  `Mount.start` (`src/sosfs/fuse/mount.py:212-223`) is the template for the lock → engine → work
+  (`src/terrace/state/db.py:157`) records the holder as `host:pid` in the lockfile (`db.py:192`), and
+  `Mount.start` (`src/terrace/fuse/mount.py:212-223`) is the template for the lock → engine → work
   ordering with a compensating release. But `OverlayEngine.start` calls `lifecycle.begin_mount`
   unconditionally (`overlay.py:108`), which bumps the generation and sets
   `shutdown_state = 'mounted'`. A commit that used it would set the crash flag on an overlay that is
@@ -47,7 +47,7 @@ missing is everything around them:
   mount. Commit needs the tier attach without the lifecycle transition — the same offline path
   `issues/audit-command.md` introduces.
   - 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan`
-    tree the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
+    tree the `begin_mount` call is at `src/terrace/engine/overlay.py:117`.
 * **The audit hand-off.** After a detach, commit proceeds directly: metadata is trusted, no walk.
   After a crash it runs the audit first, automatically. Neither branch can be written before the
   audit exists, and the branch condition is the `shutdown_state` value `fuse/mount.py` settles —
@@ -71,7 +71,7 @@ missing is everything around them:
 
 One promise in `PLAN.md` is contradicted by the code as it stands rather than merely unimplemented.
 "Transfers run in parallel" at deferred commit: `TransferPool` builds a `ThreadPoolExecutor`
-(`src/sosfs/engine/transfer.py:62`) and exposes `submit` (`transfer.py:112-115`), and **`submit` has
+(`src/terrace/engine/transfer.py:62`) and exposes `submit` (`transfer.py:112-115`), and **`submit` has
 no caller under `src/`** — the only reference is `tests/engine/test_transfer.py:113`. Every copy in
 the system runs on the calling thread through `TransferPool.copy`, and `drain()` iterates
 `dirty_copies()` calling `commit_upstream` one at a time. Commit is the one path where parallelism is
@@ -79,7 +79,7 @@ unambiguously safe and valuable — no mount, no FUSE callbacks, an exclusive lo
 up front — so this cycle either adopts the pool for it or `PLAN.md` stops promising it. Under the
 plan-drift rule that decision is made in `PLAN.md` before the code.
 - 2026-11-06: `transfer.py:112-115` above holds at `141aa86`; on the `deferred-rename-source-orphan`
-  tree `submit` is at `src/sosfs/engine/transfer.py:122-125`, and it still has no caller under `src/`.
+  tree `submit` is at `src/terrace/engine/transfer.py:122-125`, and it still has no caller under `src/`.
 
 ## Why it was deferred
 
@@ -103,17 +103,17 @@ once, and reports by path anything it could not reach — naming the host that h
 
 Draft R-IDs, to be firmed up at promotion.
 
-- **R1** — WHILE a mount daemon holds the state lock, `sosfs commit spec.toml` SHALL exit non-zero
+- **R1** — WHILE a mount daemon holds the state lock, `terrace commit spec.toml` SHALL exit non-zero
   with `DatabaseLocked` naming the holder as `host:pid`, and SHALL move no data and write no row.
-- **R2** — WHEN an overlay was detached with queued dirty state, `sosfs commit spec.toml` SHALL exit
+- **R2** — WHEN an overlay was detached with queued dirty state, `terrace commit spec.toml` SHALL exit
   0, leave zero rows in `writeback`, leave every file's newest bytes present at the source, and settle
   `shutdown_state = 'clean'` — without performing an audit walk.
-- **R3** — WHILE the recorded `shutdown_state` is `mounted`, `sosfs commit` SHALL run the audit first
+- **R3** — WHILE the recorded `shutdown_state` is `mounted`, `terrace commit` SHALL run the audit first
   and say on stderr that it did, before moving any data.
 - **R4** — WHEN `--direct` is passed, the source SHALL end byte-identical to what the default cascade
   produces from the same starting state, and no residency row for a skipped intermediate tier SHALL
   still claim a current copy.
-- **R5** — IF a `scope = "node"` tier is unreachable from this host, THEN `sosfs commit` SHALL name
+- **R5** — IF a `scope = "node"` tier is unreachable from this host, THEN `terrace commit` SHALL name
   the mounting host recorded in the `overlay` row, report each affected path, and exit 2 without
   rolling anything back; WHEN `--forfeit` is also passed, it SHALL roll those entries back to their
   last committed version and name each rollback by path.
@@ -126,7 +126,7 @@ Draft R-IDs, to be firmed up at promotion.
   already matches the upstream object SHALL be skipped and counted as skipped in the report. Depends
   on checksum recording, which nothing implements today (`issues/invariant-audit-gaps.md`).
 - **R8** — WHEN a commit is interrupted and re-run, it SHALL converge without duplicating a transfer
-  or leaving an unresolved `intent` row, and a following `sosfs audit` SHALL exit 0.
+  or leaving an unresolved `intent` row, and a following `terrace audit` SHALL exit 0.
 
 ## Notes
 
@@ -147,7 +147,7 @@ Draft R-IDs, to be firmed up at promotion.
   command finalizes. The parallel-transfer promise lives in the same section and needs reconciling
   either way this cycle goes.
 - **CLI wiring.** Adding a real `commit` touches four places: the `Application` subclass, `APP_HELP`
-  (`src/sosfs/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
+  (`src/terrace/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
   one is silent in one direction only — a command in `commands` but absent from `APP_HELP` fails
   `tests/test_cli.py:31`, while one added to `APP_HELP` and not to `commands` passes and fails at
   invocation. `tests/test_cli.py:42` parametrizes the stub list and must lose `commit` in the same

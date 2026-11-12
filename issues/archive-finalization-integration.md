@@ -86,7 +86,7 @@ commit boundary, not a wall-clock time.
 - **R5** — WHEN an overlay with an archive source is unmounted after N file operations, the number
   of whole-archive rewrites SHALL be independent of N, and the source archive's member set, modes
   and mtimes SHALL equal what the same operations produce against a plain-directory oracle.
-- **R6** — WHEN `sosfs commit` finalizes an archive source offline, it SHALL perform one re-pack, or
+- **R6** — WHEN `terrace commit` finalizes an archive source offline, it SHALL perform one re-pack, or
   one reconstruct-and-push, for the whole commit — the same post-condition as R1 and R3 from the
   offline path. Implemented by
   [`offline-commit-command.md`](offline-commit-command.md); named here so the two cycles agree on one
@@ -109,7 +109,7 @@ commit boundary, not a wall-clock time.
   [`crash-fault-injection-suite.md`](crash-fault-injection-suite.md) needs a mid-re-sync kill point,
   which cannot exist until `resync` has a caller.
 - `PLAN.md` → ArchiveTier, direct-update and staged re-sync (:129-147); → Deferred commit;
-  → `sosfs commit` (:300-334). The `drain.py:77-81` docstring is invalidated by this cycle and is a
+  → `terrace commit` (:300-334). The `drain.py:77-81` docstring is invalidated by this cycle and is a
   same-commit-rule target.
 - Open questions a shaping conversation has to settle:
   1. **Where does batching live?** A `Tier`-protocol extension (`begin_batch` / `end_batch`, or a

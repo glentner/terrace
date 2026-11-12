@@ -12,7 +12,7 @@ lane: public
 
 ## Problem
 
-`src/sosfs/tier/archive.py` is 678 lines implementing the entire `Tier` protocol over ZIP, TAR and
+`src/terrace/tier/archive.py` is 678 lines implementing the entire `Tier` protocol over ZIP, TAR and
 tar.gz in both of the operating modes `PLAN.md` describes, and it is reachable from nothing.
 `uv run pytest -m unit tests/tier/test_archive.py` reports 36 passed in 0.85 s;
 `tests/tier/test_spec.py:313-356` adds six more over `LocationSpec`. Every one of those tests
@@ -20,12 +20,12 @@ constructs the adapter by hand. No overlay spec can name it.
 
 Three gates stand in the way, in the order a spec file hits them.
 
-`TIER_KEYS` (`src/sosfs/tier/spec.py:28`) is `{name, type, path, url, s3, role, scope, quota,
+`TIER_KEYS` (`src/terrace/tier/spec.py:28`) is `{name, type, path, url, s3, role, scope, quota,
 writeback}` — no `location`, no `staging`, no `sync`, no `sharded`. `_reject_unknown` runs at
 `spec.py:204`, before the type is examined, so the first archive-shaped key kills the parse.
 `SUPPORTED_TYPES` (`spec.py:25`) is `{'posix', 's3'}` while `TIER_TYPES` (`spec.py:24`) admits
 `zip`, `tar` and `tar.gz`; `spec.py:209-210` raises "not yet supported" for the three it names but
-does not accept. And `OverlayEngine.start` (`src/sosfs/engine/overlay.py:109-126` (holds at `5e0d997`)) has exactly two
+does not accept. And `OverlayEngine.start` (`src/terrace/engine/overlay.py:109-126` (holds at `5e0d997`)) has exactly two
 construction branches, `if tier_spec.type == 's3'` and an `else` that builds a `PosixTier` rooted at
 `tier_spec.path` — an archive spec that got past the parser would be constructed as a POSIX tier
 rooted at the archive *file*.
@@ -34,7 +34,7 @@ Reproduced against the direct-update ZIP example at `PLAN.md:424-429`, copied ve
 `[overlay]`-plus-`[[tier]]` shape the parser requires:
 
 ```
-$ uv run python -c "from sosfs.tier.spec import OverlaySpec; OverlaySpec.load('/tmp/arc-spec.toml')"
+$ uv run python -c "from terrace.tier.spec import OverlaySpec; OverlaySpec.load('/tmp/arc-spec.toml')"
 SpecError: Unknown key(s) in tier 'archive': location
 ```
 
@@ -61,11 +61,11 @@ one has a cost paid at the wrong time.
 
 **An archive tier has nowhere to put its managed-location marker.** The engine registers every tier
 and refuses to mount on any `MarkerStatus` but `OK` (`overlay.py:127-128` (holds at `141aa86`)). `TierRegistry.attach`
-(`state/registry.py:106-110`) writes `.sosfs/marker` under a POSIX root; `attach_tier`
+(`state/registry.py:106-110`) writes `.terrace/marker` under a POSIX root; `attach_tier`
 (`registry.py:112-117`) delegates to `tier.read_marker` / `tier.write_marker`, which only `S3Tier`
 implements (`s3.py:286`, `:294`). `ArchiveTier` implements neither, and it cannot host the marker
 inside itself: `_guard` (`archive.py:271-274`) raises `PermissionError` for any path under
-`.sosfs`. An unmarked managed location is what the audit reads as tier evaporation.
+`.terrace`. An unmarked managed location is what the audit reads as tier evaporation.
 
 **An archive source with no POSIX staging tier is caught at first write, not at parse.**
 `eligible_tier` falls through to `overlay.py:200-201` (holds at `141aa86`) and raises `EngineError: No
@@ -153,7 +153,7 @@ Draft R-IDs, to be firmed up at promotion.
 - [`ci-integration-lane.md`](ci-integration-lane.md) is what makes R8 observable on any machine but
   the maintainer's.
 - Open questions a shaping conversation has to settle:
-  1. **Where does an archive tier's marker live?** Beside the archive (`some.zip.sosfs-marker`)
+  1. **Where does an archive tier's marker live?** Beside the archive (`some.zip.terrace-marker`)
      pollutes the source directory and needs an inner-location write path that is not `atomic_write`
      over the whole blob. Inside the staging directory works only for staged mode and leaves
      direct-update unmarked. A fourth `InnerLocation` method is protocol surface every future

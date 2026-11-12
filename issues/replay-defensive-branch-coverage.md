@@ -13,7 +13,7 @@ lane: public
 
 ## Problem
 
-`_replay_through` (`src/sosfs/engine/overlay.py:1282`; that cite and the line numbers below hold at
+`_replay_through` (`src/terrace/engine/overlay.py:1282`; that cite and the line numbers below hold at
 `60406ae`) makes several decisions that hand-planted mutants change without turning any test red. The review of `nested-rmdir-replay-recursion` (cycle 1,
 2026-11-10, two independent reviewers at `60406ae`) ran every mutant below against the whole of
 `tests/engine/test_replay.py`, and each one survived:

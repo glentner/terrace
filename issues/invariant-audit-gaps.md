@@ -19,37 +19,37 @@ place where a property the repository asserts — in a schema comment, a docstri
 and a verification substrate, not a mechanism; see the last open question.
 
 **1. `residency.checksum` is never written.** The column is reserved at
-`src/sosfs/state/schema.sql:95` ("blake2b hex, when checksum recording is enabled"), it is in
-`RESIDENCY_FIELDS` (`src/sosfs/state/catalog.py:88`) and in the insert
-(`src/sosfs/state/catalog.py:196-203` (holds at `141aa86`)), and `OverlaySpec` parses `checksum = true` from the
-`[overlay]` table (`src/sosfs/tier/spec.py:287-289`, key at `:27`). Nothing computes a digest:
+`src/terrace/state/schema.sql:95` ("blake2b hex, when checksum recording is enabled"), it is in
+`RESIDENCY_FIELDS` (`src/terrace/state/catalog.py:88`) and in the insert
+(`src/terrace/state/catalog.py:196-203` (holds at `141aa86`)), and `OverlaySpec` parses `checksum = true` from the
+`[overlay]` table (`src/terrace/tier/spec.py:287-289`, key at `:27`). Nothing computes a digest:
 `blake2b` occurs in `src/` only in that schema comment, and `spec.checksum` has no reader anywhere
-under `src/sosfs/engine/` or `src/sosfs/fuse/`. An operator who sets the flag gets an inert
+under `src/terrace/engine/` or `src/terrace/fuse/`. An operator who sets the flag gets an inert
 configuration key and no error. The cost lands downstream — `PLAN.md` line 348 has `audit --full`
-verify clean copies against the checksum, line 322 has `sosfs commit` skip a file whose recorded
+verify clean copies against the checksum, line 322 has `terrace commit` skip a file whose recorded
 checksum already matches upstream, and line 389's config comment advertises both. Neither has anything
 to compare against, so any criterion in `issues/audit-command.md` or
 `issues/offline-commit-command.md` that mentions checksums has to fund the recording first. **Unbuilt
 work**, not a live defect — but a spec key that silently does nothing is a defect on its own.
 
 **2. `tier.generation` never advances in production.** `TierRegistry.bump_generation`
-(`src/sosfs/state/registry.py:151-157`) has no caller under `src/`; the only call sites are
+(`src/terrace/state/registry.py:151-157`) has no caller under `src/`; the only call sites are
 `tests/state/test_registry.py:92-97`. `MarkerStatus.GENERATION_MISMATCH` therefore only ever arises
-from someone editing a marker file out of band, never from a re-initialization sosfs performed itself.
-The status is implemented, tested and turned into an `EngineError` by `src/sosfs/engine/overlay.py:128` (holds at `141aa86`),
+from someone editing a marker file out of band, never from a re-initialization Terrace performed itself.
+The status is implemented, tested and turned into an `EngineError` by `src/terrace/engine/overlay.py:128` (holds at `141aa86`),
 so it reads as a live safety check on a code path that has never fired. Whatever operation was meant to
 bump it — a deliberate tier reset, a re-register after an evaporation — does not exist. **Unbuilt
 work**; the risk is that a future reader trusts the mismatch branch as exercised.
 
 **3. `intent.temp_name` is dead, and the temps that exist are recognized inconsistently.**
 `Journal.begin` writes the column when the caller passes `temp_for`
-(`src/sosfs/state/journal.py:229-247`); no production call site passes it — only
+(`src/terrace/state/journal.py:229-247`); no production call site passes it — only
 `tests/state/test_journal.py:111,152` and `tests/state/test_survival.py:57`. Meanwhile two kinds of
-temp are actually created. `PosixTier.put` writes `.sosfs/partial/put-{uuid4().hex}-{name}`
-(`src/sosfs/tier/posix.py:133-135`), which `is_temp_name` recognizes because it classifies by the first
-two path components rather than by filename (`src/sosfs/state/journal.py:42-45`).
+temp are actually created. `PosixTier.put` writes `.terrace/partial/put-{uuid4().hex}-{name}`
+(`src/terrace/tier/posix.py:133-135`), which `is_temp_name` recognizes because it classifies by the first
+two path components rather than by filename (`src/terrace/state/journal.py:42-45`).
 `PosixInnerLocation.atomic_write` writes `.{archive}.{hex}.tmp` as a *sibling of the archive file*
-(`src/sosfs/tier/archive.py:99-109`), which the convention does not recognize at all — and because it
+(`src/terrace/tier/archive.py:99-109`), which the convention does not recognize at all — and because it
 sits beside the archive rather than inside a tier root, no sweep and no `usage()` walk will ever see
 it. So an audit written to "find the temp named in the intent row" finds `NULL` in every row, the
 prefix convention is the only one that works, and a crash mid-re-pack leaves debris nothing cleans.
@@ -58,11 +58,11 @@ crash debris today.
 
 **4. `statfs` reports an entirely full filesystem for an unquota'd non-POSIX source.**
 `OverlayOperations.statfs` calls `os.statvfs(source.path)` and falls back to `_quota_statvfs` on
-`OSError` (`src/sosfs/fuse/adapter.py:104-114`). For an S3 source `TierSpec.path` holds the url string
-(`src/sosfs/tier/spec.py:189`), so the `statvfs` raises and the fallback fires, which is the intended
+`OSError` (`src/terrace/fuse/adapter.py:104-114`). For an S3 source `TierSpec.path` holds the url string
+(`src/terrace/tier/spec.py:189`), so the `statvfs` raises and the fallback fires, which is the intended
 design (`PLAN.md` line 264: "configured quota for unbounded sources like S3"). But
-`src/sosfs/fuse/adapter.py:119` reads `total = source.quota.size or 0`, and nothing in
-`OverlaySpec._validate_stack` (`src/sosfs/tier/spec.py:304-323`) requires a source to declare a quota —
+`src/terrace/fuse/adapter.py:119` reads `total = source.quota.size or 0`, and nothing in
+`OverlaySpec._validate_stack` (`src/terrace/tier/spec.py:304-323`) requires a source to declare a quota —
 `PLAN.md` line 67 calls the source "typically unquoted". The result is `f_blocks = f_bfree = f_bavail =
 0`: `df` reports 100 % full, and every tool that pre-checks free space before writing refuses to touch
 a mount that works fine. This is a **live defect on `main`** with a user-visible wrong answer. The
@@ -71,19 +71,19 @@ unit test; the `df` behaviour itself needs a real mount on Linux and an S3 sourc
 
 **5. There is no directory `fsync` anywhere.** Three sites write a temp, `fsync` the file descriptor
 and then `os.replace`, and none of them fsyncs the containing directory:
-`src/sosfs/tier/posix.py:144-146`, `src/sosfs/tier/archive.py:106-107` and
-`src/sosfs/state/lifecycle.py:182-183`. The data is durable; the *name* is not. On a power loss the
+`src/terrace/tier/posix.py:144-146`, `src/terrace/tier/archive.py:106-107` and
+`src/terrace/state/lifecycle.py:182-183`. The data is durable; the *name* is not. On a power loss the
 rename can be lost while the content is present, so the tier reverts to the previous file while the
 catalog records the new residency as clean — after which eviction is licensed to drop the copy it
 believes is redundant, and a promotion copies stale bytes downstream. Treat this as a **repo-wide
 omission and a design decision, not a drive-by fix**: the state store already concedes the same
-power-loss class deliberately (`synchronous = NORMAL`, `src/sosfs/state/db.py:94-97`, justified at
+power-loss class deliberately (`synchronous = NORMAL`, `src/terrace/state/db.py:94-97`, justified at
 `:60-63` on the grounds that a power loss evaporates the volatile tiers anyway and the audit runs
 regardless). Making the tier adapters stricter than the database is a claim about which failure model
 the project stands behind, and belongs in `PLAN.md` before any of the three sites change.
 
 **6. `S3Tier.rename`'s docstring claims an atomicity S3 does not have.**
-`src/sosfs/tier/s3.py:245` reads "files rename atomically, directories move their whole prefix (not
+`src/terrace/tier/s3.py:245` reads "files rename atomically, directories move their whole prefix (not
 atomic)". S3 has no server-side rename; obstore implements `obstore.rename` as copy-then-delete, so a
 crash between the two leaves the object live at both keys. The second clause is correct and the first
 is wrong. The cost is not the sentence but what is built on it: `AGENTS.md` § *Invariants* § 4
@@ -124,7 +124,7 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   calling `OverlayOperations.statfs` against an S3-source spec; the corresponding `df` output needs a
   real mount on Linux with `/dev/fuse` and MinIO.
 - **R3** — The archive adapter's re-pack temp SHALL be recognizable as crash debris by the same
-  convention as the POSIX transfer temp — either by moving under `.sosfs/partial/` or by extending
+  convention as the POSIX transfer temp — either by moving under `.terrace/partial/` or by extending
   `is_temp_name` — so that after a `SIGKILL` mid-re-pack a sweep can name the file. Whether the sweep
   itself exists depends on `issues/audit-command.md`.
 - **R4** — `intent.temp_name` SHALL either be written by the production paths that create temps, or be
@@ -138,7 +138,7 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   same-commit rule applies because the checklist currently asserts the stronger property.
 - **R7** — The repository SHALL either name the production path that bumps `tier.generation`, or
   record that `GENERATION_MISMATCH` detects external tampering only, so the branch is not read as
-  covering a case sosfs itself produces.
+  covering a case Terrace itself produces.
 
 ## Notes
 
@@ -167,7 +167,7 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   the digest is computed during the copy that is already reading the bytes, or in a separate pass, and
   whether the flag stays overlay-wide or becomes per-boundary.
 - 2026-11-11 (whole-tree review at `64faf27`): one more dead vocabulary value. `writeback.state` admits
-  `'active'` (`src/sosfs/state/schema.sql:112`) and nothing sets it.
+  `'active'` (`src/terrace/state/schema.sql:112`) and nothing sets it.
   [`issues/racing-write-marked-clean.md`](racing-write-marked-clean.md) notes the state it was reserved
   for.
 - Found by: the invariant audit run during the software-factory port (2026-08-22). Findings 1, 2 and 3

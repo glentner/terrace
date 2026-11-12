@@ -17,8 +17,8 @@ Nothing measures this filesystem. `PLAN.md` § *Risks and mitigations* names the
 FUSE throughput — this is a reference implementation, not a kernel bypass; mitigate with passthrough
 file handles for resident-copy I/O, free-threading, and a benchmark harness … to keep honest numbers
 in the docs." The mitigation exists in code and the number does not. `PosixTier.open_direct`
-(`src/sosfs/tier/posix.py:70`) hands the engine a real OS file descriptor, and `OverlayEngine.read`
-and `write` (`src/sosfs/engine/overlay.py:639-654` (holds at `141aa86`)) are `os.pread` and `os.pwrite` on it — the design
+(`src/terrace/tier/posix.py:70`) hands the engine a real OS file descriptor, and `OverlayEngine.read`
+and `write` (`src/terrace/engine/overlay.py:639-654` (holds at `141aa86`)) are `os.pread` and `os.pwrite` on it — the design
 that makes a defensible overhead ratio possible. Until someone measures it, the claim that the
 overlay adds a tolerable fraction to direct tier access is an assertion in a risks table.
 
@@ -37,7 +37,7 @@ number that is wrong in the flattering direction.
 - **Commits and rescues are serial.** § 8 of the same file: the rescue budget is polled between
   files and transfers are serial. A "commit throughput" figure is a single-stream figure and has to be
   labelled as one, or a reader will scale it by core count.
-- **Archive reads are not ranged.** `ArchiveTier.read` (`src/sosfs/tier/archive.py:486-501`) extracts
+- **Archive reads are not ranged.** `ArchiveTier.read` (`src/terrace/tier/archive.py:486-501`) extracts
   the whole member and then slices, and `S3InnerLocation.open_read` (`archive.py:151`) buffers the
   entire object into a `BytesIO`, re-opened per member read. The `Tier` protocol is range-ready; for
   archives that is a promise about the signature, not about the cost. Do not write a criterion that
