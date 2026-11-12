@@ -291,6 +291,17 @@ Each of the seed's open questions was ruled before shaping. All are resolved 202
 - **Q:** Can the extended-attribute criterion be checked on a real mount? — **A:** No. The
   integration lane runs nowhere today. The unit-level adapter tests grade the attribute names, and
   the real-mount check is recorded as not run. (The foreman's ruling; resolved 2026-11-11.)
+- **Q:** R6 says a variable outside the `TERRACE_` prefix has no effect. The configuration library
+  matches the prefix without its underscore, so `TERRACE0LOGGING_LEVEL` sets `logging.level`, as
+  `SOSFS0LOGGING_LEVEL` does on the base commit. Is that in scope? — **A:** No. It is the library's
+  behaviour and it predates the rename; changing it is a behaviour change, which the non-goals rule
+  out. R6's third clause is graded with old-prefixed names and with unrelated names. The plan
+  records the prefix match as a dated note on `issues/config-command.md`. (The foreman's ruling at
+  the plan sign-off; resolved 2026-11-12.)
+- **Q:** This cycle's own `ROADMAP.md` entry spells the old name, and R1's census covers
+  `ROADMAP.md`. Does the entry change? — **A:** Yes, as far as R1 needs: its old-name phrases are
+  reworded, and nothing else in the entry moves. The roadmap step retires the entry when the cycle
+  lands. (The foreman's ruling at the plan sign-off; resolved 2026-11-12.)
 
 ## Related materials
 
