@@ -9,6 +9,7 @@ from typing import Any, Tuple
 
 # Standard libs
 import io
+import os
 import ast
 import sys
 import time
@@ -244,3 +245,84 @@ def test_helper_imports_nothing_of_the_package() -> None:
         elif isinstance(node, ast.ImportFrom):
             names.add((node.module or '').split('.')[0])
     assert names and 'terrace' not in names and 'tests' not in names
+
+
+# Runs the helper in a process of its own, with the client library's send patched to signal the
+# process from inside the n-th request (`n:signum`, comma-separated), or, given `thread:signum`, to
+# signal a thread other than the main one once the helper is waiting. Each request's number and URL
+# go to standard error.
+DRIVER = '''
+import os, sys, time, signal, threading
+from importlib.util import spec_from_file_location, module_from_spec
+from botocore.httpsession import URLLib3Session
+found = spec_from_file_location("bundle_loop", sys.argv[1])
+helper = module_from_spec(found)
+found.loader.exec_module(helper)
+plan, count, real = sys.argv[2], [0], URLLib3Session._get_request_target
+at = {} if plan.startswith("thread:") else {int(n): int(s) for n, s in (pair.split(":") for pair in plan.split(",") if pair)}
+def target(self, url, proxy_url):
+    count[0] += 1
+    print("request", count[0], url, file=sys.stderr, flush=True)
+    if count[0] in at:
+        os.kill(os.getpid(), at[count[0]])
+    return real(self, url, proxy_url)
+URLLib3Session._get_request_target = target
+class Watch:
+    def __init__(self, stream):
+        self.stream = stream
+    def write(self, text):
+        if plan.startswith("thread:") and "interrupt to tear down" in text:
+            def later():
+                time.sleep(0.5)
+                signal.pthread_kill(threading.get_ident(), int(plan.split(":")[1]))
+            threading.Thread(target=later, daemon=True).start()
+        return self.stream.write(text)
+    def flush(self):
+        self.stream.flush()
+sys.stderr = Watch(sys.stderr)
+sys.exit(helper.main(sys.argv[3:]))
+'''
+
+# With one bundle the helper makes five requests: the bucket and the bundle in setup, then the
+# listing, the bundle and the bucket in teardown.
+WINDOWS = {
+    'setup-1': ('1:{0}', False, 0), 'setup-2': ('2:{0}', False, 0),
+    'teardown-3': ('3:{0}', True, 0), 'teardown-4': ('4:{0}', True, 0), 'teardown-5': ('5:{0}', True, 0),
+    'second': ('1:{0},2:{0}', False, 0), 'thread': ('thread:{0}', False, 0), 'command': ('', True, 130),
+}
+SIGNALS = {'int': signal.SIGINT, 'term': signal.SIGTERM, 'hup': signal.SIGHUP}
+MODES = ('legacy', 'standard')
+# The suite runs one representative per window kind; the class checker sets the variable for every one.
+EVERY = [(window, name, mode) for window in WINDOWS for name in SIGNALS for mode in MODES]
+SOME = [('setup-1', 'term', 'standard'), ('setup-2', 'int', 'legacy'), ('teardown-4', 'hup', 'standard'),
+        ('second', 'int', 'standard'), ('thread', 'int', 'legacy'), ('command', 'term', 'legacy')]
+CASES = EVERY if os.environ.get('BUNDLE_LOOP_EVERY_SIGNAL') == '1' else SOME
+SIGNAL_SELF = ('import os, sys, time; os.kill(os.getppid(), int(sys.argv[1])); time.sleep(60)')
+
+
+@mark.parametrize('window, name, mode', CASES, ids=['-'.join(case) for case in CASES])
+def test_a_signal_in_any_window_tears_down_on_the_first(window: str, name: str, mode: str, tmp_path: Path) -> None:
+    plan, command, status = WINDOWS[window]
+    signum = SIGNALS[name]
+    scratch = tmp_path / 'tmp'
+    scratch.mkdir()
+    env = dict(os.environ, TMPDIR=str(scratch), AWS_RETRY_MODE=mode, AWS_CONFIG_FILE=str(tmp_path / 'absent'))
+    argv = [sys.executable, '-c', DRIVER, str(HELPER), plan.format(int(signum))]
+    if window == 'command':
+        argv += ['--', sys.executable, '-c', SIGNAL_SELF, str(int(signum))]
+    elif command:
+        argv += ['--', sys.executable, '-c', 'pass']
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    try:
+        out, err = process.communicate(timeout=20)
+    finally:
+        process.kill()
+        process.wait()
+    requests = [line.split() for line in err.splitlines() if line.startswith('request ')]
+    endpoints = {urlsplit(url)._replace(path='', query='').geturl() for _, _, url in requests}
+    assert len(endpoints) == 1, err
+    planned = [int(pair.split(':')[0]) for pair in plan.split(',') if pair and not pair.startswith('thread')]
+    assert all(n <= len(requests) for n in planned), err      # every planned signal was sent
+    assert process.returncode == status, err
+    assert 'Traceback' not in err
+    assert list(scratch.iterdir()) == [] and refuses(endpoints.pop())

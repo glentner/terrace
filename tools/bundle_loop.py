@@ -18,13 +18,14 @@ The helper imports nothing of the project, so it works whatever the spec parser 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 # Standard libs
 import io
 import os
 import sys
 import random
+import select
 import shutil
 import signal
 import tarfile
@@ -43,6 +44,7 @@ RESYNC = ('24/day', 3600.0)                                             # sync.m
 DELAY = ('60s', 60.0)                                                   # every stage tier's write-back delay
 SIZE = 64 * 1024 * 1024                                                 # a stage tier's size limit unless overridden
 FILES = 10000                                                           # every stage tier's count limit
+HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)                # each one tears the loop down
 
 
 class Store:
@@ -104,7 +106,7 @@ class Loop:
 
     def __init__(self, endpoint: str, *, bundles: int = 1, members: int = 6, fastest_size: int | None = None,
                  access_key: str = 'test', secret_key: str = 'test', region: str = 'us-east-1',
-                 parent: str | Path | None = None) -> None:
+                 parent: str | Path | None = None, cancelled: Callable[[], object] = lambda: False) -> None:
         if bundles < 1:
             raise ValueError('a loop needs at least one bundle')
         import boto3
@@ -120,14 +122,22 @@ class Loop:
         self.root = Path(tempfile.mkdtemp(prefix='bundle-loop.', dir=parent))
         self._made_bucket = False
         try:
+            # `cancelled` is asked between requests, never inside one: a stop raised inside the client
+            # library can be wrapped and retried away.
+            def check() -> None:
+                if cancelled():
+                    raise Stop()
             self.content = self.root / 'content'
             self.stems = [f'bundle-{index:03d}' for index in range(bundles)]
             self.keys = {stem: f'{PREFIX}/{stem}.tar.gz' for stem in self.stems}
+            check()
             self.client.create_bucket(Bucket=self.bucket)
             self._made_bucket = True
             for index, stem in enumerate(self.stems):
+                check()
                 self._generate(index, stem, members)
                 self.client.put_object(Bucket=self.bucket, Key=self.keys[stem], Body=pack(self.content, stem))
+            check()
             self.spec = self.respec('.')
         except BaseException:
             self.close()
@@ -199,7 +209,75 @@ class Loop:
 
 
 class Stop(Exception):
-    """A termination signal arrived."""
+    """A termination signal arrived; raised by the helper's own code, between library calls."""
+
+
+class Requests:
+    """
+    Termination requests. The handler only records the signal: it raises nothing, so no library code
+    on the stack can swallow or retry the request, and a signal during teardown cannot cut it short.
+    The interpreter also writes each signal's number to a pipe, from whichever thread the signal
+    landed on, so a wait on that pipe wakes even when the signal came before the wait began.
+    """
+
+    signum: int | None
+
+    def __init__(self) -> None:
+        self.signum = None
+        self._read, self._write = os.pipe()
+        for end in (self._read, self._write):
+            os.set_blocking(end, False)
+        # A mask inherited from the parent would hold these pending forever; a handler of our own for
+        # SIGINT too, so a helper started with it ignored (a shell's background job) still stops.
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, HANDLED)
+        self._previous = signal.set_wakeup_fd(self._write, warn_on_full_buffer=False)
+        for signum in HANDLED:
+            signal.signal(signum, self._record)
+
+    def _record(self, signum: int, frame: object) -> None:
+        if self.signum is None:
+            self.signum = signum
+
+    def __bool__(self) -> bool:
+        """Whether a signal has arrived, by the handler or by the pipe, whichever saw it first."""
+        try:
+            seen = os.read(self._read, 512)
+        except BlockingIOError:
+            seen = b''
+        if seen and self.signum is None:
+            self.signum = seen[0]
+        return self.signum is not None
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until a signal arrives or `timeout` passes; whether one has arrived."""
+        if not self:
+            select.select([self._read], [], [], timeout)
+        return bool(self)
+
+    def close(self) -> None:
+        """Stop the pipe. The handler stays: a signal once the loop is gone changes nothing."""
+        signal.set_wakeup_fd(self._previous)
+        os.close(self._read)
+        os.close(self._write)
+
+
+def run(command: List[str], env: Dict[str, str], requests: Requests) -> int:
+    """Run the command to its end and return its status; on a request, end it and raise `Stop`."""
+    process = subprocess.Popen(command, env=env)
+    try:
+        while True:
+            try:
+                return process.wait(timeout=0.05)
+            except subprocess.TimeoutExpired:
+                if requests:
+                    raise Stop() from None
+    finally:
+        if process.poll() is None:
+            try:
+                process.wait(timeout=0.25)          # an interrupt to the process group reached it too
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -215,54 +293,43 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument('command', nargs=argparse.REMAINDER, help='run this, then tear down')
     options = parser.parse_args(argv)
     command = options.command[1:] if options.command[:1] == ['--'] else options.command
+    stopped = 130 if command else 0
 
-    # A handler of our own for SIGINT too, so a helper started with it ignored (a shell's background
-    # job) still stops on an interrupt.
-    handled = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-
-    def quiet() -> None:
-        """Once teardown begins, a second signal must not cut it short."""
-        for signum in handled:
-            signal.signal(signum, signal.SIG_IGN)
-
-    def on_signal(signum: int, frame: object) -> None:
-        # Ignore the rest before raising: a second signal that landed between the raise and the
-        # teardown's own `quiet()` would skip the teardown.
-        quiet()
-        raise Stop(signum)
-    for signum in handled:
-        signal.signal(signum, on_signal)
-
+    requests = Requests()
     store = None
     try:
         endpoint = options.endpoint
         if endpoint is None:
             store = Store().start()
             endpoint = store.endpoint
-        loop = Loop(endpoint, bundles=options.bundles, access_key=options.access_key,
-                    secret_key=options.secret_key, region=options.region, fastest_size=options.fastest_size)
-        status = 0
+        if requests:
+            return stopped
+        try:
+            loop = Loop(endpoint, bundles=options.bundles, access_key=options.access_key,
+                        secret_key=options.secret_key, region=options.region, fastest_size=options.fastest_size,
+                        cancelled=requests.__bool__)
+        except Stop:
+            return stopped
         try:
             print(loop.spec, flush=True)
             if command:
                 env = dict(os.environ, BUNDLE_LOOP_SPEC=str(loop.spec), BUNDLE_LOOP_ENDPOINT=endpoint,
                            BUNDLE_LOOP_BUCKET=loop.bucket)
-                status = subprocess.run(command, env=env).returncode
-            else:
-                print('bundle_loop: up; interrupt to tear down', file=sys.stderr, flush=True)
-                signal.pause()
-        except (KeyboardInterrupt, Stop):
-            status = 130 if command else 0
+                return run(command, env, requests)
+            print('bundle_loop: up; interrupt to tear down', file=sys.stderr, flush=True)
+            while not requests.wait():
+                pass
+            return stopped
+        except Stop:
+            return stopped
         finally:
-            quiet()
             loop.close()
-        return status
-    except (KeyboardInterrupt, Stop):
-        return 130 if command else 0
     finally:
-        quiet()
-        if store is not None:
-            store.stop()
+        try:
+            if store is not None:
+                store.stop()
+        finally:
+            requests.close()
 
 
 if __name__ == '__main__':

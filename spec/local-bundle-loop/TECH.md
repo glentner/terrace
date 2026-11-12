@@ -3,7 +3,7 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/local-bundle-loop
 base: main
 current_phase: done
@@ -19,7 +19,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1
+  attempts: 1
+  verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1 && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py && uv run python -I spec/local-bundle-loop/remediation/F2-signal-teardown.py
 - id: P2
   name: Nine stages, the oracle and the tap
   status: done
@@ -199,7 +200,70 @@ behind on any exit path; its own tests prove each of those.
   M12 test's stand-in `rmtree` honours `ignore_errors` as the real one does, so a `close` that passes
   `ignore_errors=True` is caught as well as one that swallows the error; both were planted and red.
   `AGENTS.md`'s SPDX file count (§ Code style) moves with the tree too.
-- **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1`
+- **Amended at remediation (2026-11-12, review cycle 2).** P1 reopened for A1 and for the Linux CI
+  failure of `test_interrupt_tears_down_when_started_with_it_ignored` at `14a2b56` (both Linux legs
+  timed out after 30 s waiting for the helper; macOS passed). One class: the helper's teardown under
+  signals (R2). This supersedes the sentence above that all three signals are ignored once teardown
+  begins, and P2's remediation note on the handler.
+  - [x] The handler only records the signal; it raises nothing, so no library frame can wrap it and
+        retry it away (A1, standard retry mode) or turn it into an `HTTPClientError` traceback (the
+        default mode, the out-of-scope note of cycle 2), and a signal during teardown has nothing to
+        cut short. `Loop` takes `cancelled` and asks it between requests (before the bucket, before
+        each bundle, before the spec), raising the helper's own `Stop` from its own frame; `main`
+        asks after the store starts. The wait is `select` on the pipe `signal.set_wakeup_fd` writes,
+        which the interpreter fills from whichever thread took the signal and which stays readable
+        if the signal came before the wait began; `signal.pause()` is gone. The three signals are
+        unblocked before any thread starts. A command runs under `Popen` and is polled every 50 ms;
+        on a request it gets 0.25 s to exit (an interrupt to the group reached it too), then is
+        killed, as `subprocess.run` did, and the helper exits 130. Exit statuses are unchanged.
+  - [x] Sweep: every client-library window in the helper. Setup: `create_bucket`, each
+        `put_object`; teardown: `list_objects_v2`, each `delete_object`, `delete_bucket`. Each is
+        signalled from inside the library's send, under `AWS_RETRY_MODE` `legacy` and `standard`.
+        The store's start and stop make no client call; the argument parse precedes any resource.
+        No other signal handling in `tests/loop` or `tools/`.
+  - [x] Pins: `test_a_signal_in_any_window_tears_down_on_the_first` in `test_helper.py` runs the
+        helper under a driver that patches botocore's send to signal the process from inside the
+        n-th request, or to `pthread_kill` a thread other than the main one once the helper waits.
+        Windows: setup requests 1 and 2, teardown requests 3, 4, 5 (with a command exiting 0), a
+        second signal in the stop's own teardown, the other-thread wait, and a command that signals
+        the helper. Each asserts the exit status, no traceback, an empty `TMPDIR` and a refusing
+        endpoint, and that every planned signal was sent. The suite runs six representatives; the
+        checker sets `BUNDLE_LOOP_EVERY_SIGNAL=1` for all 48 (8 windows x 3 signals x 2 modes).
+  - [x] Checker: `spec/local-bundle-loop/remediation/F2-signal-teardown.py` (review cycle 2, A1,
+        and the Linux failure) runs the 48 cases and repeats the four wait-window tests 25 times each
+        beside one CPU burner per core, judged by JUnit id.
+  - [x] Teeth, on a throwaway worktree of `790463e` with this `test_helper.py` planted: 24 of 48
+        cases fail. Standard mode, setup windows and the second signal: the helper never exits (20 s
+        timeout), A1 itself. Legacy mode, the same windows: exit 1 with
+        `HTTPClientError: An HTTP Client raised an unhandled exception: 2`. The other-thread wait,
+        every signal and mode: never exits. The teardown and command windows pass there, as they
+        should. Of the suite's six, four fail there. The checker there: `FAILED, 24 problem(s)`. The
+        four repeated wait tests passed 25 of 25 there too, so the repeats are a smoke test on this
+        host, not a measured catch; the deterministic windows carry the teeth.
+  - [x] The Linux failure, **fixed by analysis, unverified on Linux** (no Linux host, and CI is
+        unavailable). The test signals only after the helper printed that it waits, so the old helper sat in
+        `signal.pause()` and never ran its handler on the main thread. `pause()` returns only for a
+        signal delivered to the calling thread after it blocks: one handed to another thread (the
+        store's server threads; Linux picks another thread when the main one has the signal blocked
+        or already pending) or arriving before the call trips the C handler and leaves the main
+        thread asleep. The new other-thread window reproduces exactly that hang on macOS at
+        `790463e`. Why only the started-ignored test fails, on both Linux legs, is not established:
+        it is the one helper test launched through `preexec_fn`, which forces a plain `fork()` where
+        the other helper tests may take a spawn path, and no reading here ties that to the hang. The fix covers each candidate path (another thread, before the
+        wait, an inherited mask). Settling evidence on a Linux runner at `14a2b56`: while the helper
+        hangs, `SigBlk`/`SigPnd`/`SigCgt` in `/proc/<pid>/status` and each `/proc/<pid>/task/*/status`,
+        `strace -f -e trace=signal,pause` for the thread that took the signal, a stack dump of the
+        main thread; then this gate's checker on the fix.
+  - [x] Counts: 788 unit tests and 807 in all (six new items), moved in `AGENTS.md`; 51 test files.
+  - Gate: the first run went red on this amendment's own wording (P3's ledger read a phrase as a
+    deferral with no seed), recorded as attempt 1, reworded, and the whole gate rerun green on the
+    final tree: `p1 ok` (22 helper tests), `p3 ok` (lane 29.8 s before, 31.1 s after, 1.2 s added
+    of a 10 s budget; 779 passed and 9 xfailed in the unit lane), F1 585 of 585, F2 48 of 48 cases
+    and 100 of 100 repeats.
+  - P1 is earlier than P3, so its gate runs P1's rows, then P3's whole gate (rows, collect, variant,
+    ledger, figures and the lane, which is the full unit suite), then cycle 1's F1 checker, whose
+    repeats include the helper's tests, then this checker.
+- **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1 && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py && uv run python -I spec/local-bundle-loop/remediation/F2-signal-teardown.py`
 - **Touches:** `tools/bundle_loop.py`, `tests/loop/__init__.py`, `tests/loop/conftest.py`,
   `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`.
 
