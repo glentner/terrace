@@ -28,10 +28,10 @@ phases:
   hill: downhill
   verify: uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F2-frozen-gate.py base suite records ledger && uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F2-liveness-pin.py && uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F1-agents-figures.py
 review:
-  last_reviewed_commit: 99851a7d51ab48a06aef141deb423fb737a6a98b
-  verdict: changes-requested
-  blocked_reason: 'F1: two stale measured figures in AGENTS.md (R8). F2: no test pins the flag reset after a hop a change met.'
-  cycle: 1
+  last_reviewed_commit: d2bf13f96151b2f6cbc95cd7181cdca38e4e9383
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 
 # TECH.md — A write racing a commit is never recorded clean

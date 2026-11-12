@@ -182,3 +182,105 @@ F1 does not trigger the gate: `AGENTS.md` lines outside § Invariants are not on
 ## Optional completeness sub-pass
 
 Not run, by the foreman's ruling.
+
+## Review cycle 2 — approved (2026-11-12)
+
+- **Reviewed commit:** `d2bf13f`. The remediation is that one commit on top of `99851a7` and the
+  cycle 1 review commit `fbec95f`.
+- **Mode: scoped**, by the foreman's ruling. The pass verified the remediation of F1 and F2 only. It
+  was not a fresh blind pass over the full spec-excluded diff. One fresh blind reviewer ran it. It was
+  given the GOAL text, the rubric, the path of `AGENTS.md`, the two findings as cycle 1 stated them,
+  and the view `git diff 99851a7..d2bf13f -- . ':(exclude)spec/'`. It did not read `spec/` or the
+  KB. The sequential fallback did not run. The `debate` variant and the completeness sub-pass did not
+  run either.
+- **Contract drift:** none since cycle 1. `GOAL.md` last moved at `4b4b7ec`, which cycle 1 recorded.
+- **The remediation outside `spec/`:** `AGENTS.md` (figures), `tests/engine/test_racing.py` (one new
+  test), and a dated note on `issues/freethreaded-concurrency-stress.md`.
+  `git diff 99851a7..d2bf13f -- src/` is empty (0 bytes; `src-diff.log`). Nothing under `src/`
+  changed.
+
+Evidence: every log named below is in the worktree's gitignored `.local/review2/`.
+
+### Verification run
+
+- The profile's `verify` at `d2bf13f` (`verify-head.log`): lint exited 0 (`lint: all checks passed`,
+  SPDX pair on all 76 `.py` files). The summary line was `763 passed in 32.41s`: 0 failed, 0 errors.
+  That equals the 763 the remediation reports, and is one more than cycle 1's 762.
+- The reviewer planted F2's mutant (`marked_dirty = bool(met)` in `_commit_hop`) in a scratch clone,
+  never in the worktree (`mutant.diff`). On the mutant the new test fails at `test_racing.py:756`:
+  `assert outcomes == ['admitted', 'waits on the path lock']`. The writer was admitted in all six
+  rounds and the commit copied 7 times. `test_racing.py` on the mutant gives `1 failed, 31 passed`
+  (`mutant-racing.log`), and the unit suite gives `1 failed, 762 passed` (`mutant-unit.log`). The new
+  test is the only test that kills the mutant. It passes at head.
+- Determinism: the test has no `sleep` and no wall-clock ratio. `Event.wait(WAIT)` serves only as an
+  upper bound. The test ran 150 times, in five parallel loops of 30, beside a `-n auto` unit run:
+  `runs: 150 pass: 150 fail: 0`. The load run itself gave `763 passed in 42.05s`
+  (`repeat-summary.log`).
+- The completeness side, on the same schedule at head (`probe-completeness-head.log`). The reviewer
+  used test-local wrappers on `update_residency` and `_commit_hop` and edited no source.
+  - The commit made two copies.
+  - After the first hop the holder read `dirty`: holder `BBBB`, upstream `AAAA`, row queued.
+  - After the second hop it read `clean`: holder `BBBB`, upstream `BBBB`. That is the only clean
+    record, and its upstream held the holder's bytes.
+  - The write the commit did not carry left the holder `dirty`: holder `CCCC`, row queued.
+  - After `flush` the source read `CCCC`, and `assert_reaches_source` passed.
+
+  The copy is never recorded clean while its upstream lacks a write.
+- Tree on hand-back: `git status --porcelain` was empty at `d2bf13f`. The mutant was planted only in
+  the clone, and the clone's restore was checked with `cmp -s` (exit 0, `clone-restore.log`). The
+  orchestrator re-checked the tree status, the verify line and the empty `src/` diff.
+
+### Scoped matrix
+
+| Item | Verified by | How | Status |
+|------|-------------|-----|--------|
+| F1: unit, integration and total test counts (`AGENTS.md:62`, `:66`, `:88` "ten", `:103`, `:741`, `:788`) | reviewer | `pytest --collect-only -q` with each marker: `763/773 (10 deselected)`, `10/773 (763 deselected)`, `773 collected` (`f1-counts.log`) | ✅ |
+| F1: `tests/engine` count (`:128`, 425) | reviewer | `425 tests collected` | ✅ |
+| F1: `tests/` file count (`:103`, 43) | reviewer | `git ls-files tests`: 43 | ✅ |
+| F1: `.py` file count (`:834`, 76) | reviewer | lint's own count, and `git ls-files 'src/*.py' 'tests/*.py'`: 76. The 13 other tracked `.py` files are all under `spec/`, outside the sentence's scope. | ✅ |
+| F1: "sixty-seven lines" (`:223`, `:240`) | reviewer | `wc -l locks.py`: 67 | ✅ |
+| F2: the mutant fails the new test | reviewer | clone: `1 failed, 762 passed`, at `:756` | ✅ |
+| F2: the new test passes at head | reviewer | within `763 passed` | ✅ |
+| F2: deterministic | reviewer | no sleep or ratio; 150 runs under load, 0 failures | ✅ |
+| F2: the completeness side holds | reviewer | probe at head: clean only when the upstream holds the bytes; the uncarried write reaches the source | ✅ |
+| `src/` unchanged | reviewer, orchestrator | `git diff 99851a7..d2bf13f -- src/`: 0 bytes | ✅ |
+| `verify` | reviewer, orchestrator | lint exit 0; 763 passed, 0 failed, 0 errors | ✅ |
+| The dated note on `issues/freethreaded-concurrency-stress.md` | reviewer, then orchestrator | The reviewer found every symbol the note cites at head, and confirmed the kill claim. The orchestrator checked the three counts the reviewer could not see: 15 mutants is the plan's count (`PLAN.md:264`), and the 612-case matrix and 12 mutants are cycle 1's (above). | ✅ |
+| R9, CI | not observed | Read at publish. | — |
+
+The R-ID matrix of cycle 1 stands for every R-ID except R8, which F1 had failed. R8 is now ✅: the
+measured figures equal the tree. No line under `src/` changed, so no behaviour graded in cycle 1
+changed.
+
+**Unmapped changes:** the dated note on `issues/freethreaded-concurrency-stress.md` goes past F2's
+ruling. It files the module-wide mutant sweep that cycle 1 routed and this cycle did not run. It is
+prose, it is a deferral record in its home, and it is accurate where it can be checked. It does not
+block.
+
+### Findings
+
+None. No CONFIRMED finding, no PLAUSIBLE finding, and no out-of-Scope reproduction.
+
+- **F1: remediated.** Every measured figure `AGENTS.md` carries that this cycle could move equals
+  what the tree measures at `d2bf13f`.
+- **F2: remediated.** The liveness side is pinned:
+  `test_writer_that_never_pauses_lets_commit_upstream_return` kills the mutant that survived cycle 1,
+  and it is deterministic. The completeness side holds on the same schedule.
+
+### Human gate
+
+**The cycle 1 trigger (F2, in `_commit_hop`, a path on the high-blast-radius list in `AGENTS.md`
+§ Invariants) is cleared.**
+
+- **The foreman's ruling on F2.** The foreman was the judge of the gate for this run. It ruled to fix
+  F2 by pinning the property on both sides, with no engine change. This cycle verified that the
+  remediation did exactly that: one test, and no line under `src/` changed.
+- **Sign-off: the foreman, as judge of the gate for this run (2026-11-12).** It covers the remediation
+  of F2, and with it the publish recommendation below.
+
+Cycle 2 raised no new trigger.
+
+### Loop
+
+The loop has converged in two cycles of the three allowed. Cycle 1 reviewed the behaviour and found
+it sound. Cycle 2 closes both of cycle 1's findings and adds none. Next: `code terrace publish`.
