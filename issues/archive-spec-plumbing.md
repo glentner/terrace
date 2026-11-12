@@ -166,5 +166,9 @@ Draft R-IDs, to be firmed up at promotion.
   3. **Are archive tiers legal at stage positions, or source-only in v1?** Stage-position archives
      have no described semantics and no test. Source-only is one rule in `_validate_stack` and it
      closes the node-scope question at the same time.
+- 2026-11-11 (whole-tree review at `64faf27`): a read-only mount
+  ([`issues/read-only-mount.md`](read-only-mount.md)) reaches the flagship use case with the read side
+  alone: admit the archive types and keys, construct the tier, index, read. Shaping may split read from
+  write here.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   tier-invariants and remaining-work briefs.

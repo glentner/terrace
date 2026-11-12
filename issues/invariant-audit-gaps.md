@@ -166,6 +166,10 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   every hop, which for a multi-gigabyte file on a source-facing boundary is real time. Decide whether
   the digest is computed during the copy that is already reading the bytes, or in a separate pass, and
   whether the flag stays overlay-wide or becomes per-boundary.
+- 2026-11-11 (whole-tree review at `64faf27`): one more dead vocabulary value. `writeback.state` admits
+  `'active'` (`src/sosfs/state/schema.sql:112`) and nothing sets it.
+  [`issues/racing-write-marked-clean.md`](racing-write-marked-clean.md) notes the state it was reserved
+  for.
 - Found by: the invariant audit run during the software-factory port (2026-08-22). Findings 1, 2 and 3
   from the state-store topic; 3 (the archive temp), 5 and 6 from the tier-atomicity topic; 4 from the
   FUSE-adapter and layering topic.

@@ -96,4 +96,10 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
     configuration, and `tests/engine/test_model.py` stays unchanged (that cycle's GOAL Q2).
     Model coverage of source-served files, if wanted, stays with this seed, whose cycle redraws
     the sample anyway.
+- 2026-11-11 (whole-tree review at `64faf27`): the cycle that adopted this (branch
+  `test/model-commit-route-reach`, parked at its plan's stop on 2026-11-09) found two engine defects on
+  its dry runs, and each opened a fix cycle of its own.
+  [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) proposes to take the widened model as
+  its acceptance instrument (its R7) instead of landing it against the current replay. Resuming it as
+  planned or folding it in is the maintainer's call; nothing here changes the branch.
 - Found by: `deferred-rename-source-orphan` review cycle 1 (F4, coverage observation), 2026-11-06.

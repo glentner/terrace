@@ -117,5 +117,18 @@ or a faithful stand-in; none is checkable in CI as it stands.
   [`issues/daemonized-mount-first-run.md`](daemonized-mount-first-run.md) are prerequisites;
   [`issues/documentation-and-v0.1.0.md`](documentation-and-v0.1.0.md) owns the operations guide this
   extends. Root `PLAN.md` → § *Lifecycle and recovery* (§ *Shutdown*, § *Deferred commit*).
+- 2026-11-11 (whole-tree review at `64faf27`): questions 1 and 2 decide whether the product can run where
+  it is meant to, and each is a few minutes on a real cluster. Take them before the next engine cycle,
+  out of cycle. They are the maintainer's to run. Three more belong on the list:
+  6. **The state database on shared storage.** A commit from another host needs the state directory on a
+     shared filesystem. SQLite's documentation rules out WAL across hosts, and its locking needs POSIX
+     locks, which some parallel-filesystem mounts do not provide. One host at a time is the design, so
+     this may work; it is unverified, and the alternative (state on node-local storage, shipped at
+     detach) changes the crash story.
+  7. **One mount per node.** A multi-node job needs the mount on every node
+     ([`issues/read-only-mount.md`](read-only-mount.md)).
+  8. **The time limit is the ordinary ending.** A killed mount leaves `shutdown_state = mounted`, and the
+     next mount raises. Recovery at mount is a prerequisite for a second job on the same overlay
+     ([`issues/audit-command.md`](audit-command.md)).
 - Found by: the owner's statement of the deployment goal (2026-11-04). Nothing here has been checked
   on a cluster.

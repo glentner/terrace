@@ -167,6 +167,11 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
   that the plan recorded a placeholder and the guard at `fuse/mount.py:125-127` settled the question
   in code. Whether that counts as substantive is the thing to settle before the cycle starts, not
   during it.
+- 2026-11-11 (whole-tree review at `64faf27`): `PLAN.md` § *Risks and mitigations* → the namespace-replay
+  bullet now runs to about sixty lines narrating six cycles, and `AGENTS.md` § 5 and § 10 restate the
+  same mechanism at the grain of a docstring. Each engine cycle paid a review round to keep the three in
+  step. [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) R8 owns shrinking them if it is
+  adopted. If it is declined, that residue is this seed's.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   FUSE/CLI/layering brief (items 1-3), the verification-substrate brief (item 5), and the
   remaining-work brief (item 4).

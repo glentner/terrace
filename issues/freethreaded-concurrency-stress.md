@@ -265,6 +265,15 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
 - Open question — **how long is long enough.** A workload that finds a race in 10 s on a 16-core
   runner may find nothing in 10 s on a 2-core one. Bounding by operation count makes the run
   deterministic and makes the coverage machine-dependent instead.
+- 2026-11-11 (whole-tree review at `64faf27`): this seed has become a record of defects, not only of a
+  missing test, and two readings in it need correcting. The handle fields are not benign: a writer's
+  stale read of `marked_dirty` lets a write land on a copy the commit records clean, reproduced by
+  injection, and [`issues/racing-write-marked-clean.md`](racing-write-marked-clean.md) now owns that fix.
+  The sequences under "Path locks do not cover descendants" and "An ancestor's round trip" are engine
+  defects with one cause, which [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md)
+  proposes to remove (its R4). If that seed is adopted, this one keeps the workload and R1–R6, and R7–R9
+  become that cycle's tests. Its place late in the roadmap fits a stress suite; it never fitted the
+  defects filed in it.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the FUSE/CLI/
   layering review named the handle fields and the logging initializer, and the verification-substrate
   review measured that both CI jobs run the same command.

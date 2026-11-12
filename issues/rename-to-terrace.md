@@ -301,5 +301,11 @@ Draft R-IDs, to be firmed up at promotion.
   logs writing to another's, and `core/config.py:100,145,199`, where the prefix, the blame string and
   the bootstrap override are three unlinked literals and a stale blame string survives a green test
   run.
+- 2026-11-11 (whole-tree review at `64faf27`): sequencing. Two cycles are parked on branches
+  (`fix/rename-over-tombstoned-child`, `test/model-commit-route-reach`), and a tree-wide rename conflicts
+  with both. If [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) absorbs them the tree
+  is quiet, which is the cheap moment for this. That seed bumps the schema version and this one moves the
+  marker directory: two breaks of the on-disk format, free only until something is deployed, and best
+  taken together.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the rename-census
   brief.

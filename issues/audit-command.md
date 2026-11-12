@@ -199,6 +199,12 @@ Draft R-IDs, to be firmed up at promotion.
       the confirm before the purge is at `src/sosfs/engine/overlay.py:1038`.
     - 2026-11-08: `source-path-truncate-and-stat` moved it again; at `6425a21` it is at
       `src/sosfs/engine/overlay.py:1061` (holds at `5e0d997`).
+- 2026-11-11 (whole-tree review at `64faf27`): the mount-time half is on the deployment path ahead of
+  everything else here. A batch job killed at its time limit is the ordinary ending, and today that
+  leaves an overlay no later job can mount. [`issues/read-only-mount.md`](read-only-mount.md) R4 is the
+  smallest slice of the walk (markers, intents, a size check, counters) and needs no loss report, because
+  a read-only overlay has nothing to lose. Shaping should consider building that slice first and the
+  reconcile, quarantine, loss report and exit codes on top of it.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the state-store
   invariants topic (the intent journal has no consumer) and the remaining-work topic (dossier 4).
 - *Added 2026-11-06 by `deferred-rename-source-orphan` (review cycle 1):* **catalog and residency

@@ -75,4 +75,8 @@ large flush or drain holds the source lock for time proportional to its work.
   drained was finding P1 there; Geoffrey ruled it a fix, and the cycle's remediation fixed it: a pass
   over rows nothing stands in reads the queue a fixed number of times, pinned by a count of queue reads
   in `tests/engine/test_replay.py`.
+- 2026-11-11 (whole-tree review at `64faf27`): held.
+  [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) proposes to replace
+  `_replay_through`, and its R6 carries this seed's R1. Fixing the cost in place is worth a cycle only if
+  that seed is declined.
 - Found by: `nested-rmdir-replay-recursion` review cycle 1 (both debate reviewers).

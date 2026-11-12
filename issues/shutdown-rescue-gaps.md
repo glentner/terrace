@@ -174,5 +174,17 @@ the KB's EARS notes).
   documented wording and converts a scheduler's SIGTERM into an unbounded stall before the SIGKILL
   that follows it, which is worse for the case the knob exists to serve. Rejecting it at parse time
   is safer and breaks any spec file already carrying the value.
+- 2026-11-11 (whole-tree review at `64faf27`): two additions.
+  - **Three paths settle `detached` without the rescue, not one.** `Shutdown.FORCE` does it by design
+    (`src/sosfs/fuse/mount.py:258-259`), beside the second SIGINT and a rescue cut short by its budget.
+    One three-valued flag cannot carry "metadata is trusted" and "node-local data was rescued" as a
+    single promise. The residency rows already say which dirty copies sit on a node-scope tier and
+    `overlay.host` says which node, so `detached` can mean the first alone and `commit` can read the
+    second.
+  - **The shutdown is a state machine held in a latched mode, a counter and an event** (`_mode`,
+    `_sigint`, `_stop`). Declared as one (serving, draining, rescuing, settled, and the signal each
+    transition takes), the missing transition from a cancelled drain to a rescue is a hole in a table
+    instead of a branch nobody wrote. `Mount` is not a `StateThread`, though the house rule makes
+    long-running components state machines.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — FUSE/CLI
   layering brief, divergences 1 and 2, and the engine-policy brief, divergences 1, 2 and 3.

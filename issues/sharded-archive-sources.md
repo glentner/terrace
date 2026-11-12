@@ -136,6 +136,21 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   archive fixtures these tests need; [`issues/hpc-deployment.md`](hpc-deployment.md) is where the
   researcher this serves meets the product. Root `PLAN.md` → § *Tier protocol*, § *Technology
   decisions*, § *Phase outline*.
+- 2026-11-11 (whole-tree review at `64faf27`): three notes.
+  - **The use case is read-only.** [`issues/read-only-mount.md`](read-only-mount.md) takes the write path
+    off its critical path. With it, the prerequisites are the read side of
+    [`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md) and the streaming read named above, not
+    the re-pack journaling or the finalization batching.
+  - **A member can be served without being unpacked.** The staged shard is an uncompressed tar and
+    `archive_index` records each member's data offset. A handle that is the tar's descriptor plus a base
+    offset and a length serves `read` with one `pread`, with no promotion, no per-member transaction and
+    no inode on any lower tier. Unpacking a shard to files spends on each lower tier the inodes the
+    shards were made to save. The owner's cascade pulls each file down on first read; whether the unit
+    that cascades is the member or the shard is worth deciding with a measurement
+    ([`issues/read-path-metadata-writes.md`](read-path-metadata-writes.md) has the per-file cost).
+  - **Many mounts read one dataset.** A multi-node job mounts on every node and a sweep runs many jobs at
+    once. One mount per overlay means one staged copy per mount
+    ([`issues/read-only-mount.md`](read-only-mount.md) R6).
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed
   by the invariant audit run during the software-factory port (2026-08-22) — tier-layer review.

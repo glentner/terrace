@@ -120,4 +120,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   shaping decides whether narrowing it is in scope here, and any narrowing must still keep an
   ancestor's catalog move out of a handle-less `truncate` from its lookup under the mutex to its
   recording (that cycle's GOAL R4).
+- 2026-11-11 (whole-tree review at `64faf27`): held. What excludes a directory rename, and how long the
+  source mutex is held, is decision 4 of
+  [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) R1. Shape this after that is ruled.
 - Found by: `deferred-rename-source-orphan`'s plan (D4), seeded in its P5.

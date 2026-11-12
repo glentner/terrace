@@ -182,5 +182,14 @@ Draft R-IDs, to be firmed up at promotion.
 - Open — **one job or two.** Splitting FUSE and MinIO means a MinIO outage cannot mask a FUSE
   regression and the two halves can have different triggers; it also doubles the setup cost and the
   places a pass count has to be asserted.
+- 2026-11-11 (whole-tree review at `64faf27`): two notes.
+  - **Placement.** The re-triage of this date moves the lane ahead of the mount-level fixes, against
+    "Why it was deferred" above. The reason there was that the lane is worth most once it has
+    regressions to protect. The cycles now queued behind it (the daemonized mount, the owner of a
+    created file, a read-only mount) change behaviour only a real mount shows, so each would otherwise
+    land with its mount-level case owed.
+  - **A first payload.** A POSIX conformance suite run against a real mount.
+    [`issues/posix-surface-gaps.md`](posix-surface-gaps.md) found root-owned entries and missing symlink
+    creation by reading; a suite finds the rest of that class by measurement.
 - Found by: the invariant audit run during the software-factory port (2026-08-22), verification-substrate
   brief.

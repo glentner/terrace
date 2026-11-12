@@ -109,6 +109,13 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   at release time?
 - Open question — **the workload.** Which file sizes, and does the harness deliberately cross
   `bypass_size` so the pass-through path is measured as well as the staged one?
+- 2026-11-11 (whole-tree review at `64faf27`): a first engine-level figure exists and argues against
+  waiting. [`issues/read-path-metadata-writes.md`](read-path-metadata-writes.md) measured open, read and
+  release of a resident 4 KiB file at about 3,100 to 4,300 files a second against 35,900 on the stage
+  directly, flat from four threads up, with three SQL writes per file. "Why it was deferred" holds for a
+  published table. It does not hold for a baseline: a number that shapes the read path is worth having
+  before the read path is built on. Shaping should consider two cycles, a small engine-API baseline now
+  and the mounted, published figures where this entry sits.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the remaining-work
   review found nothing built, and the tier and verification-substrate reviews supplied the measurement
   hazards.

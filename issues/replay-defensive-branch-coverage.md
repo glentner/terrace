@@ -75,4 +75,8 @@ unreachable or equivalent, with the reason, in the test module's docstring.
   count of queue reads in `tests/engine/test_replay.py`, `queue_passes`, is one),
   `issues/model-commit-route-reach.md`, `spec/nested-rmdir-replay-recursion/REVIEW.md` (cycle 1,
   coverage observations).
+- 2026-11-11 (whole-tree review at `64faf27`): held.
+  [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) proposes to delete the function these
+  mutants live in. This seed has no object if that is adopted, and is worth a cycle only if it is
+  declined.
 - Found by: `nested-rmdir-replay-recursion` review cycle 1.

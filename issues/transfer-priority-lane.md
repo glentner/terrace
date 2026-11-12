@@ -58,6 +58,13 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   are the heaviest on-demand transfers the product will make;
   [`issues/benchmark-harness.md`](benchmark-harness.md) matters because the lane's whole claim is a
   latency claim. Root `PLAN.md` → § *Phase outline* (phase 12).
+- 2026-11-11 (whole-tree review at `64faf27`): there is no queue for a lane to reorder. Measured through
+  the engine API on a three-tier POSIX stack with tmpdir tiers: during a `drain` of 50 dirty files, every
+  call to `TransferPool.copy` ran on the calling thread and the pool's four workers ran nothing. `submit`
+  (`src/sosfs/engine/transfer.py:122-125`) has one caller, a test. Write-back, drain and rescue are
+  single-stream, so the first question is whether background copies use the pool at all
+  ([`issues/offline-commit-command.md`](offline-commit-command.md) asks it of commit). A lane follows
+  from a yes.
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*. The flat
   `TransferPool` queue was confirmed by the invariant audit run during the software-factory port
   (2026-08-22) — tier-layer and remaining-work reviews.
