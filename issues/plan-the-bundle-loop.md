@@ -71,7 +71,8 @@ alternative turned down.
   durable tier rebuilds what changed and leaves the staged bundles in place for the next mount. What a
   mount does after a kill.
 - **R6** — **Identity and local state.** Row ids that are never reused, as a schema bump taken before
-  anything is deployed. What a mount's database holds once the durable tier describes itself.
+  anything is deployed (ruled 2026-11-11). What a mount's database holds once the durable tier describes
+  itself.
 - **R7** — **Sharing.** A top durable tier shared read-only between mounts, each with tiers of its own
   below ([`issues/shared-staged-tier.md`](shared-staged-tier.md)): what it needs from the marker, the
   member index and the pull. Many writers on one overlay are not designed for here and are scoped when

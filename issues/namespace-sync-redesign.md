@@ -67,15 +67,15 @@ clear it and neither does a remount. What masks a source object is a fact about 
 (`Catalog.holder`). It does not need a row in the logical tree.
 
 **3. Path locks cover one path, and a directory rename moves many.** A lock on `/a/b/c` does not stop
-a rename of `/a`, which rewrites every descendant's catalog path and moves every stage copy. Five
-cycles met this and each deferred it to `issues/freethreaded-concurrency-stress.md`, a `test` seed,
-which now records four sequences reproduced by injection, two of them silent (an `open` that returns
-another entry's stage bytes; a promotion that copies the source over a dirty stage copy and records it
-clean, so the write is gone), and a list of eleven calls an ancestor's catalog move can land inside. The `open`, `_serve` and
-`truncate` docstrings state the windows they leave open in their own words. The response each time
-was to widen one global lock: `_source_lock` is now held across whole-file copies to and from the
-source, across a rename's catalog transaction, and across every handle-less `truncate`
-(`AGENTS.md` § 10).
+a rename of `/a`, which rewrites every descendant's catalog path and moves every stage copy. Five cycles
+met this and each deferred it to `issues/freethreaded-concurrency-stress.md`, a `test` seed, which now
+records four sequences reproduced by injection, two of them silent (an `open` that returns another
+entry's stage bytes; a promotion that copies the source over a dirty stage copy and records it clean, so
+the write is gone), and a list of eleven calls an ancestor's catalog move can land inside. The `open`,
+`_serve` and `truncate` docstrings state the windows they leave open in their own words. The response
+each time was to widen one global lock: `_source_lock` is now held across whole-file copies to and from
+the source, across a rename's catalog transaction, and across every handle-less `truncate` (`AGENTS.md` §
+10).
 
 **The replay itself is a dependency solver written as a queue walker.** The queue stopped being an
 operation log in the first cycle: rows resolve "the entry's current place, never the paths a row
@@ -127,7 +127,7 @@ before any code, under the plan-drift rule.
   prototype evidence for it. [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) is the cycle
   that writes them; if it has landed, this criterion is met by citing it:
   1. **Stable ids.** `AUTOINCREMENT` on `entry.id`, `writeback.id` and `intent.id`, as a schema version
-     bump taken before any state database is deployed.
+     bump taken before any state database is deployed. Ruled yes by the maintainer on 2026-11-11.
   2. **Where tombstones live.** Out of the logical namespace: a removed or moved-away entry holds a
      physical place only, and the name it left is free at once.
   3. **How the source catches up.** From state, at a unit the source type sets. For a bundle source
@@ -167,14 +167,18 @@ before any code, under the plan-drift rule.
 
 ## Notes
 
-- **What this absorbs, if adopted.** The parked cycles `rename-over-tombstoned-child` (branch
-  `fix/rename-over-tombstoned-child`, its prototype and probes in a local ref) and
-  `model-commit-route-reach` (branch `test/model-commit-route-reach`) become acceptance material here
-  rather than separate landings: R3 and R7. `issues/replay-cost-at-scale.md` and
-  `issues/replay-defensive-branch-coverage.md` describe a function this would delete: R6 carries the
-  first, and the second has no object once `_replay_through` is gone.
-  `issues/source-commit-staged-publish.md` depends on decision 4. None of those seeds is retired by
-  this one being filed; that needs the maintainer's word.
+- **What this absorbs.** Ruled by the maintainer on 2026-11-11: the two parked cycles are folded into
+  this one and do not resume. `rename-over-tombstoned-child` becomes R3 and `model-commit-route-reach`
+  becomes R7. Their records: branch `fix/rename-over-tombstoned-child` at `efe3c8c` and branch
+  `test/model-commit-route-reach` at `1f33386`, both pushed, each holding its `spec/{slug}/GOAL.md` with
+  the rulings made in it. Their unfinished work is on the foreman's host only, as commit objects under
+  `refs/park/`: the tombstone fix with its 29 tests (`rename-over-tombstoned-child-prototype`,
+  `f3fe3fa`), the widened model (`model-commit-route-reach-prototype`, `8766694`) and its plan
+  (`model-commit-route-reach-plan`, `3572ed9`). All of it predates the rename and is written against the
+  replay; it is material to port, not to merge. `issues/replay-cost-at-scale.md` and
+  `issues/replay-defensive-branch-coverage.md` describe a function this deletes: R6 carries the first,
+  and the second has no object once `_replay_through` is gone. Neither is retired by this ruling; that
+  waits for this cycle to land. `issues/source-commit-staged-publish.md` depends on decision 4.
 - **Two stages.** The model, the schema and the bundle source first, where there is no replay to
   port. POSIX and object-prefix sources second, where `_replay_through` is deleted. Shaping decides
   whether that is one cycle or two; the first stage is what the bundle loop waits on

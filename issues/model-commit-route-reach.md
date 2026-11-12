@@ -100,6 +100,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   `test/model-commit-route-reach`, parked at its plan's stop on 2026-11-09) found two engine defects on
   its dry runs, and each opened a fix cycle of its own.
   [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) proposes to take the widened model as
-  its acceptance instrument (its R7) instead of landing it against the current replay. Resuming it as
-  planned or folding it in is the maintainer's call; nothing here changes the branch.
+  its acceptance instrument (its R7) instead of landing it against the current replay. Ruled by the
+  maintainer on 2026-11-11: it is folded into that rebuild and does not resume. The branch stays as the
+  record.
 - Found by: `deferred-rename-source-orphan` review cycle 1 (F4, coverage observation), 2026-11-06.

@@ -29,7 +29,8 @@ delay — cannot be configured from a spec file, and nothing in the engine calls
 first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
 developer machine against a local object store. The lifecycle around the loop and the mount a researcher
 uses follow. Sharing the staged bundles between read-only mounts may come early; many writers on one
-overlay are for a later day. The order is a proposal until the decisions in the next section are ruled.
+overlay are for a later day. The maintainer agreed this order on 2026-11-11 and ruled the decisions that
+gated it; what is still open is in the next section.
 
 Unremediated security findings are indexed separately in `.security/ROADMAP.md`, which is gitignored.
 See [`AGENTS.md`](AGENTS.md) for why.
@@ -38,29 +39,25 @@ See [`AGENTS.md`](AGENTS.md) for why.
 
 ## Decisions that gate the queue
 
-Open as of 2026-11-11. Each is the maintainer's, and each changes what the next cycle is. Remove a
-bullet when it is ruled; the ruling's record is the seed it names. The first of the bundle loop's
-cycles, [`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md), is where most are written
-down.
+Each is the maintainer's. Remove a bullet when it is ruled; the ruling's record is the seed it names.
+Ruled on 2026-11-11, and recorded in the seeds: the order of the sections below; that pressure or an
+expired delay moves a copy one tier up and no further, a clean copy included
+([`issues/eviction-one-hop.md`](issues/eviction-one-hop.md)); what a soft unmount leaves
+([`issues/shutdown-rescue-gaps.md`](issues/shutdown-rescue-gaps.md)); one database for everything, on
+storage every host sees ([`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md)); row ids
+that are never reused; and the namespace rebuild, with the two parked cycles folded into it
+([`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)).
 
-- **What leads.** Three orders were weighed: take a read-only mount all the way to a cluster first;
-  finish the write-back transaction machinery first; or drive a thin slice of the whole bundle loop
-  locally and harden outward from it. The sections below are the third, and the maintainer agreed
-  the direction on 2026-11-11.
-- **How a source catches up.** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)
-  lists the choices. For a bundle source one is forced: mark the bundle dirty and rebuild it from
-  state. Adopting the seed holds four others and folds two parked cycles into it; declining it
-  resumes them in their old order.
-- **Stable row ids while nothing is deployed.** `AUTOINCREMENT` is a schema version bump that strands
-  no state database today and every one after the first deployment.
-- **The two parked cycles.** `rename-over-tombstoned-child` and `model-commit-route-reach` sit on
-  pushed branches with open worktrees. Resume them as planned, or fold them into the rebuild as its
-  acceptance tests.
 - **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an unmount
   helper, how a Python 3.15 runtime arrives, and whether SQLite's locks and journal mode are sound on the
   home filesystem, where the one database is ruled to live. It does not gate the first section. It is
   minutes of checking, and it decides what the third section is
   ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
+- **What follows the loop.** The lifecycle around it or the mount a researcher uses. Decided when the
+  first section closes.
+- **Retiring two held seeds.** `replay-cost-at-scale` and `replay-defensive-branch-coverage` describe a
+  function the rebuild deletes. Retiring them waits for the rebuild to land and for the maintainer's
+  confirmation.
 
 ## Queued: the bundle loop, driven locally
 
@@ -84,17 +81,17 @@ bundles that changed and leaves the staged ones in place for the next mount.
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
-First, because the cost grows with every later cycle and the tree is quiet only while the parked
-cycles are held: 498 occurrences across 83 files at `6419966`, before the factory added its own. The
-mechanical two-thirds — distribution name, package directory, imports, class names, test modules, CI,
-prose — is a rename. The other third is not: the `SOSFS_*` environment prefix, the `user.sosfs.*`
-xattr namespace, the `.sosfs/marker` and `.sosfs/partial` directories in every managed tier root, and
-the default state path are **on-disk and user-visible contracts**, and changing the marker directory
-without a decision about existing overlays turns every managed location into an evaporated tier on the
-next mount. Nothing is deployed, which is what makes that decision cheap now. If stable row ids are
-ruled in, the schema bump rides with this format break. `PLAN.md` records `sosfs` as a technology
-decision rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before
-it touches code.
+First, because the cost grows with every later cycle and the tree is quiet only while the parked cycles
+are held: 498 occurrences across 83 files at `6419966`, before the factory added its own. The mechanical
+two-thirds — distribution name, package directory, imports, class names, test modules, CI, prose — is a
+rename. The other third is not: the `SOSFS_*` environment prefix, the `user.sosfs.*` xattr namespace, the
+`.sosfs/marker` and `.sosfs/partial` directories in every managed tier root, and the default state path
+are **on-disk and user-visible contracts**, and changing the marker directory without a decision about
+existing overlays turns every managed location into an evaporated tier on the next mount. Nothing is
+deployed, which is what makes that decision cheap now. Stable row ids were ruled in on 2026-11-11, and
+the schema bump can ride with this format break. `PLAN.md` records `sosfs` as a technology decision
+rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before it touches
+code.
 
 ### Drive the bundle loop end to end on a local object store
 
@@ -531,23 +528,23 @@ one entry: a Globus inner location, which is a submit-and-wait transfer rather t
 synthetic-subtree wrapping for a non-conforming archive. Sharding, the priority lane and the SFTP
 inner location were split out as each found a user. What is left has no one asking for it yet.
 
-## Held behind the namespace decision
+## Held for the namespace rebuild
 
 Four seeds that repair or measure the mechanism
-[`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) proposes to replace. Held
-since 2026-11-11, not retired: each keeps its file and its evidence. If the rebuild is adopted, the
-proposal is to fold the first into its acceptance tests, retire the next two, and shape the last
-after it; if it is declined, they return to the head of the lifecycle section in this order.
+[`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) replaces. Ruled on 2026-11-11:
+the rebuild goes ahead, and the two parked cycles fold into it. The first seed below is therefore its
+acceptance material and has no cycle of its own. The next two wait for the rebuild to land. The last is
+shaped after it. Held, not retired: each keeps its file and its evidence.
 
 ### The model rarely reaches the scheduler and eviction commit routes
 
 **Seed:** [`issues/model-commit-route-reach.md`](issues/model-commit-route-reach.md) · `test` · appetite small
 
 Over the fixed CI draw the stateful model committed to the source through a scheduler poll's data row
-zero times, and through the eviction manager zero times. Its cycle is parked at its plan stop on
-branch `test/model-commit-route-reach`: widening the model's reach found two engine defects in two
-dry runs, each of which opened a fix cycle. The widened model is the instrument a rebuild should be
-judged by.
+zero times, and through the eviction manager zero times. Its cycle, parked at its plan stop on branch
+`test/model-commit-route-reach`, was folded into the rebuild on 2026-11-11: widening the model's reach
+found two engine defects in two dry runs, each of which opened a fix cycle. The widened model is the
+instrument a rebuild should be judged by.
 
 ### A single replay's cost grows faster than its queue
 
