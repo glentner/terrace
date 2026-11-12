@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/local-bundle-loop
 base: main
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: Stand the loop up with one command
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -155,42 +155,50 @@ checklists below are the work. `code-build` executes the next actionable phase, 
 generated bundles, writes the spec and the directories, prints the spec's path, and leaves nothing
 behind on any exit path; its own tests prove each of those.
 
-- [ ] `tools/bundle_loop.py` as `PLAN.md` § 2.1 specifies: `Store`, `Loop` (`root`, `content`,
+- [x] `tools/bundle_loop.py` as `PLAN.md` § 2.1 specifies: `Store`, `Loop` (`root`, `content`,
       `keys`, `spec`, `state`, `tiers`, `staging`, `form`, `resync_interval`, `delay`, `respec`,
       `close`), `main` with `-n`, `--fastest-size`, `--endpoint` and its credentials, and an
       optional command. SPDX header pair first. No import of `terrace` or `tests`.
-- [ ] Member bytes come from `random.Random` seeded by bundle and member, so an object is a few
+- [x] Member bytes come from `random.Random` seeded by bundle and member, so an object is a few
       kilobytes after compression. Each bundle is one top-level directory named for its stem, six
       files in two directories, no empty directory.
-- [ ] The spec is the single-archive form for one bundle and the sharded form for several, key for
+- [x] The spec is the single-archive form for one bundle and the sharded form for several, key for
       key as `PLAN.md` § *Configuration* (the project's) documents them; `scratch` is shared scope,
       `tmp` and `shm` are node scope; every stage tier states a size limit, a count limit and a
       delay.
-- [ ] Teardown: `Loop.close()`; the constructor closes what it made if a later step raises; `main`
+- [x] Teardown: `Loop.close()`; the constructor closes what it made if a later step raises; `main`
       stops the store in a `finally` that covers a failure while the loop is built; `SIGTERM` and
       `SIGHUP` are handled like an interrupt, and `SIGINT` gets a handler of its own so the helper
       stops when started with it ignored. All three are ignored once teardown begins. `close()` makes
       the root's directories writable before removing it and lets a failure to remove it propagate.
       Standard output carries the spec's path and the command's own output, nothing else
       (`ThreadedMotoServer(..., verbose=False)`).
-- [ ] `tests/loop/__init__.py` loads the helper by path and exports it. `tests/loop/conftest.py`
+- [x] `tests/loop/__init__.py` loads the helper by path and exports it. `tests/loop/conftest.py`
       has the session fixture `store`, which skips by name where `boto3` or `moto.server` cannot be
       imported.
-- [ ] `tests/loop/test_helper.py`, `pytestmark = mark.unit`, with the sixteen tests `HELPER_ROWS`
+- [x] `tests/loop/test_helper.py`, `pytestmark = mark.unit`, with the sixteen tests `HELPER_ROWS`
       names. Six run the helper in a subprocess and assert that the endpoint the spec names refuses
       a connection and that the spec's directory is gone: a command that exits 0, a command that
       exits 3 (and the helper exits 3), an interrupt, a termination signal, an interrupt when the
       helper was started with it ignored, and a second signal 5 ms after the first.
       Each such test waits for the process and kills it in a `finally`. The bundle test unpacks
       each object with `tarfile` itself; the oracle arrives in P2.
-- [ ] `tools/lint.sh`: add `tools` to the ruff paths and to the SPDX loop, and to the two notes that
+- [x] `tools/lint.sh`: add `tools` to the ruff paths and to the SPDX loop, and to the two notes that
       name the directories. `.github/workflows/ci.yml`: add `tools` to the ruff step (`PLAN.md`
       deviation row 2; drop this item if the sign-off declines it).
-- [ ] `AGENTS.md`: a line for the helper under § Commands; the `tools/` row of § Repository map
+- [x] `AGENTS.md`: a line for the helper under § Commands; the `tools/` row of § Repository map
       names it; the counts move (see above).
-- [ ] Fail-once, each seen red on `rows-p1` and reverted: M7 (the constructor stops closing what it
+- [x] Fail-once, each seen red on `rows-p1` and reverted: M7 (the constructor stops closing what it
       made), M8 (`main` stops handling `SIGTERM`) and M12 (`close` ignores a directory it cannot
       remove).
+- **Amended at build (2026-11-12).** The helper carries no shebang and no exec bit: `tools/lint.sh`'s
+  SPDX check requires the header pair on lines 1 and 2, and a shebang pushed it to 2 and 3 (the plan
+  never dry-ran lint with `tools` in its paths). It runs as `uv run python tools/bundle_loop.py`.
+  `.github/workflows/ci.yml` has no SPDX step of its own, so only its ruff step gains `tools`.
+  `test_helper.py` skips by name, as `store` does, where `boto3` or `moto.server` is missing. The
+  M12 test's stand-in `rmtree` honours `ignore_errors` as the real one does, so a `close` that passes
+  `ignore_errors=True` is caught as well as one that swallows the error; both were planted and red.
+  `AGENTS.md`'s SPDX file count (§ Code style) moves with the tree too.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1`
 - **Touches:** `tools/bundle_loop.py`, `tests/loop/__init__.py`, `tests/loop/conftest.py`,
   `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`.
