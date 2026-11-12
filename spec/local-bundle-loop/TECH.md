@@ -3,10 +3,10 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/local-bundle-loop
 base: main
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2
 - id: P3
   name: The MinIO variant, the measured lane and the ledger
-  status: pending
+  status: done
   satisfies:
   - R7
   - R8
@@ -264,35 +264,51 @@ measured and recorded; `AGENTS.md` describes all of it with figures that match t
 R8 and R9 are met in part by what is committed here and in `AGENTS.md`, not by behaviour a blind
 reviewer can drive: the lane figures below are graded by the orchestrator against the gate's log.
 
-- [ ] `tests/loop/test_scenario_minio.py`: `pytestmark = [mark.integration, mark.skipif(...)]`, with
+- [x] `tests/loop/test_scenario_minio.py`: `pytestmark = [mark.integration, mark.skipif(...)]`, with
       the endpoint, credentials, region, defaults and skip reason of
       `tests/tier/test_s3_integration.py`; the same nine function objects imported from
       `tests/loop/stages.py`; and a `scene` fixture over that endpoint.
-- [ ] `tests/loop/test_support.py`: add `test_the_minio_module_collects_the_same_stages`.
-- [ ] `variant` passes: the module's wiring over the helper's own store, nine expected failures with
+- [x] `tests/loop/test_support.py`: add `test_the_minio_module_collects_the_same_stages`.
+- [x] `variant` passes: the module's wiring over the helper's own store, nine expected failures with
       the same three properties as the unit module. Say nowhere that this is a run of the variant;
       it is a run of its fixtures against moto.
-- [ ] `issues/ci-integration-lane.md`: a dated note. `tests/loop/test_scenario_minio.py` is written
+- [x] `issues/ci-integration-lane.md`: a dated note. `tests/loop/test_scenario_minio.py` is written
       and collected and has never run, on any machine; the lane that first runs it also learns
       whether the tap works in front of a store that checks request signatures.
-- [ ] `AGENTS.md`: the integration count under § Commands, in § Repository map, in § Conventions and
+- [x] `AGENTS.md`: the integration count under § Commands, in § Repository map, in § Conventions and
       in the sentence on the tests no automated machine runs; a statement that the bundle loop's MinIO
       variant has not run on any machine, with `issues/ci-integration-lane.md` named as the seed that
       owns running it; the lane's measured time wherever the file states one.
-- [ ] Run the phase verify. Copy its three `lane` lines here, under **Measured**, and say they are
+- [x] Run the phase verify. Copy its three `lane` lines here, under **Measured**, and say they are
       from the P3 verify run. Then run `figures-p3` and `ledger` again, since both read files this
       step edits. Run `uv run pytest -m unit` once for the serial time `AGENTS.md` states.
-- [ ] The deferral ledger. Walk P1, P2 and P3 above for every "do not fix here", "known
+- [x] The deferral ledger. Walk P1, P2 and P3 above for every "do not fix here", "known
       limitation", "follow-up", "left as" or "not run", and confirm each names its
       `issues/{slug}.md` and that `ROADMAP.md` indexes it. This cycle has one: the MinIO variant is
       not run in this cycle, and the machine that runs it is
       [`issues/ci-integration-lane.md`](../../issues/ci-integration-lane.md)'s to provide. An
       unrecorded deferral fails the phase.
-- [ ] Fail-once: M9 (one stage deleted from `test_scenario_minio.py`), seen red on `collect`.
-- **Measured:** to be filled from the P3 verify run. Planning's one `lane` run, on the prototype at
-  `bf438b4` before the design review added ten tests: without `tests/loop` 37.3 s (median of 45.9,
-  37.3, 32.8), 731 passed; with it 37.4 s (median of 37.4, 39.7, 31.2), 762 passed and 9 expected
-  failures; added 0.1 s.
+- [x] Fail-once: M9 (one stage deleted from `test_scenario_minio.py`), seen red on `collect`.
+- **Measured:** from the P3 verify run (`tools/lint.sh && … check_outcomes.py p3`, 2026-11-12, load
+  average about 4 at the start), the three `lane` lines as the gate printed them:
+
+  ```
+  gate: lane before: 30.6 s median of [30.6, 30.2, 31.1]; {'passed': 731}
+  gate: lane after:  31.7 s median of [31.7, 31.7, 30.1]; {'passed': 772, 'xfailed': 9}
+  gate: lane added:  1.0 s, budget 10 s
+  ```
+
+  Before this cycle: 731 passed. After: 772 passed and 9 expected failures, none skipped or failed.
+  The P2 verify run had measured 4.5 s added (medians 35.1 s and 39.6 s); planning measured 0.1 s on
+  the prototype. One serial `uv run pytest -m unit` after the gate: 772 passed, 19 deselected, 9
+  xfailed in 59.2 s. `AGENTS.md`'s "~60 s serial, ~30 s under `-n auto`" already matches both, so
+  its timings are unchanged; its counts moved.
+- **Amended at build (2026-11-12).** `variant` ran the MinIO module's fixtures, tap and skip against
+  the helper's moto store standing in for MinIO: nine expected failures with the same three
+  properties. It is not a run against MinIO; `tests/loop/test_scenario_minio.py` has not run against
+  MinIO on any machine, and running it is `issues/ci-integration-lane.md`'s (noted there, dated
+  2026-11-12). The unit lane now counts 41 passing tests under `tests/loop` (16 helper, 25 support),
+  as planning's prototype did.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3`
 - **Touches:** `tests/loop/test_scenario_minio.py`, `tests/loop/test_support.py`,
   `issues/ci-integration-lane.md`, `AGENTS.md`, `spec/local-bundle-loop/TECH.md`.

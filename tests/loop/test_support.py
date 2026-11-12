@@ -23,7 +23,7 @@ from obstore.store import S3Store
 from pytest import mark, raises, param
 
 # Internal libs
-from tests.loop import oracle, stages, test_scenario
+from tests.loop import oracle, stages, test_scenario, test_scenario_minio
 from tests.loop.stages import Blocked, blocked, Scene, STAGES
 from tests.loop.tap import Tap
 
@@ -112,6 +112,13 @@ def test_the_unit_module_collects_exactly_the_nine_stages() -> None:
     for name in STAGES:
         assert getattr(test_scenario, name) is getattr(stages, name)
     assert test_scenario.pytestmark.name == 'unit'
+
+
+def test_the_minio_module_collects_the_same_stages() -> None:
+    assert sorted(name for name in vars(test_scenario_minio) if name.startswith('test_')) == sorted(STAGES)
+    for name in STAGES:
+        assert getattr(test_scenario_minio, name) is getattr(stages, name)
+    assert [found.name for found in test_scenario_minio.pytestmark] == ['integration', 'skipif']
 
 
 Files = Dict[str, Optional[bytes]]

@@ -59,11 +59,11 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 780 tests, ~60 s — must pass before every commit
+uv run pytest -m unit                            # 781 tests, ~60 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
-uv run pytest -m integration                     # 10 tests: real mounts (Linux) + MinIO
+uv run pytest -m integration                     # 19 tests: real mounts (Linux) + MinIO
 tools/lint.sh                                    # ruff + layering + SPDX + version + CLAUDE.md symlink
 tools/temp_site.sh uv run terrace --version      # CLI drive in a throwaway site
 uv run python tools/bundle_loop.py               # the bundle loop on a local object store; prints the spec
@@ -86,8 +86,9 @@ Each of the four jobs (`Lint & build`, `Unit (Linux, 3.15)`, `Unit (Linux, 3.15t
 red job is a defect to fix, never a known failure to read past.
 
 **CI does not run the integration suite.** There is no integration job and nothing starts MinIO, so
-ten tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, plus the
-only real-S3 round trip — execute on no automated machine. Never infer from a green PR that they
+nineteen tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, the
+only real-S3 round trip, and the bundle loop's nine stages against MinIO — execute on no automated
+machine. Never infer from a green PR that they
 passed. Worse, `uv run pytest -m integration` **exits 0 when every test skipped**, so a gate written
 that way proves nothing; assert a pass count.
 
@@ -101,7 +102,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 50 files, 790 tests (780 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `test_scenario.py` drives the engine over the spec `tools/bundle_loop.py` writes as nine ordered stages, the loop's progress record (§ *Verification*); `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives. |
+| `tests/` | 51 files, 800 tests (781 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `test_scenario.py` drives the engine over the spec `tools/bundle_loop.py` writes as nine ordered stages, the loop's progress record (§ *Verification*); `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_scenario_minio.py` is the same nine stages under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine. |
 | `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -707,7 +708,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 780 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 781 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -753,7 +754,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **780 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **781 unit tests in ~60 s serial, ~30 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
@@ -768,7 +769,10 @@ name the post-condition it asserts:
   pytest through it** — pytest loses its rootdir and exits 5, and the scrub strips
   `TERRACE_TEST_MINIO_*`.
 - **Integration** — `uv run pytest -m integration` after `docker compose up -d --wait`. Not reachable
-  on every machine and not run by CI; when a criterion needs it, say so.
+  on every machine and not run by CI; when a criterion needs it, say so. The bundle loop's MinIO
+  variant, `tests/loop/test_scenario_minio.py`, has not run on any machine: it is written and
+  collected, and its fixtures have been exercised only against the helper's moto store standing in
+  for MinIO. Running it is `issues/ci-integration-lane.md`'s.
 
 **The bundle loop is a progress record.** `tests/loop/test_scenario.py` drives the loop end to end
 as nine stages: reach, read, pressure, change, re-aggregate, read back, release, offline commit and
@@ -811,7 +815,7 @@ symbols, documented invariants, `PLAN.md` sections.
 
 Follows hypershell conventions (the author's house style):
 
-* `src/` layout; 120-character lines; SPDX headers on every module (all 84 `.py` files under `src/`,
+* `src/` layout; 120-character lines; SPDX headers on every module (all 85 `.py` files under `src/`,
   `tests/` and `tools/` carry them; `lint.sh` keeps it that way).
 * Module template:
 
