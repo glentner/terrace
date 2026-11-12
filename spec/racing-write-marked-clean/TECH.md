@@ -3,7 +3,7 @@ slug: racing-write-marked-clean
 title: A write racing a commit is never recorded clean
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/racing-write-marked-clean
 base: main
 current_phase: done
@@ -28,10 +28,10 @@ phases:
   hill: downhill
   verify: uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/verify/racing_gate.py base suite records ledger
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 99851a7d51ab48a06aef141deb423fb737a6a98b
+  verdict: changes-requested
+  blocked_reason: 'F1: two stale measured figures in AGENTS.md (R8). F2: no test pins the flag reset after a hop a change met.'
+  cycle: 1
 ---
 
 # TECH.md — A write racing a commit is never recorded clean
