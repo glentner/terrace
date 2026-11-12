@@ -23,6 +23,8 @@ __all__ = ['Tap', 'Request', 'Window']
 
 HOP_BY_HOP = frozenset({'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
                         'proxy-authenticate', 'proxy-authorization'})
+LINE = 65537                     # the longest chunk-size or trailer line the tap reads
+BLOCK = 65536                    # how much of a refused body the tap reads at a time
 
 
 class Request(NamedTuple):
@@ -94,11 +96,36 @@ class Tap:
             def log_message(self, *args) -> None:
                 return
 
+            def drain(self) -> None:
+                """
+                Read a chunked body to its last chunk and the trailer section, discarding it. A reply
+                sent with request bytes still unread closes the connection under the client's writes,
+                which the client may see as a broken pipe instead of the reply.
+                """
+                while True:
+                    size = int(self.rfile.readline(LINE).split(b';', 1)[0], 16)
+                    if size == 0:
+                        break
+                    size += 2                                # the line break after the chunk
+                    while size:
+                        data = self.rfile.read(min(size, BLOCK))
+                        if not data:
+                            raise ConnectionError('the client closed inside a chunk')
+                        size -= len(data)
+                while self.rfile.readline(LINE) not in (b'\r\n', b'\n', b''):
+                    pass
+
             def forward(self) -> None:
                 if 'chunked' in self.headers.get('Transfer-Encoding', '').lower():
-                    # A body this tap cannot replay faithfully is refused and remembered, never guessed at.
+                    # A body this tap cannot replay faithfully is refused and remembered, never guessed at,
+                    # and never forwarded. It is read to its end first, so the client always sees the refusal.
                     with tap._mutex:
                         tap.refused.append(f'{self.command} {self.path}')
+                    self.close_connection = True
+                    try:
+                        self.drain()
+                    except (ValueError, OSError):
+                        return                               # broken framing has no end to read to
                     self.send_error(501, 'The tap forwards bodies with a Content-Length only')
                     return
                 body = self.rfile.read(int(self.headers.get('Content-Length', 0) or 0))

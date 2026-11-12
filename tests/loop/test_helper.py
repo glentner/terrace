@@ -34,10 +34,13 @@ def refuses(endpoint: str) -> bool:
     """Whether nothing listens at the endpoint any more."""
     address = urlsplit(endpoint)
     try:
-        socket.create_connection((address.hostname, address.port), timeout=2).close()
-        return False
+        probe = socket.create_connection((address.hostname, address.port), timeout=2)
     except ConnectionRefusedError:
         return True
+    with probe:
+        # A free loopback port can be handed to the probe itself as its source: TCP then connects the
+        # socket to itself, and nothing listens there.
+        return probe.getsockname() == probe.getpeername()
 
 
 def client(endpoint: str) -> Any:

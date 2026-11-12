@@ -240,14 +240,34 @@ def test_scene_refuses_a_spec_that_bypasses_the_tap(scene: Callable[..., Scene],
             Scene(loop=stage.loop, tap=other, fetch=stage.fetch)
 
 
+def put_chunked(stage: Scene, key: str, chunks: list[bytes]) -> int:
+    """PUT a chunked body through the tap; the status the client reads back."""
+    address = urlsplit(stage.tap.endpoint)
+    connection = http.client.HTTPConnection(address.hostname, address.port, timeout=30)
+    try:
+        connection.request('PUT', f'/{stage.loop.bucket}/{key}', body=iter(chunks), encode_chunked=True,
+                           headers={'Transfer-Encoding': 'chunked'})
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
 def test_tap_refuses_a_chunked_body_and_fails_the_window(scene: Callable[..., Scene]) -> None:
     stage = scene(bundles=1)
-    address = urlsplit(stage.tap.endpoint)
     with raises(AssertionError, match='refused 1 request'):
         with stage.tap.window() as seen:
-            connection = http.client.HTTPConnection(address.hostname, address.port)
-            connection.request('PUT', f'/{stage.loop.bucket}/chunked', body=iter([b'a', b'b']),
-                               headers={'Transfer-Encoding': 'chunked'})
-            assert connection.getresponse().status == 501
-            connection.close()
+            assert put_chunked(stage, 'chunked', [b'a', b'b']) == 501
     assert seen.requests == []
+    with raises(Exception, match='NoSuchKey'):
+        stage.fetch('chunked')
+
+
+def test_tap_reads_a_long_chunked_body_before_refusing_it(scene: Callable[..., Scene]) -> None:
+    # Far more than the socket buffers hold: a tap that replied first would close under the client's writes.
+    stage = scene(bundles=1)
+    with raises(AssertionError, match='refused 1 request'):
+        with stage.tap.window() as seen:
+            assert put_chunked(stage, 'long', [bytes(16 * 1024)] * 256) == 501
+    assert seen.requests == []
+    with raises(Exception, match='NoSuchKey'):
+        stage.fetch('long')

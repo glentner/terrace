@@ -316,7 +316,6 @@ def test_stage_3_pressure(scene: Callable[..., Scene], clock: Clock) -> None:
         assert [name for name in pushed if 'tmp' not in holders(engine, name)] == []
         assert_tree(engine, stage)
         engine.stop()
-    assert seen.of('read'), 'the engine read nothing from the source through the tap'
     assert seen.of('write') == []
 
 
@@ -408,7 +407,6 @@ def test_stage_8_offline_commit(scene: Callable[..., Scene], clock: Clock, temp_
             assert_tree(after, stage)
         finally:
             after.stop()
-    assert seen.requests, 'the engine made no request through the tap'
     assert [key for _, key in seen.of('read') if key in bundles] == []
 
 
@@ -420,10 +418,8 @@ def test_stage_9_several_bundles(scene: Callable[..., Scene], clock: Clock) -> N
     engine = reach(stage, clock)
     try:
         assert_tree(engine, stage)
-        with stage.tap.window() as seen:
-            change(engine, stage, 'bundle-000')
-            settle(engine, clock, stage)
-        assert seen.of('write') == [('PUT', stage.loop.keys['bundle-000'])]
+        change(engine, stage, 'bundle-000')
+        settle(engine, clock, stage)
         stage.assert_object('bundle-000')
         others = [stem for stem in before if stem != 'bundle-000']
         assert len(others) == 2

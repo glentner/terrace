@@ -218,16 +218,20 @@ def main(argv: List[str] | None = None) -> int:
 
     # A handler of our own for SIGINT too, so a helper started with it ignored (a shell's background
     # job) still stops on an interrupt.
-    def on_signal(signum: int, frame: object) -> None:
-        raise Stop(signum)
     handled = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-    for signum in handled:
-        signal.signal(signum, on_signal)
 
     def quiet() -> None:
         """Once teardown begins, a second signal must not cut it short."""
         for signum in handled:
             signal.signal(signum, signal.SIG_IGN)
+
+    def on_signal(signum: int, frame: object) -> None:
+        # Ignore the rest before raising: a second signal that landed between the raise and the
+        # teardown's own `quiet()` would skip the teardown.
+        quiet()
+        raise Stop(signum)
+    for signum in handled:
+        signal.signal(signum, on_signal)
 
     store = None
     try:

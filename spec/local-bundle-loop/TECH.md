@@ -3,7 +3,7 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/local-bundle-loop
 base: main
 current_phase: done
@@ -33,7 +33,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2
+  verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py
 - id: P3
   name: The MinIO variant, the measured lane and the ledger
   status: done
@@ -251,7 +251,49 @@ when they are weakened.
   The P2 gate's `lane` measured 4.5 s added (medians 35.1 s and 39.6 s); planning measured 0.1 s.
   M3 was planted both ways (strict lost, raises lost) and M10 both ways (`pytest.xfail`, a
   hand-raised `Blocked`); all red.
-- **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2`
+- **Amended at remediation (2026-11-12, review cycle 1).** P2 reopened for F1 and F2.
+  - [x] F1, the class: no `tests/loop` test's outcome depends on socket timing. The tap answered a
+        chunked body with 501 and closed with the body unread, so the client could fail with a broken
+        pipe before it read the refusal. The tap now records the refusal, reads the chunked body to
+        its end and discards it, then answers 501: the refusal is still recorded, never forwarded,
+        and fails its window. `test_tap_refuses_a_chunked_body_and_fails_the_window` now sends a
+        correctly framed chunked body (it used to send the raw bytes under a chunked header) and
+        checks that the store never received the key; `test_tap_reads_a_long_chunked_body_before_refusing_it`
+        (4 MB, far past the socket buffers) pins the drain in the suite and fails on every run
+        against the old tap.
+  - [x] F1 sweep over `tests/loop` and `tools/bundle_loop.py`. The tap's forward path reads the
+        whole `Content-Length` body before it connects upstream, and reads the whole reply before
+        answering; buffered reads loop to the length, so no read assumes one segment. Both servers
+        bind port 0 themselves (moto through `make_server`, the tap directly), and werkzeug closes
+        the listening socket when `serve_forever` returns, so no port is chosen, released and bound
+        again. Two sites changed: `refuses()` in `test_helper.py` treats a probe connected to itself
+        (a free loopback port handed to the probe as its own source) as refused, and the helper's
+        signal handler ignores the three signals before it raises, so a second signal can no longer
+        land between the raise and teardown's own `quiet()` and skip `Loop.close()`. The helper is
+        P1's file; its rows run in this gate's `rows-p2`.
+  - [x] F1 checker: `spec/local-bundle-loop/remediation/F1-socket-timing.py` (review cycle 1, F1)
+        repeats the fourteen socket-exchange tests 585 times in one `-n auto` run beside one
+        CPU-bound process per core (the chunked refusal 300 times, sized from the measured unfixed
+        rate below) and asserts each passed every time. On a throwaway worktree of `14a2b56`, the
+        same checker failed the chunked refusal 13, 10 and 12 times in 300 (about 4 %, every one a
+        `BrokenPipeError`); with this cycle's `test_support.py` planted there over the old tap, 50 in
+        300 and the long body 100 in 100. Every other repeated test passed there too, so the helper
+        changes rest on reasoning, not on a failure seen.
+  - [x] F2: stages 3 and 8 assert what R6 states and nothing more. Stage 3 drops "at least one read
+        reached the source" and keeps "no write"; stage 8 drops "at least one request" and keeps "no
+        read of any bundle's key" by the engine started after the commit. Swept the other stages
+        for a source-request assertion R6 does not state: stage 9 asserted its writes were exactly
+        one `PUT` of the changed bundle, which R6 does not ask of stage 9, and now asserts only R4's
+        byte-identical objects. Stages 5 and 7 are unchanged (R6 and the 2026-11-12 clarification).
+        This supersedes the *Counted* column of `PLAN.md` § 2.4 for stages 3, 8 and 9 and the
+        sentence in § 2.6 that stages 3 and 8 assert that something arrived; the scene's check that
+        the spec names the tap still guards against an empty window. Every stage still stops at
+        `reach`, so none of these assertions can execute until the block lifts.
+  - [x] Counts: 782 unit tests and 801 in all (one new test), moved in `AGENTS.md`; `tests/loop`
+        now has 42 passing unit tests (16 helper, 26 support), one more than P3 records.
+  - The P2 gate (`p2`) has no check of P2's exact state, so it runs unchanged after P3; the
+    reopened gate runs it, then the checker.
+- **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py`
 - **Touches:** `tests/loop/oracle.py`, `tests/loop/tap.py`, `tests/loop/stages.py`,
   `tests/loop/conftest.py`, `tests/loop/test_scenario.py`, `tests/loop/test_support.py`, `AGENTS.md`.
 
