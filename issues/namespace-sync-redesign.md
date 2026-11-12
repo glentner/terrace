@@ -124,7 +124,8 @@ Draft R-IDs, to be firmed up at promotion. The first is a design decision and be
 before any code, under the plan-drift rule.
 
 - **R1** — `PLAN.md` SHALL record, with the maintainer, the decision on each of these, and the
-  prototype evidence for it:
+  prototype evidence for it. [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) is the cycle
+  that writes them; if it has landed, this criterion is met by citing it:
   1. **Stable ids.** `AUTOINCREMENT` on `entry.id`, `writeback.id` and `intent.id`, as a schema version
      bump taken before any state database is deployed.
   2. **Where tombstones live.** Out of the logical namespace: a removed or moved-away entry holds a
@@ -139,6 +140,13 @@ before any code, under the plan-drift rule.
      rename takes alone; or stage copies addressed by entry id, so a rename moves no stage object.
      The second gives up stage trees a person can read by name, which matters when a state database is
      lost.
+  5. **What is authoritative for the durable tier.** The state database, as built; or the tier itself,
+     with the staged bundle, its index, the altered files and the record of removals all kept as
+     files there, and the database an index of the node-local tiers and a cache of the rest. The
+     second is what lets a halted job recover from scratch alone, a commit run on a host that never
+     saw the mount, and a later mount on a second node
+     ([`issues/multi-node-mounts.md`](multi-node-mounts.md)). It also takes SQLite off the shared
+     filesystem, where its own documentation says its journal mode does not work.
 - **R2** — WHEN an entry is purged, its id SHALL never name another entry in the same state database.
 - **R3** — WHEN a removed or moved-away entry's former name is taken by a create, a mkdir or a rename
   at any depth, the call SHALL succeed as it does on a plain directory. The reproduction above SHALL

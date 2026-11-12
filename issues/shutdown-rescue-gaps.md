@@ -186,5 +186,14 @@ the KB's EARS notes).
     transition takes), the missing transition from a cancelled drain to a rescue is a hole in a table
     instead of a branch nobody wrote. `Mount` is not a `StateThread`, though the house rule makes
     long-running components state machines.
+- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): the
+  story's name for the rescue is a partial commit up to the lowest durable tier, on a signal from the
+  user or the batch scheduler, so the mount can stop and the node be released. Two notes on the budget. A
+  scheduler's grace between its terminating signal and its kill is commonly tens of seconds, far below
+  the five-minute default here. And a scheduler can be asked to deliver a chosen signal a set time before
+  the limit, which is the dependable way to give a rescue minutes: one site guide advises treating the
+  lead time as a minimum, and a vendor ticket reports it not arriving, so the pattern wants testing where
+  it will run. Sources: <https://documentation.sigma2.no/jobs/guides/cleanup_timeout.html>,
+  <https://support.schedmd.com/show_bug.cgi?id=333>.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — FUSE/CLI
   layering brief, divergences 1 and 2, and the engine-policy brief, divergences 1, 2 and 3.

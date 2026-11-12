@@ -130,5 +130,12 @@ or a faithful stand-in; none is checkable in CI as it stands.
   8. **The time limit is the ordinary ending.** A killed mount leaves `shutdown_state = mounted`, and the
      next mount raises. Recovery at mount is a prerequisite for a second job on the same overlay
      ([`issues/audit-command.md`](audit-command.md)).
+- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
+  three updates. Question 6 above goes away if the durable tier describes itself and the state database
+  stays node-local ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R3, R6). Question 7 has a
+  seed of its own ([`issues/multi-node-mounts.md`](multi-node-mounts.md)). And for question 4, the job
+  script should ask the scheduler for a signal ahead of the limit and forward it to the mount, instead of
+  relying on the grace after the terminating signal
+  ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)).
 - Found by: the owner's statement of the deployment goal (2026-11-04). Nothing here has been checked
   on a cluster.

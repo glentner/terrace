@@ -172,6 +172,9 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
   same mechanism at the grain of a docstring. Each engine cycle paid a review round to keep the three in
   step. [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) R8 owns shrinking them if it is
   adopted. If it is declined, that residue is this seed's.
+- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
+  [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) redraws `PLAN.md` around the user story and
+  absorbs most of the residue listed here. Shape this after it, from what it leaves.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   FUSE/CLI/layering brief (items 1-3), the verification-substrate brief (item 5), and the
   remaining-work brief (item 4).

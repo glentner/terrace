@@ -34,6 +34,21 @@ reading the result from the bucket.
 > quota (eviction) or write-back delay themselves and put back to the source over S3/SFTP. A 'commit'
 > flushes everything back up the stack.
 
+**His clarifications of the same date**, paraphrased:
+
+- every stage tier has a size limit, a count limit and a write-back delay. Lack of room in a tier
+  pushes a copy up the stack, which may cause the same in the tier above; on a read-only workload
+  that is the only force. A changed copy left alone for its delay is pushed up as well, whatever the
+  tier's room, and that may cascade for the upper tier's own reasons;
+- a push goes one tier up. A write-back in the lowest tier never goes "all the way up" to repack the
+  bundle;
+- a signal, from the user or the batch scheduler, commits what has changed up to the lowest durable
+  tier, so the mount can stop and the node be released. Later, from a login node, a full commit
+  rebuilds the bundles that changed, and does not delete the staged bundles, so the next mount does
+  not pull them again;
+- mounting one spec on many nodes at once is wanted and is not a goal for the first release
+  ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
+
 The scenario below is that story at the size of a laptop: an object store for the source, a
 directory for scratch, two more for the node-local tiers.
 
@@ -81,6 +96,15 @@ Draft R-IDs, to be firmed up at promotion.
   injected clock past that bundle's re-aggregation interval and poll; then download and unpack the
   bundle's object and match the oracle's tree, with every other bundle's object byte-identical to
   before; then start a second engine on fresh state over the same bucket and read the same tree.
+- **R2a** — THE scenario SHALL include a pressure stage: with the fastest tier's limits set below the
+  bytes read, every read SHALL still succeed, each copy pushed out SHALL be found one tier up, and the
+  stage SHALL make no write to the source.
+- **R2b** — THE scenario SHALL include a release stage: after changes in the fastest tier, the
+  engine is told to detach, and every change SHALL then be on the durable tier with the source
+  untouched. A second process, given the spec and the durable tier and nothing of the first
+  process's node-local tiers, SHALL run the full commit; the bundle's object SHALL then match the
+  oracle, and the staged bundle SHALL still be on the durable tier, so a mount after it pulls
+  nothing.
 - **R3** — Each stage of the scenario the tree cannot yet pass SHALL be a strict expected failure
   that names the seed owning it, so a stage that starts passing fails the run until its marker is
   removed.
@@ -95,7 +119,8 @@ Draft R-IDs, to be firmed up at promotion.
   through the engine once the code exists; this one states the target the code is built toward.
 - The stages map onto seeds in order: reaching a bundle from a spec file
   (`issues/archive-spec-plumbing.md`); a clean transition that can be trusted on the copies a
-  re-aggregation reads (`issues/racing-write-marked-clean.md`); the synchronization model
+  re-aggregation reads (`issues/racing-write-marked-clean.md`); what pressure does
+  (`issues/eviction-one-hop.md`); the synchronization model
   (`issues/namespace-sync-redesign.md`, first stage); the journal bracket and the lock around a
   rebuild (`issues/archive-journaling-and-locking.md`); the delayed re-aggregation itself
   (`issues/archive-finalization-integration.md`); many bundles (`issues/sharded-archive-sources.md`).

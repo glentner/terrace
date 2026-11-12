@@ -165,6 +165,12 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
     the ordinary promotion off the source, which `ArchiveTier` serves by offset from the working
     `.tar`. It answers the question in the note above: members cascade one at a time to the fast
     tiers, and scratch holds the bundle whole, with no file made there for a member nobody changed.
+- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): a
+  staged bundle is the unit the durable tier's limits count and its eviction moves
+  ([`issues/eviction-one-hop.md`](eviction-one-hop.md)): a clean one is dropped, since the source holds
+  it; one with altered files beside it is rebuilt and pushed first. Pulling and decompressing a bundle is
+  work that must happen once, which is where a second mount first meets the first
+  ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed
   by the invariant audit run during the software-factory port (2026-08-22) — tier-layer review.

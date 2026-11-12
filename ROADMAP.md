@@ -26,11 +26,11 @@ every engine cycle worked on one mechanism, deferred namespace replay against a 
 entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
 bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
 delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation.
-The first section below drives that loop end to end on a developer machine against a local object
-store. It takes the core decisions about identity and source synchronization there, where the bundle
-source forces them, instead of in another repair of the replay. The lifecycle around the loop and the
-mount a researcher uses follow. The order is a proposal until the decisions in the next section are
-ruled.
+The first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
+developer machine against a local object store. The lifecycle around the loop and the mount a
+researcher uses follow. Mounting one spec on many nodes is not in the first release; the first
+release is designed so that it can be added. The order is a proposal until the decisions in the next
+section are ruled.
 
 Unremediated security findings are indexed separately in `.security/ROADMAP.md`, which is gitignored.
 See [`AGENTS.md`](AGENTS.md) for why.
@@ -40,46 +40,51 @@ See [`AGENTS.md`](AGENTS.md) for why.
 ## Decisions that gate the queue
 
 Open as of 2026-11-11. Each is the maintainer's, and each changes what the next cycle is. Remove a
-bullet when it is ruled; the ruling's record is the seed it names.
+bullet when it is ruled; the ruling's record is the seed it names. The first of the bundle loop's
+cycles, [`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md), is where most are written
+down.
 
 - **What leads.** Three orders were weighed: take a read-only mount all the way to a cluster first;
   finish the write-back transaction machinery first; or drive a thin slice of the whole bundle loop
-  locally and harden outward from it. The sections below are the third. The first hardens the half
-  that does not set the project apart, and fixes the read path's abstractions before write-back has
-  tested them. The second is what the cycles since adoption did, for a source type the loop does not
-  use.
+  locally and harden outward from it. The sections below are the third, and the maintainer agreed
+  the direction on 2026-11-11.
+- **What is authoritative for the durable tier.** The state database, as built; or the tier itself,
+  holding the staged bundles, their indexes, the altered files and the record of removals as files.
+  The second is what a halted job's recovery, a commit from a login node and a later multi-node mode
+  all need, and it takes SQLite off the shared filesystem. It is the largest decision here.
+- **What pressure does to a clean copy.** Drop it, as built, or keep it one tier up when that tier
+  lacks it ([`issues/eviction-one-hop.md`](issues/eviction-one-hop.md)).
 - **How a source catches up.** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)
-  lists four design choices. For a bundle source the third is forced: mark the bundle dirty and
-  rebuild it from state. Adopting the seed holds four others and folds two parked cycles into it;
-  declining it resumes them in their old order.
+  lists the choices. For a bundle source one is forced: mark the bundle dirty and rebuild it from
+  state. Adopting the seed holds four others and folds two parked cycles into it; declining it
+  resumes them in their old order.
 - **Stable row ids while nothing is deployed.** `AUTOINCREMENT` is a schema version bump that strands
-  no state database today and every one after the first deployment. It is decision 1 of that seed and
-  can be ruled alone.
+  no state database today and every one after the first deployment.
 - **The two parked cycles.** `rename-over-tombstoned-child` and `model-commit-route-reach` sit on
   pushed branches with open worktrees. Resume them as planned, or fold them into the rebuild as its
   acceptance tests.
 - **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an
-  unmount helper, how a Python 3.15 runtime arrives, and whether the state database works on the
-  shared filesystem a cross-host commit needs. It no longer gates the first section. It is still
+  unmount helper, and how a Python 3.15 runtime arrives. It does not gate the first section. It is
   minutes of checking, and it decides what the third section is
-  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
+  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1 and 2).
 
 ## Queued: the bundle loop, driven locally
 
 What sets the project apart, built as one thin slice before any part of it is hardened: a dataset
 held as compressed bundles at an object-store source, read and written through the overlay, and
 re-aggregated into those bundles on a delay. Everything here runs on a developer machine against a
-local object store, engine first. The decisions about identity and source synchronization are taken
-in this section.
+local object store, engine first.
 
-The story it builds toward, from the maintainer's statement of 2026-11-11 (quoted in full in
-[`issues/local-bundle-loop.md`](issues/local-bundle-loop.md)): a spec points at an object store, or a
-tape reached over SFTP, holding one bundle or ten thousand. Bundles are pulled lazily to shared
+The story it builds toward, from the maintainer's statement and clarification of 2026-11-11 (quoted
+in [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md)): a spec points at an object store, or
+a tape reached over SFTP, holding one bundle or ten thousand. Bundles are pulled lazily to shared
 scratch and decompressed there without being unpacked. Single files land in the RAM tier as they are
-read. Altered files are committed back up the stack, to node-local disk and then to scratch beside
-the bundles, by eviction or by their write-back delay. What is on scratch is durable, so a job that
-halts can recover. A bundle is repacked and put back to its source on its own delay or under quota
-pressure, and a commit flushes everything up the stack.
+read. Every stage tier has a size limit, a count limit and a write-back delay, and either pressure or
+an expired delay moves a copy one tier up, never further: to node-local disk, then to scratch beside
+the bundles. What is on scratch is durable, so a job that halts can recover. A bundle is repacked and
+put back to its source on its own delay or under pressure on scratch. A signal commits what has
+changed to the durable tier and releases the node; a commit from a login node then rebuilds the
+bundles that changed and leaves the staged ones in place for the next mount.
 
 ### Rename `sosfs` to Terrace
 
@@ -97,20 +102,6 @@ ruled in, the schema bump rides with this format break. `PLAN.md` records `sosfs
 decision rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before
 it touches code.
 
-### Reconcile `PLAN.md` against the implementation
-
-**Seed:** [`issues/plan-md-reconciliation.md`](issues/plan-md-reconciliation.md) · `docs` · appetite small
-
-Small, cheap, and early because `code terrace review` grades a cycle against a contract shaped from
-`PLAN.md`, so every inaccuracy left standing is a chance to grade correct code as wrong. The audit
-found `PLAN.md` internally inconsistent in one place (its summary lists an `fsck` command its own CLI
-table calls `audit`) and behind the code in several others: `umount` takes a spec file rather than a
-mountpoint, and the implementation is the better design; `rich` and `frozendict` are named as
-technology decisions and used nowhere; four of the eight testing-strategy bullets describe coverage
-that does not exist. This cycle holds only the residue — the inaccuracies no other queued cycle will
-touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
-diff, which is what the same-commit rule requires.
-
 ### Drive the bundle loop end to end on a local object store
 
 **Seed:** [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md) · `test` · appetite small
@@ -120,7 +111,38 @@ indexed, read and written through the overlay, re-aggregated on a delay, and rea
 bucket by a fresh engine. Every piece exists alone and none can be joined, so every decision about
 the loop is made by reading. This cycle adds a helper that stands the loop up on a laptop with no
 container, and one scenario whose stages are strict expected failures, each naming the seed that owns
-it. The rest of this section turns those stages green in order.
+it, including a stage where pressure moves copies up with no write to the source, and one where a
+detach is followed by a commit from a second process that has only the durable tier. The rest of this
+section turns those stages green in order.
+
+### Redraw `PLAN.md` around the user story
+
+**Seed:** [`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md) · `docs` · appetite big
+
+`PLAN.md` and the invariants describe a different product from the one in the user story, and every
+cycle is graded against them: eviction that commits to the source, a state database that is the
+authority for every tier, changes replayed against the source one operation at a time, sharding and
+SFTP after the release, and many mounts as the first non-goal. This cycle writes the contract the
+later ones build to: the tier model, the durable tier and what is authoritative for it, how a bundle
+is rebuilt, what a signal and a commit do, stable ids, and what a multi-node mode will need left
+alone. It writes no engine code. Two throwaway prototypes on the local loop's helper keep its
+decisions from being made by reading. Before any engine cycle, because a builder working toward the
+story today is working against its own contract.
+
+### Reconcile `PLAN.md` against the implementation
+
+**Seed:** [`issues/plan-md-reconciliation.md`](issues/plan-md-reconciliation.md) · `docs` · appetite small
+
+Small and cheap, and it follows the redraw above, which absorbs most of it. It matters because
+`code terrace review` grades a cycle against a contract shaped from `PLAN.md`, so every inaccuracy
+left standing is a chance to grade correct code as wrong. The audit
+found `PLAN.md` internally inconsistent in one place (its summary lists an `fsck` command its own CLI
+table calls `audit`) and behind the code in several others: `umount` takes a spec file rather than a
+mountpoint, and the implementation is the better design; `rich` and `frozendict` are named as
+technology decisions and used nowhere; four of the eight testing-strategy bullets describe coverage
+that does not exist. This cycle holds only the residue — the inaccuracies no other queued cycle will
+touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
+diff, which is what the same-commit rule requires.
 
 ### Make archive tiers reachable from a spec file
 
@@ -147,16 +169,17 @@ ahead of the bundle write-back because a re-aggregation reads staged copies it b
 a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
 namespace work, and how wide the second route is on a production kernel is one measurement away.
 
-### Evicting a dirty copy commits it all the way to the source
+### Pressure or delay moves a copy one tier up, and no further
 
 **Seed:** [`issues/eviction-one-hop.md`](issues/eviction-one-hop.md) · `fix` · appetite small
 
-When a pressured tier has no clean copy left, eviction commits each dirty copy to the source before
-dropping it, and `AGENTS.md` § 7 states that as a rule. The user story says a dirty file moves back up
-the stack one tier at a time, and a bundle is repacked on triggers of its own. For a bundle source the
-difference is the cost model: pressure in the RAM tier would otherwise turn every evicted file into a
-re-aggregation and a push to an object store or to tape. The reason § 7 gives for the rule does not
-follow from the code. Small, and it has to be settled before the re-aggregation is built on it.
+The maintainer's tier model: every stage tier has a size limit, a count limit and a delay, and either
+one moves a copy exactly one tier up, which may cascade. The tree differs twice. Eviction commits a
+dirty copy all the way to the source, which `AGENTS.md` § 7 states as a rule on a reason the code does
+not bear out; for a bundle source that turns pressure in the RAM tier into a re-aggregation and a
+push per evicted file. And eviction drops a clean copy, where the model as read keeps it one tier up,
+so node-local disk catches what falls out of RAM. That second reading wants the maintainer's word.
+Small, and settled before the re-aggregation is built on it.
 
 ### Rebuild how the namespace reaches the source
 
@@ -171,7 +194,7 @@ It sits here, ahead of the bundle write-back, because a bundle cannot take a rep
 all: the model that fits it is to mark a bundle dirty and rebuild it from state, which in the bundle
 case has no order to discover. So the model, the schema and the bundle source come first, and POSIX
 and object-prefix sources move to it afterwards, when the replay is deleted. Shaping decides whether
-that is one cycle or two. Its first criterion is a design decision recorded in `PLAN.md`.
+that is one cycle or two. Its decisions are the plan cycle's; this is the build.
 High-blast-radius as a whole: it changes the schema and the gated regions of `engine/overlay.py`.
 
 ### Bring archive mutations under the journal and a lock
@@ -237,8 +260,10 @@ other calls must not wait, and a local server for tests. Split out of the extend
 ## Queued: the lifecycle around the loop
 
 Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop
-at once and finalize its source later. The engine half exists and the recovery half does not. This
-section can run beside the next one; which leads is a decision for when the loop closes.
+at once and finalize its source later. The engine half exists and the recovery half does not. How
+much of this section is left to build depends on the durable-tier decision above: a tier that
+describes itself is recovered by reading it. This section can run beside the next one; which leads
+is a decision for when the loop closes.
 
 ### The write-back scheduler dies on a source-only stack
 
@@ -421,7 +446,7 @@ stage copies, with nothing to report lost. That recovery is the read-only slice 
 is on the deployment path regardless: a batch job that reaches its time limit is killed, and today
 the next mount of the same overlay raises `CrashDetected`. The seed also states the question the
 one-mount-per-overlay rule leaves open for this workload, where a multi-node job mounts on every node
-and a sweep runs many jobs over one dataset.
+and a sweep runs many jobs over one dataset; `issues/multi-node-mounts.md` takes that up.
 
 ### Opening a resident file costs three database writes
 
@@ -476,6 +501,23 @@ built around the job-script patterns, and a CLI reference. Then release readines
 0.1.0, `README.md`, verified build artifacts, and the version. Consumes the benchmark numbers and
 documents a surface with nothing stubbed in it. Last before the tag. Whether a first tag follows the
 bundle loop alone is a question for the maintainer once that section closes.
+
+## Queued: after the first release
+
+Wanted, and deliberately not in the first tag. The first is designed for from the start.
+
+### Mount one overlay on many nodes at once
+
+**Seed:** [`issues/multi-node-mounts.md`](issues/multi-node-mounts.md) · `feature` · appetite big
+
+Not a goal for the first release, and asked for in user consultations more than once: the same spec
+mounted on many nodes, each with node-local speed in its own fast tiers, negotiating at the durable
+tier with directory locks, consistent eventually. High-throughput workloads are the case it changes
+most. The tree forbids it at every level, and SQLite cannot be the shared piece. The seed is filed
+now for the five choices the first release makes anyway that decide whether this is a feature later
+or a rewrite; they are settled in the plan cycle that leads the roadmap. It builds in steps: many
+readers of one staged dataset, then writers on bundles of their own, then, if ever wanted, writers
+within one bundle.
 
 ### Extended archive sources
 

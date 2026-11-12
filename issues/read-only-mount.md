@@ -60,8 +60,9 @@ Draft R-IDs, to be firmed up at promotion.
 
 - **R1** — WHEN an overlay is mounted read-only (a mount option, a spec key, or both: shaping decides),
   every mutating call SHALL fail with `EROFS`, and no residency SHALL ever be `dirty`.
-- **R2** — WHILE mounted read-only, the write-back scheduler SHALL NOT run, and eviction SHALL drop
-  clean copies as today.
+- **R2** — WHILE mounted read-only, the write-back scheduler SHALL NOT run, and pressure SHALL be the
+  only thing that moves a copy, one tier up, as [`issues/eviction-one-hop.md`](eviction-one-hop.md)
+  settles it for a clean copy.
 - **R3** — WHEN a read-only mount ends by `SIGINT`, by `SIGTERM` or by an external unmount, it SHALL
   settle `shutdown_state = clean`.
 - **R4** — WHEN a read-only mount was killed and the same overlay is mounted read-only again, the
@@ -70,7 +71,8 @@ Draft R-IDs, to be firmed up at promotion.
 - **R5** — WHEN an overlay holds dirty state from an earlier read-write mount, a read-only mount SHALL
   refuse with a message naming `commit`.
 - **R6** — `PLAN.md` SHALL record whether read-only mounts of one dataset may share a staged tier, and
-  if so what owns the staging.
+  if so what owns the staging. [`issues/multi-node-mounts.md`](multi-node-mounts.md) takes this up:
+  shared reading is its first step and needs no conflict rule.
 
 ## Notes
 
