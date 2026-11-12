@@ -893,8 +893,8 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | branches | `{kind}/{slug}`: `feature/`, `fix/`, `refactor/`, `docs/`, `test/`, `ci/`, the prefix per GOAL `kind`; the set is open |
 | commit categories | `[feature] [fix] [refactor] [docs] [test] [ci] [build] [release] [factory]`, where `[factory]` is a change to § Factory or § Invariants (the old `[harness]` category is retired). Branch commits take the GOAL's `kind` verbatim (an open set); landing subjects use these categories, and the set is open |
 | branch commits | `[{kind}] Build {slug} P<n>`, with no trailer; the landing (squash) commit carries the `Co-Authored-By` trailer this repo records (§ Conventions) |
-| landing | `squash-local`: squash onto `origin/main` in the cycle worktree, one `[category] what changed` |
-| ci | none as a landing gate. `.github/workflows/ci.yml` runs on every push to `main` and to every cycle branch, and the foreman reads `gh run list` after each push |
+| landing | `squash-pr`: push the cycle branch, open a pull request, and squash-merge it as one `[category] what changed`. The foreman merges once the pull request's checks are green, then fast-forwards the main checkout |
+| ci | the landing gate. `.github/workflows/ci.yml` runs on every pull request and on every push to `main` and to a cycle branch; the foreman reads `gh pr checks` before a merge |
 | setup | `uv sync`: dependency refresh, run before any verify |
 | verify | `tools/lint.sh && uv run pytest -n auto -m unit`: the full gate. Assert the reported pass count, not the exit code: exit 0 is necessary but not sufficient (§ Verification), and `uv run pytest -m integration` exits 0 when every test skipped. Phases narrow it; publish and release run all of it |
 | throwaway environment | `tools/temp_site.sh <cmd…>` (contract below) |
