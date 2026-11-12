@@ -1,0 +1,18 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: rename-to-terrace
+escaped_from: null
+planned: {date: '2026-11-12', phases: 3}
+landed: {date: '2026-11-12', phases: 3, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-11T23:36:58-05:00', stop: '2026-11-11T23:45:29-05:00', seconds: 511, end: gate, agent: claude-fable-5-2}
+- {step: plan, start: '2026-11-11T23:45:58-05:00', stop: '2026-11-12T00:38:11-05:00', seconds: 3133, end: gate, agent: claude-fable-5-2}
+- {step: 'build:P1', start: '2026-11-12T00:38:11-05:00', stop: '2026-11-12T00:44:26-05:00', seconds: 375, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-12T00:44:27-05:00', stop: '2026-11-12T00:57:51-05:00', seconds: 804, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-12T00:57:51-05:00', stop: '2026-11-12T00:58:30-05:00', seconds: 39, end: done, agent: claude-fable-5-2}
+reviews:
+- cycle: 1
+  date: '2026-11-12'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

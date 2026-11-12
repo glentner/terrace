@@ -3,7 +3,7 @@ slug: rename-to-terrace
 title: Rename the project to Terrace
 kind: refactor
 appetite: big
-status: in_review
+status: done
 branch: refactor/rename-to-terrace
 base: main
 current_phase: done
