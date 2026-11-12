@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/local-bundle-loop
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1
 - id: P2
   name: Nine stages, the oracle and the tap
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -210,37 +210,47 @@ each naming its owner, and each recorded in the report as stopped by the spec pa
 by nothing else; the oracle, the tap, `blocked` and the markers each have passing tests that fail
 when they are weakened.
 
-- [ ] `tests/loop/oracle.py` from the draft: `tree`, `unpacked`, `difference`. Standard library
+- [x] `tests/loop/oracle.py` from the draft: `tree`, `unpacked`, `difference`. Standard library
       only. `unpacked` raises on a member held twice and reads past an end-of-archive marker.
-- [ ] `tests/loop/tap.py` from the draft: `Tap`, `Request`, `Window`. Every method other than `GET`
+- [x] `tests/loop/tap.py` from the draft: `Tap`, `Request`, `Window`. Every method other than `GET`
       and `HEAD` is a write. A chunked request is refused with 501 and fails the window it fell in. A
       window is read only after its block ends.
-- [ ] `tests/loop/stages.py` from the draft: `Blocked`, `blocked`, `owned`, `STAGES`, the two pinned
+- [x] `tests/loop/stages.py` from the draft: `Blocked`, `blocked`, `owned`, `STAGES`, the two pinned
       parser texts, the shared steps and the nine stages of `PLAN.md` § 2.4. `Blocked` is raised in
       `blocked` and nowhere else, and `blocked` pins a refusal only (`PLAN.md` § 2.3). Stage 8 runs `python -m terrace commit` with `TERRACE_*` removed
       from the environment and the XDG paths pointed into `temp_site`.
-- [ ] `tests/loop/conftest.py`: `clock` and `scene`. `scene` is a factory: a tap in front of the
+- [x] `tests/loop/conftest.py`: `clock` and `scene`. `scene` is a factory: a tap in front of the
       store, a `Loop` built through the tap, a `fetch` that reads the store directly, and a check of
       every bundle's object against the oracle before the scene is returned. A scene refuses a spec
       whose endpoint is not the tap's. It registers assertion rewriting for `tests.loop.stages` and
       `tests.loop.oracle` before importing them.
-- [ ] `tests/loop/conftest.py`: the `pytest_runtest_makereport` hook of `PLAN.md` § 2.3. For an item
+- [x] `tests/loop/conftest.py`: the `pytest_runtest_makereport` hook of `PLAN.md` § 2.3. For an item
       named in `STAGES` it appends `marker` at set-up, and `stopped` and `cause` when set-up or the
       call raised, to `item.user_properties` (not to the report: the JUnit plugin reads the item at
       teardown). The gate pins all three per stage.
-- [ ] `tests/loop/test_scenario.py`: `pytestmark = mark.unit` and the nine stage functions,
+- [x] `tests/loop/test_scenario.py`: `pytestmark = mark.unit` and the nine stage functions,
       imported.
-- [ ] `tests/loop/test_support.py`, `pytestmark = mark.unit`, with the twenty-four tests `SUPPORT_ROWS`
+- [x] `tests/loop/test_support.py`, `pytestmark = mark.unit`, with the twenty-four tests `SUPPORT_ROWS`
       names: seven for `blocked` (one reads `stages.py`'s syntax tree), the marker audit, the unit
       module's nine, ten for the oracle (one reads its imports), five for the tap and the scene. The tap's tests go through `obstore`, the
       client the engine uses.
-- [ ] `AGENTS.md`: the `tests/` row of § Repository map and § Verification describe the scenario:
+- [x] `AGENTS.md`: the `tests/` row of § Repository map and § Verification describe the scenario:
       what `tests/loop/test_scenario.py` is, that its nine expected failures are the loop's progress
       record, and the rule for a cycle that moves the block (remove the marker of a stage that
       passes; pin the new stop of one that does not). State "9 expected failures" in those words.
       The counts move.
-- [ ] Mutations, each planted, seen red where `PLAN.md` § 6 says, and reverted: M1 to M6, M10 and
+- [x] Mutations, each planted, seen red where `PLAN.md` § 6 says, and reverted: M1 to M6, M10 and
       M11.
+- **Amended at build (2026-11-12).** Stage 5 also asserts that nothing is written to the source
+  between the change and the interval's expiry, and one object after it (`GOAL.md`'s clarification of
+  2026-11-12, the foreman's ruling 4). The draft predates it: `settle` is split into `expire_delays`
+  and `cross_interval`, stage 5 opens one tap window over the change and the delays and a second over
+  the crossing, and stages 6 and 9 still call `settle`. Stage 5 is an expected failure at `reach`, so
+  the new assertion is written and cannot yet execute; it first runs when the block lifts.
+  `test_blocked_is_raised_in_one_place` also checks that the one `mark.xfail` call sits in `owned`.
+  The P2 gate's `lane` measured 4.5 s added (medians 35.1 s and 39.6 s); planning measured 0.1 s.
+  M3 was planted both ways (strict lost, raises lost) and M10 both ways (`pytest.xfail`, a
+  hand-raised `Blocked`); all red.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p2`
 - **Touches:** `tests/loop/oracle.py`, `tests/loop/tap.py`, `tests/loop/stages.py`,
   `tests/loop/conftest.py`, `tests/loop/test_scenario.py`, `tests/loop/test_support.py`, `AGENTS.md`.

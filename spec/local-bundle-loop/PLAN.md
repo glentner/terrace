@@ -234,7 +234,7 @@ bundle (the single form); stage 9 uses three (the sharded form).
 | 2 | `test_stage_2_read` | `assert_tree`: walk `readdir` from `/`, read every file, compare names, kinds and bytes with the oracle's tree. | | `archive-spec-plumbing.md` |
 | 3 | `test_stage_3_pressure` | Built with `fastest_size=2048`: every member fits and all six together do not. Each file is read and compared, and the stage notes which reads left a copy on `shm`. After one `EvictionManager.poll()`, a file is pushed out if it was on `shm` and no longer is. At least one was, and each is held on `tmp`. Then `assert_tree` again, and the engine stops. | the window covers all of it through the stop: at least one read reached the source, and no write | `eviction-one-hop.md` |
 | 4 | `test_stage_4_change` | `change`: modify, create, rename and remove one member each inside `bundle-000`, each mirrored on the oracle's directory with a file operation. `assert_tree`. | | `namespace-sync-redesign.md` |
-| 5 | `test_stage_5_reaggregate` | `change`, then `settle`: let each tier's delay expire, a hop at a time and well inside one interval; then cross the bundle's interval once and poll until idle. The object unpacks to the oracle's directory. | the window covers `change` and `settle`: its writes are exactly `[('PUT', bundle-000's key)]` | `archive-finalization-integration.md` |
+| 5 | `test_stage_5_reaggregate` | `change`, then `settle`: let each tier's delay expire, a hop at a time and well inside one interval; then cross the bundle's interval once and poll until idle. The object unpacks to the oracle's directory. | one window over `change` and the delays: no write; a second over the interval's crossing: its writes are exactly `[('PUT', bundle-000's key)]` | `archive-finalization-integration.md` |
 | 6 | `test_stage_6_read_back` | As 5, stop, then a second engine over `respec('second')`: `assert_tree`. | | `archive-finalization-integration.md` |
 | 7 | `test_stage_7_release` | `change`, `detach` (`rescue`, then `stop('detached')`), remove the node-scope tier directories, start an engine on the same state: `assert_tree`, and no residency on `tmp` or `shm` for any path. | no write from the change through the detach | `shutdown-rescue-gaps.md` |
 | 8 | `test_stage_8_offline_commit` | As 7 through the removal, then `python -m terrace commit <spec>` in a second process with its XDG paths redirected. The object unpacks to the oracle's directory and `Loop.staging` is still a file. Then an engine starts and `assert_tree` holds. | in that last window, at least one request, and no read of any bundle's key | `offline-commit-command.md` |
@@ -433,6 +433,8 @@ The change touches no path on the high-blast-radius list and nothing under `src/
   the interval; it does not assert that nothing is pushed before the interval, which GOAL R4 and R6
   do not say and `issues/archive-finalization-integration.md`'s own R4 does. Each is the owning
   cycle's to tighten when its marker comes off.
+  - 2026-11-12: stage 5 now asserts it. `GOAL.md`'s clarification of that date added the
+    assertion at the sign-off; P2 built it (`TECH.md` P2 amendment).
 - **A stage that passes for a thin reason.** When a marker comes off, the stage becomes a plain
   test and its body is the whole claim. That reading belongs to the owning cycle's review. This
   cycle cannot test it.
