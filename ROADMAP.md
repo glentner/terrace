@@ -395,9 +395,17 @@ fix, and the first thing a new user hits.
 `create` and `mkdir` default the owner to `0:0` and the FUSE adapter never passes the caller's
 identity, so `ls -l` shows root on a user's own new files and the catalog disagrees with the source
 it commits to. Measured through the engine API; the adapter half is read from the code. The same seed
-carries symlink creation, which the engine can read and not perform, and the unsupported operations
-that fail without a chosen errno. A conformance suite in the integration lane would find the rest of
-this class by measurement.
+carries `link`, which fails without a chosen errno, and the unwritten decision that the mount records
+permission bits and does not enforce them. A conformance suite in the integration lane would find the
+rest of this class by measurement.
+
+### Symlinks can be read through the mount and never made
+
+**Seed:** [`issues/symlink-create.md`](issues/symlink-create.md) · `feature` · appetite small
+
+The engine adopts a source symlink and serves `readlink`, and the adapter has no `symlink` callback, so
+`ln -s` through the mount fails. Making one needs a write-back path of its own, which is why it was cut
+from `posix-surface-gaps` at shaping.
 
 ### Non-`OSError` exceptions escape the VFS API
 

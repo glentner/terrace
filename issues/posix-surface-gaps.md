@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:posix-surface-gaps
 kind: fix
 appetite: small
 lane: public
