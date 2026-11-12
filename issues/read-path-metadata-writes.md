@@ -39,7 +39,7 @@ on any host: the count of three, and the flat curve past four threads. The engin
 the speed of the tier it serves before a FUSE round trip is added, and more reader threads do not
 help.
 
-This is the flagship workload's hot path. A dataset of a hundred million small files
+This is the hot path of a dataset workload. A dataset of a hundred million small files
 (`issues/sharded-archive-sources.md`) is opened once per file per epoch. At the warm rate above one
 epoch's opens take about seven hours of engine time; a training job reads thousands of samples a
 second.

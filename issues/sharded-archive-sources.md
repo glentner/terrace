@@ -137,10 +137,12 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   researcher this serves meets the product. Root `PLAN.md` → § *Tier protocol*, § *Technology
   decisions*, § *Phase outline*.
 - 2026-11-11 (whole-tree review at `64faf27`): three notes.
-  - **The use case is read-only.** [`issues/read-only-mount.md`](read-only-mount.md) takes the write path
-    off its critical path. With it, the prerequisites are the read side of
-    [`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md) and the streaming read named above, not
-    the re-pack journaling or the finalization batching.
+  - **Reading is half of it.** The maintainer's statement of 2026-11-11: the read side is a large
+    part of the project, and what sets it apart is write-back with delayed re-aggregation into the
+    compressed bundles at the source. A shard is therefore also the unit of write-back: a change
+    inside it marks that shard dirty, and a re-aggregation rebuilds that shard alone
+    ([`issues/archive-finalization-integration.md`](archive-finalization-integration.md)). A read-only
+    mount ([`issues/read-only-mount.md`](read-only-mount.md)) is a mode of this, not the goal.
   - **A member can be served without being unpacked.** The staged shard is an uncompressed tar and
     `archive_index` records each member's data offset. A handle that is the tar's descriptor plus a base
     offset and a length serves `read` with one `pread`, with no promotion, no per-member transaction and

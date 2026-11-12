@@ -20,15 +20,17 @@ invariant audit run while porting the software factory, is decomposed below into
 appetite each. Defects that audit reproduced are recorded in [`AGENTS.md`](AGENTS.md) § *Invariants*
 § *Known open violations*.
 
-**The order was re-triaged on 2026-11-11**, after a review of the whole tree at `64faf27`. Between
-adoption and that date every engine cycle worked on one mechanism, deferred namespace replay, and no
-entry outside it moved. The review's reading is that the product path had not been walked end to end:
-no mount has run on a cluster, the flagship use case reads a dataset and never writes one, and the
-queue put write-path repairs ahead of it. The sections below are two tracks and a release. The first
-reaches a researcher with a read-only dataset mount and depends on none of the write path's open
-defects. The second makes write-back something to trust, and begins by rebuilding the namespace core
-once instead of repairing it again. Neither order is settled until the decisions in the next section
-are ruled.
+**The order was re-triaged on 2026-11-11**, after a review of the whole tree at `64faf27` and the
+maintainer's statement of the same date about what the project is for. Between adoption and that date
+every engine cycle worked on one mechanism, deferred namespace replay against a POSIX source, and no
+entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
+bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
+delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation.
+The first section below drives that loop end to end on a developer machine against a local object
+store. It takes the core decisions about identity and source synchronization there, where the bundle
+source forces them, instead of in another repair of the replay. The lifecycle around the loop and the
+mount a researcher uses follow. The order is a proposal until the decisions in the next section are
+ruled.
 
 Unremediated security findings are indexed separately in `.security/ROADMAP.md`, which is gitignored.
 See [`AGENTS.md`](AGENTS.md) for why.
@@ -40,29 +42,35 @@ See [`AGENTS.md`](AGENTS.md) for why.
 Open as of 2026-11-11. Each is the maintainer's, and each changes what the next cycle is. Remove a
 bullet when it is ruled; the ruling's record is the seed it names.
 
-- **Rebuild the namespace core, or keep repairing it.**
-  [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) makes the case and lists
-  four design choices. Adopting it holds four seeds and folds two parked cycles into it; declining it
-  resumes them in their old order.
+- **What leads.** Three orders were weighed: take a read-only mount all the way to a cluster first;
+  finish the write-back transaction machinery first; or drive a thin slice of the whole bundle loop
+  locally and harden outward from it. The sections below are the third. The first hardens the half
+  that does not set the project apart, and fixes the read path's abstractions before write-back has
+  tested them. The second is what the cycles since adoption did, for a source type the loop does not
+  use.
+- **How a source catches up.** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)
+  lists four design choices. For a bundle source the third is forced: mark the bundle dirty and
+  rebuild it from state. Adopting the seed holds four others and folds two parked cycles into it;
+  declining it resumes them in their old order.
 - **Stable row ids while nothing is deployed.** `AUTOINCREMENT` is a schema version bump that strands
   no state database today and every one after the first deployment. It is decision 1 of that seed and
   can be ruled alone.
 - **The two parked cycles.** `rename-over-tombstoned-child` and `model-commit-route-reach` sit on
   pushed branches with open worktrees. Resume them as planned, or fold them into the rebuild as its
   acceptance tests.
-- **Read-only first.** Whether the first thing a researcher gets is a read-only dataset mount
-  ([`issues/read-only-mount.md`](issues/read-only-mount.md)), with the read-write lifecycle to follow.
 - **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an
   unmount helper, how a Python 3.15 runtime arrives, and whether the state database works on the
-  shared filesystem a cross-host commit needs. Minutes of checking each, and they decide whether the
-  rest is engineering or a policy conversation
+  shared filesystem a cross-host commit needs. It no longer gates the first section. It is still
+  minutes of checking, and it decides what the third section is
   ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
 
-## Queued: a read-only dataset mount on a cluster
+## Queued: the bundle loop, driven locally
 
-The shortest path from this tree to the use case the project exists for: a researcher loads a module,
-mounts a sharded dataset read-only at the top of a job script, and it works on every node of the job.
-Nothing here depends on deferred namespace replay, on drain or rescue, or on the offline commit.
+What sets the project apart, built as one thin slice before any part of it is hardened: a dataset
+held as compressed bundles at an object-store source, read and written through the overlay, and
+re-aggregated into those bundles on a delay. Everything here runs on a developer machine against a
+local object store, engine first. The decisions about identity and source synchronization are taken
+in this section.
 
 ### Rename `sosfs` to Terrace
 
@@ -94,6 +102,236 @@ that does not exist. This cycle holds only the residue — the inaccuracies no o
 touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
 diff, which is what the same-commit rule requires.
 
+### Drive the bundle loop end to end on a local object store
+
+**Seed:** [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md) · `test` · appetite small
+
+The loop that sets the project apart has never run: bundles at an object-store source, staged and
+indexed, read and written through the overlay, re-aggregated on a delay, and read back from the
+bucket by a fresh engine. Every piece exists alone and none can be joined, so every decision about
+the loop is made by reading. This cycle adds a helper that stands the loop up on a laptop with no
+container, and one scenario whose stages are strict expected failures, each naming the seed that owns
+it. The rest of this section turns those stages green in order.
+
+### Make archive tiers reachable from a spec file
+
+**Seed:** [`issues/archive-spec-plumbing.md`](issues/archive-spec-plumbing.md) · `feature` · appetite big
+
+`ArchiveTier` is adapter-complete and covered by 36 unit tests, and no user can configure it: the
+spec parser admits only `posix` and `s3`, and the archive keys `location`, `staging` and `sync` are
+rejected as unknown, so the three worked examples in `PLAN.md` all fail at parse time. `LocationSpec`
+and `inner_location()` are implemented and reachable only from tests, and the engine's tier
+construction has no archive branch. A shipped-but-unreachable adapter is worse than an unwritten one
+because it reads as done. The loop's first stage: the read side alone — admit the types and keys,
+construct the tier, index, read — turns the scenario's read stage green, and shaping may split the
+cycle there.
+
+### A write racing a commit can be recorded clean
+
+**Seed:** [`issues/racing-write-marked-clean.md`](issues/racing-write-marked-clean.md) · `fix` · appetite small
+
+A commit decides a copy is clean from a flag it resets and a stat it compares, and a write can pass
+both: one that read the flag before the reset and lands after the stat, or one of the same size inside
+one timestamp tick. Both reproduced by injection: the stage holds the new bytes, the source the old,
+the residency reads clean and the queue is empty, so the next eviction deletes the write. Placed
+ahead of the bundle write-back because a re-aggregation reads staged copies it believes are clean, so
+a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
+namespace work, and how wide the second route is on a production kernel is one measurement away.
+
+### Rebuild how the namespace reaches the source
+
+**Seed:** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) · `refactor` · appetite big
+
+Six landed cycles and a parked seventh worked on deferred namespace replay against a POSIX source,
+and each found the next defect in it: 727 lines of source added, 3,281 lines of tests and some 19,000
+lines of cycle records, and a directory rename still raises `IntegrityError` over a tombstone that
+nothing can remove. The seed traces the family to three properties — ids that are reused, tombstones
+that occupy names, and path locks that cannot see a directory rename — and proposes to remove them.
+It sits here, ahead of the bundle write-back, because a bundle cannot take a replayed operation at
+all: the model that fits it is to mark a bundle dirty and rebuild it from state, which in the bundle
+case has no order to discover. So the model, the schema and the bundle source come first, and POSIX
+and object-prefix sources move to it afterwards, when the replay is deleted. Shaping decides whether
+that is one cycle or two. Its first criterion is a design decision recorded in `PLAN.md`.
+High-blast-radius as a whole: it changes the schema and the gated regions of `engine/overlay.py`.
+
+### Bring archive mutations under the journal and a lock
+
+**Seed:** [`issues/archive-journaling-and-locking.md`](issues/archive-journaling-and-locking.md) · `fix` · appetite big
+
+Re-pack and re-sync mutate a managed location — the source archive, which for an archive source is
+the whole dataset — outside any intent bracket. `'compact'` and `'resync'` exist in the journal's
+action vocabulary with no producer. Alongside it, `ArchiveTier` has no tier-wide lock while
+`engine/locks.py` is path-keyed, so two concurrent puts to different paths in the same archive both
+snapshot the member set, both re-pack, and the second rename wins — a member vanishes with both calls
+returning success. Two more in the same region: a stale staging copy silently wins over a newer
+source, and the archive index cache is trusted unconditionally. Sequenced before the
+finalization work, which adds callers to exactly these paths.
+
+### Batch archive finalization at drain and commit
+
+**Seed:** [`issues/archive-finalization-integration.md`](issues/archive-finalization-integration.md) · `feature` · appetite big
+
+The flagship, in the maintainer's words of 2026-11-11: write-back with delayed re-aggregation into
+the compressed bundles at the source. `PLAN.md` requires one re-pack per commit or flush and never
+per file; the adapter re-packs on every `put`, `set_meta`, `delete`, `mkdir`, `rmdir` and `rename`,
+and nothing batches. Staged re-sync's rate limit is waived at drain in the design and unreachable in
+the code, because no engine module calls `resync` at all. With the synchronization model above in
+place this is its first use: a change marks its bundle dirty, and the bundle's clock or a drain
+rebuilds it from state and replaces it with one atomic write. It is not a small addition.
+
+### Archive coverage at the engine and mount level
+
+**Seed:** [`issues/archive-tier-test-coverage.md`](issues/archive-tier-test-coverage.md) · `test` · appetite small
+
+The adapter is well covered in isolation, and the loop's scenario drives one bundle through the
+engine. This closes the archive work immediately after the code that makes the tests possible: both
+modes over POSIX, tar.gz over S3 against moto, index persistence across remounts, and reconstruction
+correctness after a batched finalization. Re-scope at shaping: the scenario already holds the
+end-to-end case, so what is left is breadth.
+
+### Sharded archive sources
+
+**Seed:** [`issues/sharded-archive-sources.md`](issues/sharded-archive-sources.md) · `feature` · appetite big
+
+The loop at scale, in the owner's words of 2026-11-04: a center refuses a 100-million-inode quota
+request and the researcher's dataset lives instead as ten thousand `.tar.gz` shards of ten thousand
+images each, cascading down the tier stack just in time. Placed after one bundle works end to end,
+because a shard is then both the unit that is staged and the unit that is re-aggregated, and each is
+built once. That placement contradicts `PLAN.md`, which schedules sharding post-v0.1.0, so under the
+plan-drift rule the cycle reconciles `PLAN.md` first. A streaming or ranged read in `InnerLocation`
+is a prerequisite rather than an optimization: archive I/O is whole-blob in memory today, and a shard
+of that size cannot pass through RAM. Two questions were added on 2026-11-11: whether a member is
+served by offset from the staged shard instead of being unpacked to a file of its own, and how many
+mounts may read one staged dataset.
+
+## Queued: the lifecycle around the loop
+
+Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop
+at once and finalize its source later. The engine half exists and the recovery half does not. This
+section can run beside the next one; which leads is a decision for when the loop closes.
+
+### The write-back scheduler dies on a source-only stack
+
+**Seed:** [`issues/source-only-writeback-scheduler.md`](issues/source-only-writeback-scheduler.md) · `fix` · appetite small
+
+On a stack with the source alone, `boundary_policies` has no entry for the source, so the scheduler's
+`deadline` raises `KeyError` at its first scan after any namespace op and the pump dies. Found while
+mapping the nested-rmdir replay shapes, and recorded there without a fix. Small, and it sits in the
+scheduler the liveness work below changes.
+
+### Nothing notices when a policy pump dies
+
+**Seed:** [`issues/pump-liveness-and-loss-windows.md`](issues/pump-liveness-and-loss-windows.md) · `fix` · appetite big
+
+A `StateThread` that raises stores the exception and exits its loop; the exception surfaces only on
+`join`, and nothing monitors liveness — the mount watches the FUSE thread alone. A write-back
+scheduler that dies on a transient tier error leaves the filesystem fully functional and accepting
+writes while nothing ever commits upstream, which converts every bounded loss window into an
+unbounded one, and the only evidence is one log line. Two configuration gaps belong with it because
+they are the same failure seen from the operator's side: `max_interval` defaults to `None`, so writes
+closer together than `delay` defer the commit forever, and the eviction watermarks `PLAN.md`
+documents as defaults are hardcoded with no configuration key at all.
+
+### A second SIGINT settles `detached` without rescuing
+
+**Seed:** [`issues/shutdown-rescue-gaps.md`](issues/shutdown-rescue-gaps.md) · `fix` · appetite big
+
+The second-Ctrl-C downgrade path settles `shutdown_state = detached` and never calls `rescue()`, so
+every dirty file still queued on node-local storage is stranded behind a state that says it is safe.
+Two related gaps travel with it: `umount --detach` is bounded by `drain_timeout` where `PLAN.md` says
+it completes, because the daemon cannot distinguish it from a scheduler's SIGTERM; and an incomplete
+rescue's stranded count is discarded rather than recorded. A note of 2026-11-11 adds that a forced
+unmount settles the same state by design, so the state cannot carry the promise as written, and that
+the shutdown is a state machine held in three flags. Reaching the documented semantics is a design
+change and belongs in `PLAN.md` first.
+
+### Small gaps behind inaccurate invariants
+
+**Seed:** [`issues/invariant-audit-gaps.md`](issues/invariant-audit-gaps.md) · `fix` · appetite small
+
+Six independent findings from the August audit, each too small for its own cycle and each a place
+where an asserted property is not the one the code has. `residency.checksum` is never written though
+the spec parses `checksum = true`, so `audit --full` would have nothing to verify against.
+`tier.generation` never advances in production. `intent.temp_name` is dead and the archive's sibling
+`.tmp` falls outside the orphan-recognition convention. `statfs` reports an entirely full filesystem
+for an unquota'd non-POSIX source. There is no directory `fsync` anywhere, so a rename's *name* is not
+durable even though its data is — a design decision rather than a drive-by fix. And `S3Tier.rename`'s
+docstring claims an atomicity S3 does not have. Placed before the audit, which reads several of these
+columns.
+
+### `sosfs audit` — reconcile the state database against the tiers
+
+**Seed:** [`issues/audit-command.md`](issues/audit-command.md) · `feature` · appetite big
+
+The recovery half of a sacred invariant is unimplemented. `journal.pending()` has no consumer anywhere in
+`src/`, `begin_mount` raises `CrashDetected` and nothing catches it — so after a crash the next mount
+fails instead of recovering — and intents accumulate resolvable only by hand. The five-step walk is fully
+specified in `PLAN.md`: marker check, residency reconcile, intent resolution, counter rebuild, report
+with exit codes 0/1/2. `issues/read-only-mount.md` describes its smallest slice (markers, intents,
+counters); whichever of the two is taken first builds it. It also defines what "converged" means for the
+fault-injection suite and unblocks the commit cycle. High-blast-radius as a whole, being the only
+component licensed to delete residency rows and quarantine files on its own reading of the world.
+
+### `sosfs commit` — finalize the source offline
+
+**Seed:** [`issues/offline-commit-command.md`](issues/offline-commit-command.md) · `feature` · appetite big
+
+The project's differentiating feature and the thing the detach lifecycle was built for: drain the
+queued write-back state to the source from any host that sees the shared tiers, off the expensive
+allocation. Exclusive lock, direct after a detach, audit first after a crash, loss-risk ordering,
+checksum-match skip, batched archive finalization, `--direct` hop collapse with stale-copy
+invalidation, and `--forfeit` for data stranded on an unreachable node-scope tier. Directly
+downstream of the audit. `PLAN.md` promises parallel transfers here and every copy in the tree runs on
+its calling thread; the seed carries that contradiction.
+
+### Control channel, `status` and `flush`
+
+**Seed:** [`issues/control-channel-and-status.md`](issues/control-channel-and-status.md) · `feature` · appetite small
+
+`src/sosfs/control/` does not exist. A unix-domain socket in the state directory serving
+line-oriented JSON, wired into the mount daemon, with a client library; `status` reading it live and
+falling back to a direct database read when no mount is running; `flush` forcing an upstream commit
+for the whole overlay or a subtree. The first cheap entry after two big ones, and it reuses the
+offline read path the audit cycle introduces rather than building it twice.
+
+### Fault injection around every crash point
+
+**Seed:** [`issues/crash-fault-injection-suite.md`](issues/crash-fault-injection-suite.md) · `test` · appetite big
+
+The proof obligation for the audit and commit cycles, and the largest gap between the testing strategy
+`PLAN.md` describes and the one that exists. Today there are three survival tests with two SIGKILL
+points, no audit, no remount and no tier evaporation. What is needed: kill points between intent, act
+and confirm of every mutation type, mid-drain, mid-rescue and mid-re-sync, each followed by audit and
+remount, asserting convergence and loss-report accuracy; plus tier-evaporation cases that wipe a
+staging tier wholesale and assert the marker attributes it correctly. Placed right after the
+operations surface closes, so a defect it finds still has a natural home.
+
+### Concurrency stress on the free-threaded build
+
+**Seed:** [`issues/freethreaded-concurrency-stress.md`](issues/freethreaded-concurrency-stress.md) · `test` · appetite small
+
+The 3.15t job runs the same suite as every other job; there are no targeted stress tests despite
+free-threading being a first-class target. Parallel FUSE callbacks against transfers against eviction,
+and race hunting with the sampling profiler. Until 2026-11-11 this seed also held the engine's known
+races, several reproduced by injection; those are defects and now belong to `racing-write-marked-clean`
+and `namespace-sync-redesign`. What stays here is the workload, which needs a surface that has stopped
+moving.
+
+### A priority lane in the transfer pool
+
+**Seed:** [`issues/transfer-priority-lane.md`](issues/transfer-priority-lane.md) · `feature` · appetite small
+
+`TransferPool` is one flat FIFO executor that nothing submits to: every copy in the tree runs on its
+calling thread, measured during a drain on 2026-11-11. So there is no queue for a lane to reorder yet,
+and shaping starts by deciding whether background copies use the pool at all, which the commit cycle
+decides first. Last in this section for that reason.
+
+## Queued: a mount a researcher can use
+
+The surface between the engine and a person on a cluster: a mount that starts, files that are theirs,
+a read-only mode for datasets that are never written, and a module. Its behaviour shows only on a real
+mount, which is why the lane leads it.
+
 ### Run the integration suite somewhere
 
 **Seed:** [`issues/ci-integration-lane.md`](issues/ci-integration-lane.md) · `ci` · appetite big
@@ -105,8 +343,9 @@ test skipped, so a criterion verified that way proves nothing. Moved ahead of th
 below because each of them is a behaviour only a real mount shows: the daemonized branch has no test
 at all, the owner of a created file is decided in the adapter, and a read-only mount is defined by
 what the kernel is told. The orphan fix (landed 2026-11-06) and the handle-less truncate fix owe
-mount-level cases this lane makes run. Needs a Linux runner with `/dev/fuse` and a MinIO service
-container, and a decision about whether the lane blocks a landing or reports.
+mount-level cases this lane makes run. The bundle loop's scenario runs its MinIO and mounted halves
+here. Needs a Linux runner with `/dev/fuse` and a MinIO service container, and a decision about
+whether the lane blocks a landing or reports.
 
 ### The default mount fails on a first-ever mount
 
@@ -162,33 +401,8 @@ and a sweep runs many jobs over one dataset.
 read of a staged file passes through SQLite's single writer. Measured once through the engine API on
 a laptop: about 3,100 to 4,300 opens a second against 35,900 on the stage directly, flat from four
 threads up. For a dataset opened once per file per epoch this is the hot path, and the LRU clock is
-the one figure in the catalog that is safe to batch. Placed before the archive work so the read path
-that work builds on has a baseline.
-
-### Make archive tiers reachable from a spec file
-
-**Seed:** [`issues/archive-spec-plumbing.md`](issues/archive-spec-plumbing.md) · `feature` · appetite big
-
-`ArchiveTier` is adapter-complete and covered by 36 unit tests, and no user can configure it: the
-spec parser admits only `posix` and `s3`, and the archive keys `location`, `staging` and `sync` are
-rejected as unknown, so the three worked examples in `PLAN.md` all fail at parse time. `LocationSpec`
-and `inner_location()` are implemented and reachable only from tests, and the engine's tier
-construction has no archive branch. A shipped-but-unreachable adapter is worse than an unwritten one
-because it reads as done. For a read-only mount the read side is enough — admit the types and keys,
-construct the tier, index, read — and shaping may split the cycle there.
-
-### Sharded archive sources
-
-**Seed:** [`issues/sharded-archive-sources.md`](issues/sharded-archive-sources.md) · `feature` · appetite big
-
-The flagship use case, in the owner's words of 2026-11-04: a center refuses a 100-million-inode quota
-request and the researcher's dataset lives instead as ten thousand `.tar.gz` shards of ten thousand
-images each, cascading down the tier stack just in time. That placement contradicts `PLAN.md`, which
-schedules sharding post-v0.1.0, so under the plan-drift rule the cycle reconciles `PLAN.md` first. A
-streaming or ranged read in `InnerLocation` is a prerequisite rather than an optimization: archive I/O
-is whole-blob in memory today, and a shard of that size cannot pass through RAM. Two questions were
-added on 2026-11-11: whether a member is served by offset from the staged shard instead of being
-unpacked to a file of its own, and how many mounts may read one staged dataset.
+the one figure in the catalog that is safe to batch. Taking the baseline is cheap at any time; the fix
+belongs beside the read-only mount, whose workload it bounds.
 
 ### Deploy on an HPC cluster
 
@@ -196,195 +410,15 @@ unpacked to a file of its own, and how many mounts may read one staged dataset.
 
 The goal is a researcher who runs `module load terrace`, mounts at the top of a batch script, and
 finds that it works — free, and maintained by the center. Its first two questions are in the
-decisions above and should be answered before any cycle in this section starts; what remains here is
-the modulefile, the job-script pattern for a read-only dataset, a mount per node, and the batch
-scheduler's time-limit sequence. For a read-only mount that sequence needs no rescue: the criterion is
-that a killed mount leaves an overlay the next job can mount. The detach-then-commit pattern is the
-second track's deployment and returns here when that track closes.
-
-## Queued: write-back that can be trusted
-
-The differentiating lifecycle: delayed write-back, drain, detach with rescue, and a commit from
-another host. Its engine half exists and its recovery half does not, and its namespace core has taken
-every engine cycle since adoption. Independent of the section above; the first two entries can run
-beside it.
-
-### A write racing a commit can be recorded clean
-
-**Seed:** [`issues/racing-write-marked-clean.md`](issues/racing-write-marked-clean.md) · `fix` · appetite small
-
-A commit decides a copy is clean from a flag it resets and a stat it compares, and a write can pass
-both: one that read the flag before the reset and lands after the stat, or one of the same size inside
-one timestamp tick. Both reproduced by injection: the stage holds the new bytes, the source the old,
-the residency reads clean and the queue is empty, so the next eviction deletes the write. First in
-this track because it is the first sacred invariant, it is independent of the namespace work, and how
-wide the second route is on a production kernel is one measurement away.
-
-### Rebuild how the namespace reaches the source
-
-**Seed:** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) · `refactor` · appetite big
-
-Six landed cycles and a parked seventh worked on deferred namespace replay, and each found the next
-defect in it: 727 lines of source added, 3,281 lines of tests and some 19,000 lines of cycle records,
-and a directory rename still raises `IntegrityError` over a tombstone that nothing can remove. The seed traces the family to three
-properties — ids that are reused, tombstones that occupy names, and path locks that cannot see a
-directory rename — and proposes to remove them and to replace the replay with a planner whose states
-are declared. Its first criterion is a design decision recorded in `PLAN.md`. High-blast-radius as a
-whole: it rewrites the gated regions of `engine/overlay.py` and changes the schema.
-
-### The write-back scheduler dies on a source-only stack
-
-**Seed:** [`issues/source-only-writeback-scheduler.md`](issues/source-only-writeback-scheduler.md) · `fix` · appetite small
-
-On a stack with the source alone, `boundary_policies` has no entry for the source, so the scheduler's
-`deadline` raises `KeyError` at its first scan after any namespace op and the pump dies. Found while
-mapping the nested-rmdir replay shapes, and recorded there without a fix. Small, and it sits in the
-scheduler the liveness work below changes.
-
-### Nothing notices when a policy pump dies
-
-**Seed:** [`issues/pump-liveness-and-loss-windows.md`](issues/pump-liveness-and-loss-windows.md) · `fix` · appetite big
-
-A `StateThread` that raises stores the exception and exits its loop; the exception surfaces only on
-`join`, and nothing monitors liveness — the mount watches the FUSE thread alone. A write-back
-scheduler that dies on a transient tier error leaves the filesystem fully functional and accepting
-writes while nothing ever commits upstream, which converts every bounded loss window into an
-unbounded one, and the only evidence is one log line. Two configuration gaps belong with it because
-they are the same failure seen from the operator's side: `max_interval` defaults to `None`, so writes
-closer together than `delay` defer the commit forever, and the eviction watermarks `PLAN.md`
-documents as defaults are hardcoded with no configuration key at all.
-
-### A second SIGINT settles `detached` without rescuing
-
-**Seed:** [`issues/shutdown-rescue-gaps.md`](issues/shutdown-rescue-gaps.md) · `fix` · appetite big
-
-The second-Ctrl-C downgrade path settles `shutdown_state = detached` and never calls `rescue()`, so
-every dirty file still queued on node-local storage is stranded behind a state that says it is safe.
-Two related gaps travel with it: `umount --detach` is bounded by `drain_timeout` where `PLAN.md` says
-it completes, because the daemon cannot distinguish it from a scheduler's SIGTERM; and an incomplete
-rescue's stranded count is discarded rather than recorded. A note of 2026-11-11 adds that a forced
-unmount settles the same state by design, so the state cannot carry the promise as written, and that
-the shutdown is a state machine held in three flags. Reaching the documented semantics is a design
-change and belongs in `PLAN.md` first.
-
-### Small gaps behind inaccurate invariants
-
-**Seed:** [`issues/invariant-audit-gaps.md`](issues/invariant-audit-gaps.md) · `fix` · appetite small
-
-Six independent findings from the August audit, each too small for its own cycle and each a place
-where an asserted property is not the one the code has. `residency.checksum` is never written though
-the spec parses `checksum = true`, so `audit --full` would have nothing to verify against.
-`tier.generation` never advances in production. `intent.temp_name` is dead and the archive's sibling
-`.tmp` falls outside the orphan-recognition convention. `statfs` reports an entirely full filesystem
-for an unquota'd non-POSIX source. There is no directory `fsync` anywhere, so a rename's *name* is not
-durable even though its data is — a design decision rather than a drive-by fix. And `S3Tier.rename`'s
-docstring claims an atomicity S3 does not have. Placed before the audit, which reads several of these
-columns.
-
-### `sosfs audit` — reconcile the state database against the tiers
-
-**Seed:** [`issues/audit-command.md`](issues/audit-command.md) · `feature` · appetite big
-
-The recovery half of a sacred invariant is unimplemented. `journal.pending()` has no consumer anywhere
-in `src/`, `begin_mount` raises `CrashDetected` and nothing catches it — so after a crash the next
-mount fails instead of recovering — and intents accumulate resolvable only by hand. The five-step walk
-is fully specified in `PLAN.md`: marker check, residency reconcile, intent resolution, counter
-rebuild, report with exit codes 0/1/2. The read-only mount builds its smallest slice first; this cycle
-adds the reconcile, the quarantine and the loss report. It also defines what "converged" means for the
-fault-injection suite and unblocks the commit cycle. High-blast-radius as a whole, being the only
-component licensed to delete residency rows and quarantine files on its own reading of the world.
-
-### `sosfs commit` — finalize the source offline
-
-**Seed:** [`issues/offline-commit-command.md`](issues/offline-commit-command.md) · `feature` · appetite big
-
-The project's differentiating feature and the thing the detach lifecycle was built for: drain the
-queued write-back state to the source from any host that sees the shared tiers, off the expensive
-allocation. Exclusive lock, direct after a detach, audit first after a crash, loss-risk ordering,
-checksum-match skip, batched archive finalization, `--direct` hop collapse with stale-copy
-invalidation, and `--forfeit` for data stranded on an unreachable node-scope tier. Directly
-downstream of the audit. `PLAN.md` promises parallel transfers here and every copy in the tree runs on
-its calling thread; the seed carries that contradiction.
-
-### Control channel, `status` and `flush`
-
-**Seed:** [`issues/control-channel-and-status.md`](issues/control-channel-and-status.md) · `feature` · appetite small
-
-`src/sosfs/control/` does not exist. A unix-domain socket in the state directory serving
-line-oriented JSON, wired into the mount daemon, with a client library; `status` reading it live and
-falling back to a direct database read when no mount is running; `flush` forcing an upstream commit
-for the whole overlay or a subtree. The first cheap entry after two big ones, and it reuses the
-offline read path the audit cycle introduces rather than building it twice.
-
-### Bring archive mutations under the journal and a lock
-
-**Seed:** [`issues/archive-journaling-and-locking.md`](issues/archive-journaling-and-locking.md) · `fix` · appetite big
-
-Re-pack and re-sync mutate a managed location — the source archive, which for an archive source is
-the whole dataset — outside any intent bracket. `'compact'` and `'resync'` exist in the journal's
-action vocabulary with no producer. Alongside it, `ArchiveTier` has no tier-wide lock while
-`engine/locks.py` is path-keyed, so two concurrent puts to different paths in the same archive both
-snapshot the member set, both re-pack, and the second rename wins — a member vanishes with both calls
-returning success. Two more in the same region: a stale staging copy silently wins over a newer
-source, and the archive index cache is trusted unconditionally. This is the write side of archives,
-which a read-only dataset mount never reaches; it sits here, before the finalization work that adds
-callers to exactly these paths.
-
-### Batch archive finalization at drain and commit
-
-**Seed:** [`issues/archive-finalization-integration.md`](issues/archive-finalization-integration.md) · `feature` · appetite big
-
-`PLAN.md` requires one re-pack per commit or flush and never per file; the adapter re-packs on every
-`put`, `set_meta`, `delete`, `mkdir`, `rmdir` and `rename`, and nothing batches. Staged re-sync's rate
-limit is waived at drain in the design and unreachable in the code, because no engine module calls
-`resync` at all. This is where the drain and commit paths learn that an archive source is finalized
-once, at the end, rather than continuously — and it is not a small addition.
-
-### Archive coverage at the engine and mount level
-
-**Seed:** [`issues/archive-tier-test-coverage.md`](issues/archive-tier-test-coverage.md) · `test` · appetite small
-
-The adapter is well covered in isolation; nothing exercises an archive source *through the engine*.
-This closes the archive write side immediately after the code that makes the tests possible: both
-modes over POSIX, tar.gz over S3 against moto, index persistence across remounts, and reconstruction
-correctness after a batched finalization. Re-scope at shaping: the read-side half lands with the
-first track.
-
-### Fault injection around every crash point
-
-**Seed:** [`issues/crash-fault-injection-suite.md`](issues/crash-fault-injection-suite.md) · `test` · appetite big
-
-The proof obligation for the audit and commit cycles, and the largest gap between the testing strategy
-`PLAN.md` describes and the one that exists. Today there are three survival tests with two SIGKILL
-points, no audit, no remount and no tier evaporation. What is needed: kill points between intent, act
-and confirm of every mutation type, mid-drain, mid-rescue and mid-re-sync, each followed by audit and
-remount, asserting convergence and loss-report accuracy; plus tier-evaporation cases that wipe a
-staging tier wholesale and assert the marker attributes it correctly. Placed right after the
-operations surface closes, so a defect it finds still has a natural home.
-
-### Concurrency stress on the free-threaded build
-
-**Seed:** [`issues/freethreaded-concurrency-stress.md`](issues/freethreaded-concurrency-stress.md) · `test` · appetite small
-
-The 3.15t job runs the same suite as every other job; there are no targeted stress tests despite
-free-threading being a first-class target. Parallel FUSE callbacks against transfers against
-eviction, and race hunting with the sampling profiler. Until 2026-11-11 this seed also held the
-engine's known races, several reproduced by injection; those are defects and now belong to the two
-entries that open this section. What stays here is the workload, which needs a surface that has
-stopped moving.
-
-### A priority lane in the transfer pool
-
-**Seed:** [`issues/transfer-priority-lane.md`](issues/transfer-priority-lane.md) · `feature` · appetite small
-
-`TransferPool` is one flat FIFO executor that nothing submits to: every copy in the tree runs on its
-calling thread, measured during a drain on 2026-11-11. So there is no queue for a lane to reorder yet,
-and shaping starts by deciding whether background copies use the pool at all, which the commit cycle
-decides first. Last in this track for that reason.
+decisions above and are worth answering early, since they decide whether this section is engineering
+or a policy conversation. What remains here is the modulefile, the job-script patterns, a mount per
+node, and the batch scheduler's time-limit sequence. For a read-only mount that sequence needs no
+rescue: the criterion is that a killed mount leaves an overlay the next job can mount. The
+detach-then-commit pattern depends on the lifecycle section and joins when that closes.
 
 ## Queued: release
 
-What turns the two tracks into a tagged version.
+What turns the sections above into a tagged version.
 
 ### `sosfs config`
 
@@ -411,7 +445,7 @@ Sphinx and furo: quickstart, overlay-spec reference, architecture from `PLAN.md`
 built around the job-script patterns, and a CLI reference. Then release readiness — `CHANGELOG.md` for
 0.1.0, `README.md`, verified build artifacts, and the version. Consumes the benchmark numbers and
 documents a surface with nothing stubbed in it. Last before the tag. Whether a first tag follows the
-read-only track alone is a question for the maintainer once that track closes.
+bundle loop alone is a question for the maintainer once that section closes.
 
 ### Extended archive sources
 
@@ -428,7 +462,7 @@ Four seeds that repair or measure the mechanism
 [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) proposes to replace. Held
 since 2026-11-11, not retired: each keeps its file and its evidence. If the rebuild is adopted, the
 proposal is to fold the first into its acceptance tests, retire the next two, and shape the last
-after it; if it is declined, they return to the head of the second track in this order.
+after it; if it is declined, they return to the head of the lifecycle section in this order.
 
 ### The model rarely reaches the scheduler and eviction commit routes
 

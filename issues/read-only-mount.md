@@ -13,9 +13,9 @@ lane: public
 
 ## Problem
 
-The flagship use case is a dataset that is read and never written
+A large class of use is a dataset that is read and never written
 (`issues/sharded-archive-sources.md`), and every mount today is read-write. That puts the whole
-write path on the dataset's critical path for no benefit: deferred namespace replay, the clean
+write path on that dataset's critical path for no benefit: deferred namespace replay, the clean
 transition, drain and rescue, the audit's loss report and the offline commit all have open defects or
 do not exist (`ROADMAP.md`), and a training job touches none of them on purpose.
 
@@ -46,7 +46,7 @@ question; it does not answer it.
 
 Never proposed. `PLAN.md` and the original phase outline describe one read-write lifecycle. Found by
 an out-of-cycle review of the whole tree at `64faf27` (2026-11-11), from the order of the roadmap: the
-read path to the flagship use case was queued behind write-path repairs it does not need.
+read path to a read-only dataset was queued behind write-path repairs it does not need.
 
 ## Outcome / vision
 
@@ -80,6 +80,10 @@ Draft R-IDs, to be firmed up at promotion.
 - An archive source that is only read needs none of `issues/archive-journaling-and-locking.md`'s
   re-pack bracket or `issues/archive-finalization-integration.md`'s batching. The read side of
   `issues/archive-spec-plumbing.md` is enough to reach a read-only archive from a spec file.
+- 2026-11-11, the maintainer: a read-only mount is a large part of the project and not its flagship.
+  What sets the project apart is write-back with delayed re-aggregation into compressed bundles at
+  the source. This mode therefore follows a first pass through that loop
+  ([`issues/local-bundle-loop.md`](local-bundle-loop.md)); it does not lead.
 - Open question — **per mount or per overlay.** A spec key makes the overlay read-only for good and
   lets the engine skip constructing the write path. A mount option lets one overlay be staged
   read-write and served read-only.

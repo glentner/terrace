@@ -132,5 +132,13 @@ commit boundary, not a wall-clock time.
      existing state database unopenable.
   5. **Is the `reindex()` inside `_repack` separable from the re-pack?** A batch that re-packs once
      but still re-indexes per member has moved the wrong cost.
+- 2026-11-11 (whole-tree review at `64faf27`): the maintainer names this the project's flagship:
+  write-back with delayed re-aggregation into compressed bundles at the source. Two consequences. It
+  leads the roadmap's first section, driven on a developer machine against a local object store before
+  any cluster work ([`issues/local-bundle-loop.md`](local-bundle-loop.md)). And batching follows from
+  the synchronization model; it is not an addition to the adapter. If a change marks its bundle dirty
+  and a re-aggregation rebuilds the bundle from the catalog and the staged bytes
+  ([`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md), decision 3), nothing re-packs
+  per file and the engine has one call to make, on a clock.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work brief (dossier 2) and the tier-invariants brief.

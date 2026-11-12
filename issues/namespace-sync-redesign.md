@@ -85,6 +85,19 @@ with frames, a stack, a waiting table, marks and a stuck test. Its cost is super
 (`issues/replay-cost-at-scale.md`: 1,097 s for one drain) and mutants of its branches survive the
 suite (`issues/replay-defensive-branch-coverage.md`).
 
+**The source the project is for cannot take a replayed operation at all.** The maintainer's statement
+of 2026-11-11: what sets the project apart is write-back with delayed re-aggregation into compressed
+bundles at the source. A bundle has no rename, no unlink and no mkdir. The engine as built would
+replay each queued row into `ArchiveTier`, and the adapter answers every one by rewriting the whole
+working archive and reading every member back into the index (`_repack`,
+`src/sosfs/tier/archive.py:529`, from six callers at `:594` to `:677`). `resync`, the one call that
+pushes a bundle to its source, has no caller under `engine/`. The model that fits a bundle is
+state-based: a change marks its bundle dirty, and on the bundle's clock or at a drain the engine
+rebuilds it from the catalog and the staged bytes and replaces it with one atomic write. That rebuild
+sets every member's source place and drops every removed entry in the bundle in one transaction, so
+it has no order to discover. Decision 3 below is not open for a bundle source, and a bundle source is
+the case to build it on first.
+
 ## Why it was deferred
 
 Each cycle was a `fix` with a small appetite and a non-goal against schema changes, and the blind
@@ -116,11 +129,12 @@ before any code, under the plan-drift rule.
      bump taken before any state database is deployed.
   2. **Where tombstones live.** Out of the logical namespace: a removed or moved-away entry holds a
      physical place only, and the name it left is free at once.
-  3. **How the source catches up.** A planner that reads the drift (target against `source_path`, and
-     removed entries still holding a place) and emits an ordered list of source operations, as a pure
-     function testable without tiers; or write-through for a source that can take namespace operations
-     cheaply, with deferral kept for one that cannot. The planner run at once on each call is
-     write-through, so one mechanism may serve both.
+  3. **How the source catches up.** From state, at a unit the source type sets. For a bundle source
+     the unit is the bundle: dirty on any change inside it, rebuilt whole on its clock. For a POSIX or
+     object-prefix source the unit is the entry: a planner reads the drift (target against
+     `source_path`, and removed entries still holding a place) and emits an ordered list of source
+     operations, as a pure function testable without tiers. Write-through is that planner run at once
+     on each call, and may be the right default for a source that takes namespace operations cheaply.
   4. **What excludes a directory rename.** A namespace lock that per-file calls share and a directory
      rename takes alone; or stage copies addressed by entry id, so a rename moves no stage object.
      The second gives up stage trees a person can read by name, which matters when a state database is
@@ -155,6 +169,10 @@ before any code, under the plan-drift rule.
   first, and the second has no object once `_replay_through` is gone.
   `issues/source-commit-staged-publish.md` depends on decision 4. None of those seeds is retired by
   this one being filed; that needs the maintainer's word.
+- **Two stages.** The model, the schema and the bundle source first, where there is no replay to
+  port. POSIX and object-prefix sources second, where `_replay_through` is deleted. Shaping decides
+  whether that is one cycle or two; the first stage is what the bundle loop waits on
+  ([`issues/archive-finalization-integration.md`](archive-finalization-integration.md)).
 - **What it does not touch.** The data path's clean transition
   (`issues/racing-write-marked-clean.md`), the pumps, drain and rescue, and the tier adapters.
 - **The test asset carries over.** The model compares the engine with a plain directory, so it judges
