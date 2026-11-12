@@ -438,6 +438,16 @@ variable by assigning the empty string is enough to meet it. The rename to Terra
 and left this as it was. The throwaway environment and the `temp_site` fixture always set both
 variables to absolute paths, so no test sees either case.
 
+### No unit test pins the extended-attribute names
+
+**Seed:** [`issues/xattr-names-unpinned.md`](issues/xattr-names-unpinned.md) · `test` · appetite small
+
+The adapter tests query `user.terrace.tiers` and `user.terrace.dirty` through the module's own
+constants, so they pass whatever the constants hold: rebinding both to another name pair leaves all
+six green. The only literal check is in the integration suite, which runs nowhere. A wrong name would
+pass the unit lane and break every script that reads the attribute. Tightening an existing assertion
+closes it without moving the unit count.
+
 ### A read-only mount
 
 **Seed:** [`issues/read-only-mount.md`](issues/read-only-mount.md) · `feature` · appetite small
