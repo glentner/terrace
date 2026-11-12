@@ -227,6 +227,13 @@ The criteria:
   lines (`:992-1007`) to `8d2265f` (2026-07-03). Neither commit carries a `spec/` directory, and the
   first cycle landed on 2026-11-05. The cycle's metrics record it as `pre-factory` (the foreman's
   ruling on the method, 2026-11-11). The seed names `4aea975` alone.
+- **Q:** R7 says a write costs no SQL while "no commit of it has started since that handle last
+  wrote", and also "as today". On the base a handle whose last write began before a hop recorded
+  its outcome pays one dirty mark on its next write. Which reading holds? — **A:** "As today". R7
+  reads: WHILE a handle's copy is recorded `dirty` and no hop of it has recorded its outcome since
+  that handle's last write began, a write through that handle executes no SQL statement. The one
+  dirty mark after a hop is the base's cost and stays. (The foreman's ruling at the plan sign-off;
+  resolved 2026-11-12.)
 
 ## Related materials
 
