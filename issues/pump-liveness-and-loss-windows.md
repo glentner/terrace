@@ -14,31 +14,31 @@ lane: public
 ## Problem
 
 The two policy pumps — `WritebackScheduler` and `EvictionManager` — are `StateThread` subclasses, and
-`StateThread.run` (`src/sosfs/core/fsm.py:74-83`) catches `Exception`, stores it in `self.exc`, logs
+`StateThread.run` (`src/terrace/core/fsm.py:74-83`) catches `Exception`, stores it in `self.exc`, logs
 one line, and exits the loop. The exception surfaces only on `join`
-(`src/sosfs/core/fsm.py:100-104`), and nothing joins until shutdown. `Mount._serve_after_start` polls
-`fuse_thread.is_alive()` and nothing else (`src/sosfs/fuse/mount.py:339`), so the FUSE session is the
+(`src/terrace/core/fsm.py:100-104`), and nothing joins until shutdown. `Mount._serve_after_start` polls
+`fuse_thread.is_alive()` and nothing else (`src/terrace/fuse/mount.py:339`), so the FUSE session is the
 only liveness the process watches. When the unmount finally arrives, `Mount._stop_pumps` wraps
 `pump.stop()` in `try/except Exception` and logs — deliberately, with a comment
-(`src/sosfs/fuse/mount.py:226-235`).
+(`src/terrace/fuse/mount.py:226-235`).
 
 Neither pump isolates a failure to the item that caused it. `WritebackScheduler.on_commit` iterates
 `self._due` calling `self.engine.commit_row(row)` with no guard
-(`src/sosfs/engine/writeback.py:112-118`); `EvictionManager.on_evict` calls `self.reclaim(spec)` the
-same way (`src/sosfs/engine/evict.py:178-189`). One `OSError` out of a tier adapter kills the machine.
+(`src/terrace/engine/writeback.py:112-118`); `EvictionManager.on_evict` calls `self.reclaim(spec)` the
+same way (`src/terrace/engine/evict.py:178-189`). One `OSError` out of a tier adapter kills the machine.
 The reachable triggers are ordinary: `ENOSPC` or `EPERM` from `PosixTier.put` when the source
 filesystem fills or a directory is not writable by the mount owner; a `sqlite3.OperationalError` when
 `busy_timeout` expires under contention, for which there is no retry loop anywhere
-(`src/sosfs/state/db.py:94-97`); any obstore error surfacing from an S3 source during a network
+(`src/terrace/state/db.py:94-97`); any obstore error surfacing from an S3 source during a network
 partition.
 
 The resulting state is the dangerous part. The FUSE mount stays up. Reads and writes succeed. The
 catalog keeps flipping copies to dirty and queueing write-back rows, and nothing drains them. Every
 bound in the table below stops applying, because the code that enforces the bound is not running. The
-sole evidence is one line — `sosfs-writeback died in COMMIT: …` at ERROR, which under the default
-daemonized mount goes to `mount.log` inside the state directory, where nothing reads it. `sosfs
+sole evidence is one line — `terrace-writeback died in COMMIT: …` at ERROR, which under the default
+daemonized mount goes to `mount.log` inside the state directory, where nothing reads it. `terrace
 status`, the natural place to surface it, is a stub. A related gap sits one line away: the two
-`.start()` calls at `src/sosfs/fuse/mount.py:222-223` are outside the compensating `except` that
+`.start()` calls at `src/terrace/fuse/mount.py:222-223` are outside the compensating `except` that
 releases the lock, so a pump that fails to start leaves the lock held, the pidfile on disk and
 `shutdown_state = mounted`.
 
@@ -49,7 +49,7 @@ under a running mount.
 ### The loss-window table
 
 This is what the cycle is protecting. Every row is a window between a write being acknowledged and its
-bytes reaching a durable upstream tier; paths in the third column are relative to `src/sosfs/`.
+bytes reaching a durable upstream tier; paths in the third column are relative to `src/terrace/`.
 
 | Window | Bound | Bound lives at |
 |---|---|---|
@@ -66,16 +66,16 @@ rows two and five.
 
 ### `max_interval` defaults to `None`
 
-`WritebackSpec.max_interval` is `Optional[float] = None` (`src/sosfs/tier/spec.py:90`) and
+`WritebackSpec.max_interval` is `Optional[float] = None` (`src/terrace/tier/spec.py:90`) and
 `WritebackScheduler.deadline` only applies the cap when it is set
-(`src/sosfs/engine/writeback.py:80-82`). A file written faster than `delay` therefore never reaches its
+(`src/terrace/engine/writeback.py:80-82`). A file written faster than `delay` therefore never reaches its
 deadline: each write pushes `last_write + delay` out again, forever. This is coded intentionally and
 pinned as such by `tests/engine/test_policy.py:148-160`
 (`test_delay_only_boundary_defers_under_constant_writes`, which asserts the residency stays `dirty`
 through three writes 50 s apart under a 60 s delay and commits only once writing stops). It is the
 single most-likely-unnoticed unbounded window in the system, because an unconfigured boundary silently
 gets `WritebackSpec()` — delayed, 60 s, no cap — from the `or WritebackSpec()` in `boundary_policies`
-(`src/sosfs/engine/writeback.py:35`). An operator who never wrote a `writeback` table has an unbounded
+(`src/terrace/engine/writeback.py:35`). An operator who never wrote a `writeback` table has an unbounded
 source-facing window and no way to see it. `PLAN.md` § *Risks and mitigations* tells that operator to
 "tighten `delay`/`max_interval` … where the loss window matters", which presumes they know the window
 exists.
@@ -84,14 +84,14 @@ exists.
 
 `PLAN.md` § *Overlay engine* → *Eviction* (line 216) reads "high/low watermarks (default 95%/85%)". The
 word *default* implies a setting. `DEFAULT_HIGH = 0.95` and `DEFAULT_LOW = 0.85` are module constants
-(`src/sosfs/engine/evict.py:26-27`); the only override is the `high=`/`low=` keywords on
-`EvictionManager.__init__` (`src/sosfs/engine/evict.py:69-70`), and neither construction site passes
+(`src/terrace/engine/evict.py:26-27`); the only override is the `high=`/`low=` keywords on
+`EvictionManager.__init__` (`src/terrace/engine/evict.py:69-70`), and neither construction site passes
 them — `Mount.start` builds `EvictionManager(self.engine, tick=self.evict_tick)`
-(`src/sosfs/fuse/mount.py:221`). There is no `watermarks` key in `TIER_KEYS`, `QUOTA_KEYS` or
-`OVERLAY_KEYS` (`src/sosfs/tier/spec.py:27-30`), so an operator with a 64 GB `/dev/shm` tier and a
+(`src/terrace/fuse/mount.py:221`). There is no `watermarks` key in `TIER_KEYS`, `QUOTA_KEYS` or
+`OVERLAY_KEYS` (`src/terrace/tier/spec.py:27-30`), so an operator with a 64 GB `/dev/shm` tier and a
 workload that writes in 8 GB bursts cannot lower the high mark to give eviction more headroom. The same
 is true of the two `tick` values (`writeback_tick=1.0`, `evict_tick=5.0` at
-`src/sosfs/fuse/mount.py:154`), which are constructor arguments with no configuration surface. This one
+`src/terrace/fuse/mount.py:154`), which are constructor arguments with no configuration surface. This one
 is **unbuilt work**, not a defect: the code does what it says, and the documentation says something
 else.
 
@@ -142,15 +142,15 @@ below names one observable outcome so it is worth negotiating, not because that 
 - **R4** — When a boundary has been failing to commit for a bounded number of consecutive passes, the
   scheduler SHALL report the boundary by name and the consecutive-failure count, rather than retrying
   silently forever.
-- **R5** — When an overlay spec declares a `delayed` boundary with no `max_interval`, `sosfs mount`
+- **R5** — When an overlay spec declares a `delayed` boundary with no `max_interval`, `terrace mount`
   SHALL make the unbounded window explicit — either by applying a finite default (whose value is a
   shaping question) or by emitting a named warning identifying the boundary — so that no boundary is
   unbounded without the operator having been told.
 - **R6** — Where an overlay spec sets eviction watermarks, the eviction manager SHALL use them; the
   startup line SHALL report the values in effect (`Eviction manager started (watermarks=90%/70%, …)`),
-  and a spec with `low >= high` SHALL be rejected by `sosfs mount` with a non-zero exit and a message
+  and a spec with `low >= high` SHALL be rejected by `terrace mount` with a non-zero exit and a message
   naming the tier, at parse time rather than at construction.
-- **R7** — Where a mount is running, `sosfs status` SHALL report each pump as alive or dead. This
+- **R7** — Where a mount is running, `terrace status` SHALL report each pump as alive or dead. This
   depends on `issues/control-channel-and-status.md`; if that cycle has not landed, the criterion is
   out of scope rather than met by a log line.
 
@@ -185,7 +185,7 @@ below names one observable outcome so it is worth negotiating, not because that 
 - Open question — **where the watermark keys live.** Per-tier inside `quota = { … }` is what an
   operator wants for a tight `/dev/shm` next to a roomy `/scratch`; an overlay-level pair is one key
   and one default. Decide also whether `writeback_tick` and `evict_tick`
-  (`src/sosfs/fuse/mount.py:154`) join this cycle — they have the same gap and would otherwise need a
+  (`src/terrace/fuse/mount.py:154`) join this cycle — they have the same gap and would otherwise need a
   second configuration-surface change later.
 - Out of scope by construction: `drain_timeout = 0` meaning *rescue nothing* rather than *no limit*
   is the same class of knob defect and belongs to `issues/shutdown-rescue-gaps.md`.

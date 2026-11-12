@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Smoke tests for the sosfs CLI surface."""
+"""Smoke tests for the Terrace CLI surface."""
 
 # Type annotations
 from __future__ import annotations
@@ -21,7 +21,7 @@ def test_version() -> None:
     """Version flag reports the package version."""
     returncode, stdout, _ = main(['--version'])
     assert returncode == exit_status.success
-    assert_output(r'sosfs v\d+\.\d+\.\d+', stdout)
+    assert_output(r'terrace v\d+\.\d+\.\d+', stdout)
 
 
 def test_help() -> None:
@@ -44,7 +44,7 @@ def test_stub_commands(command: str) -> None:
     """Stub subcommands fail uniformly with a pointer to the roadmap."""
     returncode, _, stderr = main([command])
     assert returncode == exit_status.runtime_error
-    assert_output(rf'Not implemented: sosfs {command}', stderr)
+    assert_output(rf'Not implemented: terrace {command}', stderr)
 
 
 @mark.parametrize('command', ['mount', 'umount'])
@@ -63,8 +63,8 @@ def test_unknown_command() -> None:
 
 
 def test_temp_site_isolation(temp_site) -> None:
-    """The temp_site fixture scrubs SOSFS_* and redirects XDG paths."""
+    """The temp_site fixture scrubs TERRACE_* and redirects XDG paths."""
     import os
-    assert not [name for name in os.environ if name.startswith('SOSFS_')]
+    assert not [name for name in os.environ if name.startswith('TERRACE_')]
     assert os.environ['XDG_CONFIG_HOME'].startswith(str(temp_site))
     assert os.environ['XDG_STATE_HOME'].startswith(str(temp_site))

@@ -14,8 +14,8 @@ lane: public
 ## Problem
 
 **Created entries are recorded as `0:0`.** `OverlayEngine.create` and `mkdir` take optional `uid` and
-`gid` and default both to 0 (`src/sosfs/engine/overlay.py:367`, `:404`). The FUSE adapter passes
-neither (`src/sosfs/fuse/adapter.py:148`, `:191`) and never reads the calling process's identity, so
+`gid` and default both to 0 (`src/terrace/engine/overlay.py:367`, `:404`). The FUSE adapter passes
+neither (`src/terrace/fuse/adapter.py:148`, `:191`) and never reads the calling process's identity, so
 every file and directory made through a mount is cataloged as owned by root, and `getattr` reports
 that for as long as the entry is cataloged. Measured at `64faf27` through the engine API, two-tier
 POSIX stack, tmpdir tiers, Python 3.15.2 on macOS, process `501:20`:
@@ -26,7 +26,7 @@ after flush: source object owner = 501:0   catalog = 0:0
 ```
 
 The source object gets the daemon's own uid because the commit's `chown` to 0 fails unprivileged and
-is swallowed (`src/sosfs/tier/posix.py`, `_apply_meta`), so the catalog and the source disagree, and
+is swallowed (`src/terrace/tier/posix.py`, `_apply_meta`), so the catalog and the source disagree, and
 the catalog is the authority for ownership (`AGENTS.md` § 5). The adapter half is read from the code:
 no mount was driven. What a user sees: `ls -l` shows root on their own new files, and tools that
 refuse a tree owned by someone else refuse this one. A version-control checkout inside the mount is
@@ -43,7 +43,7 @@ against symlinks; environments, build trees and "latest" pointers all make them.
 
 **Unsupported operations do not say so.** `link` is out of scope by design and is not refused with a
 chosen errno. No `access` callback exists and the mount does not pass `default_permissions`
-(`src/sosfs/fuse/mount.py:310`), so permission bits are stored and reported and nothing enforces them.
+(`src/terrace/fuse/mount.py:310`), so permission bits are stored and reported and nothing enforces them.
 That may be the right behaviour for a single-user mount; it is not written down as a decision.
 
 ## Why it was deferred

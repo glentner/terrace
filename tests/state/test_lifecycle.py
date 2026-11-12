@@ -13,8 +13,8 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.lifecycle import (Lifecycle, Marker, MarkerStatus, verify_marker,
+from terrace.state.db import Database
+from terrace.state.lifecycle import (Lifecycle, Marker, MarkerStatus, verify_marker,
                                    LifecycleError, CrashDetected, MarkerError)
 
 
@@ -105,8 +105,8 @@ def test_marker_roundtrip(tmp_path: Path) -> None:
     """Markers write atomically and read back equal."""
     marker = Marker(uuid=UUID, tier='scratch', generation=3, written=123.5)
     marker.write(tmp_path)
-    assert (tmp_path / '.sosfs' / 'marker').exists()
-    assert not (tmp_path / '.sosfs' / 'marker.partial').exists()
+    assert (tmp_path / '.terrace' / 'marker').exists()
+    assert not (tmp_path / '.terrace' / 'marker.partial').exists()
     assert Marker.read(tmp_path) == marker
 
 
@@ -118,8 +118,8 @@ def test_marker_missing(tmp_path: Path) -> None:
 
 def test_marker_corrupt(tmp_path: Path) -> None:
     """Unparseable markers raise on read and report CORRUPT on verify."""
-    (tmp_path / '.sosfs').mkdir()
-    (tmp_path / '.sosfs' / 'marker').write_text('not = valid = toml\n')
+    (tmp_path / '.terrace').mkdir()
+    (tmp_path / '.terrace' / 'marker').write_text('not = valid = toml\n')
     with raises(MarkerError):
         Marker.read(tmp_path)
     assert verify_marker(tmp_path, uuid=UUID, tier='scratch', generation=1) is MarkerStatus.CORRUPT

@@ -16,10 +16,10 @@ from pathlib import Path, PurePosixPath
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.journal import PARTIAL_DIR, is_temp_name
-from sosfs.state.lifecycle import Marker
-from sosfs.tier.protocol import Tier, FileMeta
-from sosfs.tier.posix import PosixTier
+from terrace.state.journal import PARTIAL_DIR, is_temp_name
+from terrace.state.lifecycle import Marker
+from terrace.tier.protocol import Tier, FileMeta
+from terrace.tier.posix import PosixTier
 
 
 pytestmark = mark.unit
@@ -190,7 +190,7 @@ def test_delete(tier: PosixTier) -> None:
 
 
 def test_usage_excludes_internals(tier: PosixTier) -> None:
-    """usage sums regular files and symlinks, blind to the '.sosfs' directory."""
+    """usage sums regular files and symlinks, blind to the '.terrace' directory."""
     Marker(uuid=UUID, tier='scratch', generation=0, written=100.0).write(tier.root)
     put(tier, '/a', b'12345')
     tier.mkdir(PurePosixPath('/sub'))
@@ -201,17 +201,17 @@ def test_usage_excludes_internals(tier: PosixTier) -> None:
 
 
 def test_managed_internals_hidden_and_guarded(tier: PosixTier) -> None:
-    """'.sosfs' at the root reads as absent, is excluded from listings, and refuses mutation."""
+    """'.terrace' at the root reads as absent, is excluded from listings, and refuses mutation."""
     Marker(uuid=UUID, tier='scratch', generation=0, written=100.0).write(tier.root)
-    assert tier.stat(PurePosixPath('/.sosfs')) is None
-    assert tier.stat(PurePosixPath('/.sosfs/marker')) is None
+    assert tier.stat(PurePosixPath('/.terrace')) is None
+    assert tier.stat(PurePosixPath('/.terrace/marker')) is None
     assert [entry.name for entry in tier.list(PurePosixPath('/'))] == []
-    for operation in (lambda: put(tier, '/.sosfs/evil', b'x'),
-                      lambda: tier.delete(PurePosixPath('/.sosfs/marker')),
-                      lambda: tier.mkdir(PurePosixPath('/.sosfs/sub')),
-                      lambda: tier.rmdir(PurePosixPath('/.sosfs')),
-                      lambda: tier.rename(PurePosixPath('/.sosfs/marker'), PurePosixPath('/stolen')),
-                      lambda: tier.rename(PurePosixPath('/file'), PurePosixPath('/.sosfs/marker'))):
+    for operation in (lambda: put(tier, '/.terrace/evil', b'x'),
+                      lambda: tier.delete(PurePosixPath('/.terrace/marker')),
+                      lambda: tier.mkdir(PurePosixPath('/.terrace/sub')),
+                      lambda: tier.rmdir(PurePosixPath('/.terrace')),
+                      lambda: tier.rename(PurePosixPath('/.terrace/marker'), PurePosixPath('/stolen')),
+                      lambda: tier.rename(PurePosixPath('/file'), PurePosixPath('/.terrace/marker'))):
         with raises(PermissionError):
             operation()
 
@@ -240,9 +240,9 @@ def test_set_meta_missing_raises(tier: PosixTier) -> None:
 
 
 def test_set_meta_refuses_internal(tier: PosixTier) -> None:
-    """The managed '.sosfs' tree refuses metadata mutation like every other write."""
+    """The managed '.terrace' tree refuses metadata mutation like every other write."""
     with raises(PermissionError):
-        tier.set_meta(PurePosixPath('/.sosfs/marker'), FileMeta(size=0, mtime=1.0, mode=0o600))
+        tier.set_meta(PurePosixPath('/.terrace/marker'), FileMeta(size=0, mtime=1.0, mode=0o600))
 
 
 def test_escape_refused(tier: PosixTier) -> None:

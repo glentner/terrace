@@ -30,7 +30,7 @@ root-level files are refused. The shard set is dynamic: glob at mount, and a top
 delete adds or removes a shard in the source's default format. Shards are pulled and indexed lazily,
 one at a time, only when their subtree is first entered, and the index persists across remounts, so
 an unread shard among thousands costs only the initial listing. `TIER_KEYS`
-(`src/sosfs/tier/spec.py:28`) carries no `sharded` key today, so this needs spec surface on top of
+(`src/terrace/tier/spec.py:28`) carries no `sharded` key today, so this needs spec surface on top of
 whatever [`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md) adds.
 
 The owner's cascade and `PLAN.md`'s design agree on the shape and differ in one step. `PLAN.md`
@@ -175,7 +175,7 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   bundle should be cheap, in his words because "we would already have a complete mapping of the inside of
   the bundle (maybe with a pool of open handles to recent bundles so as to not negotiate a new open too
   often)". As built, `_extract` opens the working archive again for every member read
-  (`src/sosfs/tier/archive.py:402-410`). A bounded pool of open descriptors on recently used bundles
+  (`src/terrace/tier/archive.py:402-410`). A bounded pool of open descriptors on recently used bundles
   belongs with the streaming read.
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed

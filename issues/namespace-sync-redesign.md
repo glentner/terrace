@@ -32,11 +32,11 @@ defects, and each cycle closed one symptom by adding a mechanism instead of remo
 
 **1. Nothing has a stable identity.** The catalog, the path locks and the stage tiers are all keyed by
 logical path, and row ids are reused: `entry.id`, `writeback.id` and `intent.id` are plain
-`INTEGER PRIMARY KEY` (`src/sosfs/state/schema.sql:59`, `:106`, `:124`), so the id of a deleted
+`INTEGER PRIMARY KEY` (`src/terrace/state/schema.sql:59`, `:106`, `:124`), so the id of a deleted
 highest row goes to the next insert. Two cycles built machinery around that instead of ending it:
 
 - `Journal.current` recognizes a queue row by six fields, and `_replay_through` by a four-field mark
-  (`src/sosfs/state/journal.py:210-226`, `src/sosfs/engine/overlay.py:1319-1321`);
+  (`src/terrace/state/journal.py:210-226`, `src/terrace/engine/overlay.py:1319-1321`);
 - the purge watch (`PurgeWatch`, `_watch`, `_named`, `_adopt`'s clearing, a thread-local, a fifth lock
   level; `overlay.py:246-285`, `:748-780`, `:1477-1501`) exists only to tell an entry from a file that
   took its id.
@@ -90,7 +90,7 @@ of 2026-11-11: what sets the project apart is write-back with delayed re-aggrega
 bundles at the source. A bundle has no rename, no unlink and no mkdir. The engine as built would
 replay each queued row into `ArchiveTier`, and the adapter answers every one by rewriting the whole
 working archive and reading every member back into the index (`_repack`,
-`src/sosfs/tier/archive.py:529`, from six callers at `:594` to `:677`). `resync`, the one call that
+`src/terrace/tier/archive.py:529`, from six callers at `:594` to `:677`). `resync`, the one call that
 pushes a bundle to its source, has no caller under `engine/`. The model that fits a bundle is
 state-based: a change marks its bundle dirty, and on the bundle's clock or at a drain the engine
 rebuilds it from the catalog and the staged bytes and replaces it with one atomic write. That rebuild

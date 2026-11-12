@@ -64,8 +64,8 @@ Every piece exists alone and none can be joined:
 - `ArchiveTier` has 36 unit tests, some over an S3 inner location (`tests/tier/test_archive.py`), and
   the engine runs over an S3 prefix source in 8 (`tests/tier/test_s3_engine.py`), both against a
   moto server the suite starts itself (`tests/tier/conftest.py:35`);
-- the spec parser refuses every archive type (`SUPPORTED_TYPES`, `src/sosfs/tier/spec.py:25`);
-- the engine's tier construction has no archive branch (`src/sosfs/engine/overlay.py:127-147`);
+- the spec parser refuses every archive type (`SUPPORTED_TYPES`, `src/terrace/tier/spec.py:25`);
+- the engine's tier construction has no archive branch (`src/terrace/engine/overlay.py:127-147`);
 - nothing under `engine/` calls `ArchiveTier.resync`, the one call that pushes a bundle to its source.
 
 So nobody can drive the loop: not the maintainer at a terminal, not an agent in a cycle, not CI. Every

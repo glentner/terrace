@@ -29,14 +29,14 @@ else:
     state = 'detached'                  # FORCE: skip the rescue; metadata stays consistent
 ```
 
-`src/sosfs/fuse/mount.py:252-259`. `rescue()` appears only in the `DETACH` branch. A cancelled drain
+`src/terrace/fuse/mount.py:252-259`. `rescue()` appears only in the `DETACH` branch. A cancelled drain
 falls straight through to `engine.stop('detached')` with whatever was still queued left exactly
 where it was — on `/tmp`, on `/dev/shm`, on whatever node-scope tier the scheduler had not yet
 reached.
 
 **Losing the data is not the worst part; the state string is.** `shutdown_state` is a three-valued
 dirty bit, and `detached` is a promise: `PLAN.md:286` — "Metadata is consistent — no audit needed" —
-and `PLAN.md:319` — after a detach `sosfs commit` "proceeds directly; metadata is trusted, no audit
+and `PLAN.md:319` — after a detach `terrace commit` "proceeds directly; metadata is trusted, no audit
 walk". Settling `detached` therefore instructs every later recovery step *not* to go looking. When
 the allocation ends and the node is reclaimed, the dirty copies evaporate and nothing anywhere
 records that they existed. Compare the honest failure: had the mount settled `mounted`, the next
@@ -57,10 +57,10 @@ Two related gaps live in the same five lines and belong in the same cycle.
 **`umount --detach` is bounded by `drain_timeout` where `PLAN.md` says it completes.** `PLAN.md:286`
 distinguishes them explicitly — "`--detach` completes the rescue; SIGTERM bounds it by
 `drain_timeout` (schedulers send SIGKILL shortly after)". The daemon cannot tell them apart, because
-`request_shutdown(detach=True)` sends SIGTERM (`src/sosfs/fuse/mount.py:129`) and the single SIGTERM
+`request_shutdown(detach=True)` sends SIGTERM (`src/terrace/fuse/mount.py:129`) and the single SIGTERM
 branch passes `budget=self.spec.drain_timeout` unconditionally. `drain_timeout` defaults to 300 s
-(`DEFAULT_DRAIN_TIMEOUT = '5m'`, `src/sosfs/tier/spec.py:35`, `spec.py:251`) and is never `None`, so
-the unbounded path exists only in tests. An operator who runs `sosfs umount --detach` on more than
+(`DEFAULT_DRAIN_TIMEOUT = '5m'`, `src/terrace/tier/spec.py:35`, `spec.py:251`) and is never `None`, so
+the unbounded path exists only in tests. An operator who runs `terrace umount --detach` on more than
 five minutes' worth of node-local dirty data — and rescue transfers are whole-file and serial, since
 `TransferPool.submit` has no caller in `src/` — strands the remainder on a node they are about to
 give back, having run the command `PLAN.md` documents as the one that finishes the job.
@@ -68,15 +68,15 @@ give back, having run the command `PLAN.md` documents as the one that finishes t
 **An incomplete rescue is discarded rather than recorded.** `rescue()` returns
 `RescueResult(rescued, stranded, complete)` and `Mount.shutdown` throws it away; `state =
 'detached'` is set unconditionally. The stranded count reaches the operator as one `log.warning` at
-`src/sosfs/engine/rescue.py:66` and as nothing else — no exit status, no row, no field a later
-`sosfs commit` could read. `PLAN.md:294` states that "after a detach every newest version lives in a
+`src/terrace/engine/rescue.py:66` and as nothing else — no exit status, no row, no field a later
+`terrace commit` could read. `PLAN.md:294` states that "after a detach every newest version lives in a
 shared durable tier"; with a budget cutoff that sentence is false and there is no artifact that says
 so.
 
 **`drain_timeout = 0` is inverted against its own documentation.** The comment in `PLAN.md:388` on
 the spec example reads `drain_timeout = "5m"  # SIGTERM rescue budget (SIGINT always drains fully; 0
 disables)`. The code treats `0.0` as a zero budget: `rescue`'s check is `if budget is not None and
-tick() - start >= budget` (`src/sosfs/engine/rescue.py:64`), which is true on the first iteration,
+tick() - start >= budget` (`src/terrace/engine/rescue.py:64`), which is true on the first iteration,
 so it moves nothing and returns `stranded = len(worklist)` — pinned by
 `tests/engine/test_rescue.py:160-169`, `test_rescue_zero_budget_rescues_nothing`. Nothing validates
 the value: `_duration` accepts `0`, `'0'` and `'0s'` (all parse to `0.0`) and `_validate_stack`
@@ -90,7 +90,7 @@ not the place to redesign the shutdown state machine. These are **live defects i
 (confirmed at `6419966` by reading the branch and the test that pins it), not unbuilt work.
 
 `AGENTS.md` § *Invariants* § *Known open violations* names this in the § 8 row, and
-`src/sosfs/fuse/mount.py` → `shutdown`, `_on_sigint`, `_on_sigterm` is a high-blast-radius region:
+`src/terrace/fuse/mount.py` → `shutdown`, `_on_sigint`, `_on_sigterm` is a high-blast-radius region:
 the only code deciding drain versus rescue versus neither, and the settled `shutdown_state` is what
 tells the next mount whether to trust its metadata.
 
@@ -102,7 +102,7 @@ changes, so `PLAN.md` is reconciled with the maintainer *before* the code moves.
 ## Outcome / vision
 
 Every path that settles `detached` has actually rescued node-local dirty data, and a path that could
-not finish says so in a form a later `sosfs commit` and a human both read — not one warning line at
+not finish says so in a form a later `terrace commit` and a human both read — not one warning line at
 default verbosity. `umount --detach` finishes the rescue, as documented, because the daemon can tell
 it from a scheduler signal. `drain_timeout` means what the spec comment says it means, or the spec
 refuses the value. After any clean-looking shutdown, the set of files that did not make it to
@@ -119,16 +119,16 @@ the KB's EARS notes).
   shall remain on a node-scope tier for a rescued path.
 - **R2** — If a rescue ends with `stranded > 0`, then the mount shall not settle a state that
   asserts metadata is trusted and no audit is needed; the settled state and the recorded stranded
-  set together shall be enough for a later `sosfs commit` to know it must look.
+  set together shall be enough for a later `terrace commit` to know it must look.
 - **R3** — When a shutdown strands node-local dirty data, the mount shall record the stranded count
   and the affected paths durably, and a foreground mount shall exit non-zero — the count shall be
   readable after the process is gone, not only in the mount log.
-- **R4** — When `sosfs umount --detach` is issued, the rescue shall run to completion irrespective
+- **R4** — When `terrace umount --detach` is issued, the rescue shall run to completion irrespective
   of `drain_timeout`, and after the command returns no `scope = "node"` tier shall hold a dirty
   residency. Distinguishing this from a scheduler SIGTERM is a design change; `PLAN.md` records the
   mechanism before the code does.
 - **R5** — Where `drain_timeout = 0` is configured, the overlay spec shall either reject it at parse
-  time with a named `SpecError` on stderr and a non-zero `sosfs mount` exit, or treat it as an
+  time with a named `SpecError` on stderr and a non-zero `terrace mount` exit, or treat it as an
   unbounded rescue budget; the behaviour and `PLAN.md`'s spec comment shall agree.
 - **R6** — When a real mount on Linux receives two SIGINTs during a drain over a node-scope tier,
   the node tier shall hold no dirty copy once the process exits. **Integration-only**: this needs
@@ -140,7 +140,7 @@ the KB's EARS notes).
 - Related: the other reproduced silent-data-loss defect, a commit before a queued rename orphaning
   the source object, fixed by the `deferred-rename-source-orphan` cycle (landed 2026-11-06,
   `spec/deferred-rename-source-orphan/`).
-  [`offline-commit-command.md`](offline-commit-command.md) — `sosfs commit` is the consumer of
+  [`offline-commit-command.md`](offline-commit-command.md) — `terrace commit` is the consumer of
   `shutdown_state` and the reason a wrong settle costs anything; whatever R2 and R3 record has to be
   something that cycle can read, so the two want a shared shape.
   [`audit-command.md`](audit-command.md) — the walk that `detached` promises is unnecessary, and the
@@ -150,7 +150,7 @@ the KB's EARS notes).
   [`pump-liveness-and-loss-windows.md`](pump-liveness-and-loss-windows.md) owns the other unbounded
   loss windows (`max_interval = None`, a dead scheduler); `drain_timeout = 0` sits here because it
   is the same five lines.
-- `PLAN.md` → Shutdown (lines 286-297), `sosfs commit` (line 319), loss reporting by hostname (line
+- `PLAN.md` → Shutdown (lines 286-297), `terrace commit` (line 319), loss reporting by hostname (line
   332), the spec comment (line 388), and the Detach/Rescue definitions (lines 81-83).
   `AGENTS.md` § *Invariants* § 8 and its § 8 row under *Known open violations*.
 - Open question — **what signals "complete the rescue".** A control-channel request is the clean
@@ -160,7 +160,7 @@ the KB's EARS notes).
   both available today and both are a private protocol between two halves of the same program.
   `PLAN.md` has to name the choice before the code does.
 - Open question — **how a partial rescue is recorded.** A fourth `shutdown_state` value is the
-  clearest signal to a later `sosfs commit`, and it changes the `CHECK` vocabulary in `schema.sql`.
+  clearest signal to a later `terrace commit`, and it changes the `CHECK` vocabulary in `schema.sql`.
   There is no migration machinery and `db.py` refuses a `SCHEMA_VERSION` mismatch outright, so a
   bump makes every existing state database unopenable — a product decision about existing overlays,
   not a schema detail. Recording the stranded set as rows under the existing vocabulary avoids the
@@ -176,7 +176,7 @@ the KB's EARS notes).
   is safer and breaks any spec file already carrying the value.
 - 2026-11-11 (whole-tree review at `64faf27`): two additions.
   - **Three paths settle `detached` without the rescue, not one.** `Shutdown.FORCE` does it by design
-    (`src/sosfs/fuse/mount.py:258-259`), beside the second SIGINT and a rescue cut short by its budget.
+    (`src/terrace/fuse/mount.py:258-259`), beside the second SIGINT and a rescue cut short by its budget.
     One three-valued flag cannot carry "metadata is trusted" and "node-local data was rescued" as a
     single promise. The residency rows already say which dirty copies sit on a node-scope tier and
     `overlay.host` says which node, so `detached` can mean the first alone and `commit` can read the
@@ -210,7 +210,7 @@ the KB's EARS notes).
   next mount    : EngineError: Tier 'tmp' marker is missing — audit required
   ```
   The marker check is right to refuse a tier that vanished under a live record
-  (`src/sosfs/state/registry.py:118-139`). What is missing is the unmount's own step: a soft unmount
+  (`src/terrace/state/registry.py:118-139`). What is missing is the unmount's own step: a soft unmount
   leaves nothing a node-scope tier is needed for, so it should end with no residency recorded on one, and
   a mount should treat an empty node-scope tier with no residency against it as a fresh tier and not as a
   loss. This is the detach lifecycle's main path, and today it ends in an audit that does not exist.

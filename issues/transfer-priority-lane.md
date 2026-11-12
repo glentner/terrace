@@ -13,8 +13,8 @@ lane: public
 
 ## Problem
 
-**A `TransferPool` priority lane.** `src/sosfs/engine/transfer.py:62` builds one flat
-`ThreadPoolExecutor(max_workers=workers, thread_name_prefix='sosfs-transfer')`, and `submit`
+**A `TransferPool` priority lane.** `src/terrace/engine/transfer.py:62` builds one flat
+`ThreadPoolExecutor(max_workers=workers, thread_name_prefix='terrace-transfer')`, and `submit`
 (`transfer.py:113-115`) is a bare `executor.submit`. The queue is FIFO with no notion of urgency, so
 an on-demand promote — a user's `open()` blocking on a synchronous whole-file copy — waits behind
 every background warming copy already queued. This is not an archive feature at all; it is a property
@@ -61,7 +61,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
 - 2026-11-11 (whole-tree review at `64faf27`): there is no queue for a lane to reorder. Measured through
   the engine API on a three-tier POSIX stack with tmpdir tiers: during a `drain` of 50 dirty files, every
   call to `TransferPool.copy` ran on the calling thread and the pool's four workers ran nothing. `submit`
-  (`src/sosfs/engine/transfer.py:122-125`) has one caller, a test. Write-back, drain and rescue are
+  (`src/terrace/engine/transfer.py:122-125`) has one caller, a test. Write-back, drain and rescue are
   single-stream, so the first question is whether background copies use the pool at all
   ([`issues/offline-commit-command.md`](offline-commit-command.md) asks it of commit). A lane follows
   from a yes.

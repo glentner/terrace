@@ -32,13 +32,13 @@ stack." A bundle is repacked on triggers of its own
 The tree does two things differently.
 
 **Eviction of a dirty copy goes all the way to the source.** `EvictionManager._drop_dirty` calls
-`commit_upstream` (`src/sosfs/engine/evict.py:151`), which hops until the source holds the bytes, and
+`commit_upstream` (`src/terrace/engine/evict.py:151`), which hops until the source holds the bytes, and
 `AGENTS.md` § 7 states it as a rule: "to the *source*, not one hop". For a bundle source that turns
 pressure in a RAM tier into a re-aggregation and a push to an object store or to tape, once per
 evicted file. The reason § 7 gives is that a single hop "leaves the copy clean against a stage tier
 that is itself over quota, and both copies can then be reclaimed in the same pass". Read against the
 code, that does not follow: `_commit_hop` marks the upstream copy dirty against its own boundary as
-it records it (`src/sosfs/engine/overlay.py:1008-1010`), and `evict_copy` never drops a dirty copy
+it records it (`src/terrace/engine/overlay.py:1008-1010`), and `evict_copy` never drops a dirty copy
 (`overlay.py:1449`). `commit_to_shared`, the rescue's primitive, already moves one hop at a time on
 that argument. Argued from the code; no test drives eviction across several pressured tiers.
 
@@ -58,7 +58,7 @@ product if we trigger a repack on every write-back." A changed file moves one ti
 expires, and the bundle is rebuilt on the bundle's own terms.
 
 The delay half is as built. `_commit_hop` moves one hop and queues the next boundary on its own clock
-(`src/sosfs/engine/writeback.py`), which is the cascade the model describes.
+(`src/terrace/engine/writeback.py`), which is the cascade the model describes.
 
 ## Why it was deferred
 

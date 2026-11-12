@@ -4,8 +4,8 @@ last_updated: 2026-07-01
 supersedes: GOAL.md (which remains as the original statement of intent)
 ---
 
-Plan — Simple Overlay Service (`sosfs`)
-=======================================
+Plan — Terrace (`terrace`)
+==========================
 
 A clean, reference implementation of a managed data-tiering service for research computing,
 delivered as a stand-alone Python program. A FUSE mount presents a single logical namespace;
@@ -23,7 +23,7 @@ Vision and scope
 
 In HPC environments researchers hand-tier data across `/project` (large, slow, authoritative),
 `/scratch` (fast, purged), `/tmp` (node-local), and `/dev/shm` (RAM), plus S3 and archive
-formats at the cold end. `sosfs` replaces that manual choreography: the user mounts a
+formats at the cold end. Terrace replaces that manual choreography: the user mounts a
 configured tier stack and points their application at the mountpoint; all staging, write-back,
 and eviction is policy-driven.
 
@@ -40,14 +40,14 @@ and eviction is policy-driven.
   without breaking the contract.
 * Persistent overlay state (catalog, residency, LRU clocks, dirty/write-back queue) in SQLite,
   maintained so metadata is always at least as current as the data it describes.
-* Graceful shutdown (SIGINT / `sosfs umount`) that drains all changes to the source; orderly
+* Graceful shutdown (SIGINT / `terrace umount`) that drains all changes to the source; orderly
   detach (SIGTERM / `umount --detach`) that stops immediately with metadata intact, rescuing
   node-local dirty data to the nearest shared tier; audit-based recovery from crashes
-  (SIGKILL, OOM, node loss) — automatic at mount, standalone via `sosfs audit`.
-* Deferred finalization: a standalone `sosfs commit` drains queued dirty state to the
+  (SIGKILL, OOM, node loss) — automatic at mount, standalone via `terrace audit`.
+* Deferred finalization: a standalone `terrace commit` drains queued dirty state to the
   authoritative source offline, from any host that sees the shared tiers — so expensive
   compute allocations never wait on upstream data movement.
-* CLI: `sosfs mount|umount|status|flush|fsck|config` (cmdkit `ApplicationGroup`).
+* CLI: `terrace mount|umount|status|flush|fsck|config` (cmdkit `ApplicationGroup`).
 
 **Explicit non-goals (v1)**
 
@@ -77,9 +77,9 @@ Terminology
 * **Drain** — committing all dirty state hop-by-hop to the source with policy clocks collapsed;
   the graceful-shutdown path.
 * **Audit** — reconciling the state database against the managed locations after an unclean
-  shutdown; automatic at mount, or standalone via `sosfs audit` with no mount running.
+  shutdown; automatic at mount, or standalone via `terrace audit` with no mount running.
 * **Detach** — orderly immediate stop without a full drain: in-flight work resolved or rolled
-  back, metadata consistent, dirty state left queued for a later `sosfs commit`.
+  back, metadata consistent, dirty state left queued for a later `terrace commit`.
 * **Rescue** — the minimal move at detach: dirty data on node-local (`scope = "node"`) tiers
   hops to the nearest shared durable tier so it survives losing the node.
 
@@ -264,11 +264,11 @@ Two write-ordering invariants make the database authoritative after any process 
   per key). A crash at any point leaves either a resolvable intent row or an orphan temp the
   audit can discard.
 
-Managed locations are marked: each tier root carries a `.sosfs/marker` file recording the
+Managed locations are marked: each tier root carries a `.terrace/marker` file recording the
 overlay UUID, tier name, and a generation counter. A missing or mismatched marker tells the
 audit the tier evaporated wholesale (node reboot wiping `/dev/shm`) rather than files going
 missing one by one. The state directory itself must live on durable storage — never inside a
-volatile tier; `sosfs mount` refuses a spec that puts it in one.
+volatile tier; `terrace mount` refuses a spec that puts it in one.
 
 The namespace is populated lazily: directory listings hit the catalog first and fall through
 to the source tier on first touch (archives index once — ZIP central directory, TAR single
@@ -278,13 +278,13 @@ scan — cached in `archive_index`). No eager full scan at mount.
 
 mfusepy's high-level path-based API. Notable mappings: `statfs` reports the source tier's
 capacity (or configured quota for unbounded sources like S3) so `df` is meaningful;
-per-file tiering state is exposed read-only via xattrs (`user.sosfs.tiers`,
-`user.sosfs.dirty`) for observability and testing.
+per-file tiering state is exposed read-only via xattrs (`user.terrace.tiers`,
+`user.terrace.dirty`) for observability and testing.
 
 ### Control channel
 
 A Unix domain socket in the overlay's state directory, serving a small line-oriented JSON
-protocol. `sosfs status` and `sosfs flush [path]` talk to the live mount through it; `status`
+protocol. `terrace status` and `terrace flush [path]` talk to the live mount through it; `status`
 can also read the SQLite state directly when no mount is running.
 
 
@@ -298,8 +298,8 @@ the authority on what is where. The lifecycle design follows from that principle
 
 | Trigger | Behavior |
 |---|---|
-| `sosfs umount`, SIGINT | **Drain**: policy clocks collapse (all dirty state becomes immediately committable), re-sync rate limits are waived, and the write-back pipeline pushes everything to the source in loss-risk order. Unmount, set `shutdown_state = clean`. Zero loss, source finalized. |
-| `sosfs umount --detach`, SIGTERM | **Detach**: stop now, finalize later. Dirty data on `scope = "node"` tiers is first *rescued* one hop to the nearest shared durable tier — `--detach` completes the rescue; SIGTERM bounds it by `drain_timeout` (schedulers send SIGKILL shortly after; `0` disables). In-flight transfers resolve or roll back, the WAL is checkpointed, `shutdown_state = detached`. Metadata is consistent — no audit needed; finalize later with `sosfs commit`. |
+| `terrace umount`, SIGINT | **Drain**: policy clocks collapse (all dirty state becomes immediately committable), re-sync rate limits are waived, and the write-back pipeline pushes everything to the source in loss-risk order. Unmount, set `shutdown_state = clean`. Zero loss, source finalized. |
+| `terrace umount --detach`, SIGTERM | **Detach**: stop now, finalize later. Dirty data on `scope = "node"` tiers is first *rescued* one hop to the nearest shared durable tier — `--detach` completes the rescue; SIGTERM bounds it by `drain_timeout` (schedulers send SIGKILL shortly after; `0` disables). In-flight transfers resolve or roll back, the WAL is checkpointed, `shutdown_state = detached`. Metadata is consistent — no audit needed; finalize later with `terrace commit`. |
 | Second SIGINT mid-drain | Downgrade the drain to a detach. |
 | SIGKILL / OOM / node loss | Nothing runs. `shutdown_state` still reads `mounted` — the crash flag, exactly a filesystem dirty bit. The audit runs automatically before the next mount or commit. |
 
@@ -308,12 +308,12 @@ tiers first, then upstream hop by hop — so whatever time budget exists is spen
 would otherwise be unrecoverable.
 
 After a drain the source is final; after a detach every newest version lives in a shared
-durable tier awaiting `sosfs commit`. Only a crash leaves real exposure, and it is neither
+durable tier awaiting `terrace commit`. Only a crash leaves real exposure, and it is neither
 silent nor unbounded: the loss window at each boundary is capped by its write-back policy
 (`delay` / `max_interval` / `passthrough`) plus whatever rescue SIGTERM completed, making the
 policy knobs an explicit trade between upstream write amplification and exposure at the fast end.
 
-### Deferred commit (`sosfs commit`)
+### Deferred commit (`terrace commit`)
 
 The motivating pattern: a GPU job stages and writes against fast tiers, computation finishes,
 and the write-back policies haven't pushed recent outputs upstream. A full drain would finalize
@@ -322,13 +322,13 @@ an archive re-pack or S3 upload. Instead:
 
 ```bash
 # last line (or trap) of the GPU job script — seconds to minutes:
-sosfs umount --detach spec.toml   # rescue node-local dirty data to scratch, stop cleanly
+terrace umount --detach spec.toml  # rescue node-local dirty data to scratch, stop cleanly
 
 # later, from a single-CPU job or a login node — off the GPU bill:
-sosfs commit spec.toml            # finalize scratch → project / archive / S3
+terrace commit spec.toml           # finalize scratch → project / archive / S3
 ```
 
-`sosfs commit` is the offline finalizer: with no mount running (exclusive lock on the state
+`terrace commit` is the offline finalizer: with no mount running (exclusive lock on the state
 database), it drains the queued write-back state all the way to the source, from any host that
 can see the shared tiers and the state directory.
 
@@ -351,13 +351,13 @@ host may still recover it.
 
 ### Audit
 
-`sosfs audit <spec.toml>` reconciles the state database against the managed locations. It runs
-standalone with no mount (taking an exclusive lock on the state database), and `sosfs mount`
+`terrace audit <spec.toml>` reconciles the state database against the managed locations. It runs
+standalone with no mount (taking an exclusive lock on the state database), and `terrace mount`
 runs the same code automatically whenever `shutdown_state != clean` (`--no-audit` skips,
 `--audit=full` deepens). The walk goes from the fastest tier upstream — freshest data first,
 since the fast end determines what still needs committing:
 
-1. **Marker check.** Verify each tier root's `.sosfs` marker (overlay UUID, generation). A
+1. **Marker check.** Verify each tier root's `.terrace` marker (overlay UUID, generation). A
    missing marker invalidates every residency row for that tier at once and attributes losses
    to tier evaporation rather than per-file mystery.
 2. **Reconcile.** Compare tier contents against residency rows. Recorded-and-present copies
@@ -378,7 +378,7 @@ since the fast end determines what still needs committing:
 Modes: `--fast` (default: markers, existence, size/mtime) and `--full` (verify clean copies
 against blake2b checksums, when `checksum = true` recorded them at commit time). The audit
 repairs as it goes; `--dry-run` reports only. The audit never moves data upstream —
-finalizing the source is `sosfs commit`'s job, and commit invokes the audit itself after a
+finalizing the source is `terrace commit`'s job, and commit invokes the audit itself after a
 crash.
 
 The audit is idempotent and is the same code standalone and at mount: after a crash at *any*
@@ -392,17 +392,17 @@ Configuration
 Two TOML surfaces, both cmdkit-backed:
 
 1. **Application config** (logging, defaults) with hypershell-style precedence:
-   CLI > environment (`SOSFS_*`) > `.sosfs.toml` > `~/.config/sosfs/config.toml` >
-   `/etc/sosfs/config.toml` > defaults.
-2. **Overlay spec** — the tier stack definition, passed to `sosfs mount`. Order in the file
+   CLI > environment (`TERRACE_*`) > `.terrace.toml` > `~/.config/terrace/config.toml` >
+   `/etc/terrace/config.toml` > defaults.
+2. **Overlay spec** — the tier stack definition, passed to `terrace mount`. Order in the file
    is stack order, source first:
 
 ```toml
 [overlay]
 name  = "myspace"
-state = "~/.local/state/sosfs/myspace"   # durable storage; shared storage enables cross-host commit
-drain_timeout = "5m"                     # SIGTERM rescue budget (SIGINT always drains fully; 0 disables)
-checksum = false                         # record blake2b at commit; enables `sosfs audit --full`
+state = "~/.local/state/terrace/myspace"  # durable storage; shared storage enables cross-host commit
+drain_timeout = "5m"                      # SIGTERM rescue budget (SIGINT always drains fully; 0 disables)
+checksum = false                          # record blake2b at commit; enables `terrace audit --full`
 
 [[tier]]                      # upstream terminus — authoritative
 name = "project"
@@ -468,17 +468,17 @@ sync     = { max_frequency = "4/day" }
 CLI surface
 -----------
 
-`sosfs` (cmdkit `ApplicationGroup`, hypershell pattern):
+`terrace` (cmdkit `ApplicationGroup`, hypershell pattern):
 
 | Command | Purpose |
 |---|---|
-| `sosfs mount <spec.toml> <mountpoint>` | Mount the overlay (`-f` foreground, `-d` debug; daemonizes by default; auto-audits after an unclean shutdown) |
-| `sosfs umount <mountpoint>` | Drain to the source, then unmount; `--detach` stops immediately after rescuing node-local dirty data (finalize later with `sosfs commit`); `--force` skips even the rescue |
-| `sosfs status [<spec|mountpoint>]` | Per-tier usage vs. quota, dirty counts, transfer activity |
-| `sosfs flush [<path>]` | Force upstream commit now, against a live mount (whole overlay or subtree) |
-| `sosfs commit <spec.toml>` | Finalize the source offline: drain queued write-back state up the stack from any host seeing the shared tiers (`--direct` collapses hops); auto-audits after a crash |
-| `sosfs audit <spec.toml>` | Reconcile state DB against managed locations, no mount required; reports and repairs, never moves data upstream (see Lifecycle and recovery) |
-| `sosfs config get|set|which|edit` | Application config management (hypershell pattern) |
+| `terrace mount <spec.toml> <mountpoint>` | Mount the overlay (`-f` foreground, `-d` debug; daemonizes by default; auto-audits after an unclean shutdown) |
+| `terrace umount <mountpoint>` | Drain to the source, then unmount; `--detach` stops immediately after rescuing node-local dirty data (finalize later with `terrace commit`); `--force` skips even the rescue |
+| `terrace status [<spec|mountpoint>]` | Per-tier usage vs. quota, dirty counts, transfer activity |
+| `terrace flush [<path>]` | Force upstream commit now, against a live mount (whole overlay or subtree) |
+| `terrace commit <spec.toml>` | Finalize the source offline: drain queued write-back state up the stack from any host seeing the shared tiers (`--direct` collapses hops); auto-audits after a crash |
+| `terrace audit <spec.toml>` | Reconcile state DB against managed locations, no mount required; reports and repairs, never moves data upstream (see Lifecycle and recovery) |
+| `terrace config get|set|which|edit` | Application config management (hypershell pattern) |
 
 
 Technology decisions
@@ -496,8 +496,8 @@ Decided 2026-07-01 with rationale; alternatives noted.
 | State store | **stdlib `sqlite3`** (WAL, plain SQL schema) | Zero deps, transparent, free-threading-friendly. Rejected: SQLAlchemy (house style, but heavyweight for a small embedded schema). |
 | Archives | **stdlib `zipfile`/`tarfile`** | ZIP/uncompressed-TAR direct-update via atomic in-place re-pack (temp+fsync+rename; compaction implicit, no tombstones). tar.gz/remote: staged re-sync — decompress once to a durable `.tar`, offset-read, reconstruct+recompress+atomic-push, rate-limited. Sharded sources (`*.tar.gz`) and SFTP/Globus inner backings are post-v0.1.0 (Phase 12). Optimization path (true append-supersede, indexed gzip random access) is future work. |
 | S3 testing | **moto-server** (unit, pure Python, real S3 HTTP → works with obstore) + **MinIO** container behind `@mark.integration` | Matches the unit/integration marker split. |
-| CLI / config / logging / style | cmdkit `ApplicationGroup`; layered TOML + `SOSFS_*`; hypershell `Logger` w/ `TRACE`; `src/` layout, SPDX Apache-2.0 headers, 120-char lines, `from __future__ import annotations`, FSM + `Thread` idioms | House style per hypershell. hatchling + uv; Sphinx/furo docs; Keep-a-Changelog + SemVer. |
-| Package / entry point | **`sosfs`** | Per GOAL.md; repo name is a placeholder and unimportant. |
+| CLI / config / logging / style | cmdkit `ApplicationGroup`; layered TOML + `TERRACE_*`; hypershell `Logger` w/ `TRACE`; `src/` layout, SPDX Apache-2.0 headers, 120-char lines, `from __future__ import annotations`, FSM + `Thread` idioms | House style per hypershell. hatchling + uv; Sphinx/furo docs; Keep-a-Changelog + SemVer. |
+| Package / entry point | **`terrace`** | The project is Terrace, and its distribution, import package and console script are `terrace`. This overturns the earlier row, which recorded the placeholder name as the package and called the name unimportant: GOAL.md kept that name only "until a better name is chosen", and one was chosen on 2026-11-11, before any release and before any overlay was deployed. Renamed in one cycle with no compatibility code; CHANGELOG.md lists what moved. |
 
 
 Testing strategy
@@ -518,7 +518,7 @@ Testing strategy
   asserting convergence and loss-report accuracy; tier-evaporation tests (wipe a staging tier
   wholesale, assert the audit attributes it to the marker and rolls back correctly).
 * **Detach/commit**: detach leaves an audit-free state with node-scope dirty data rescued;
-  `sosfs commit` from a simulated second host (node-scope tier paths absent) finalizes the
+  `terrace commit` from a simulated second host (node-scope tier paths absent) finalizes the
   source; `--direct` and the default cascade converge to byte-identical sources; drain and
   rescue honor loss-risk ordering under a constrained time budget.
 * **CI matrix**: Linux {3.15, 3.15t}; macOS engine-only (no kext in CI). Free-threaded jobs
@@ -636,8 +636,8 @@ Expanded with discrete checklist steps in ROADMAP.md; summarized here:
 9. **Archive tiers** — ZIP/TAR direct-update (atomic re-pack), tar.gz staged re-sync
    (decompress-once + offset reads + reconstruct/recompress/push, rate-limited), S3 inner-
    location backing, drain/commit batching, archive indexing.
-10. **Control + operations** — control socket, status/flush commands, `sosfs audit`
-    (auto-at-mount, standalone), `sosfs commit` (offline finalize, `--direct`, `--forfeit`),
+10. **Control + operations** — control socket, status/flush commands, `terrace audit`
+    (auto-at-mount, standalone), `terrace commit` (offline finalize, `--direct`, `--forfeit`),
     observability polish.
 11. **Hardening & release** — crash-recovery and concurrency stress tests, free-threaded CI,
     benchmark harness, Sphinx docs, packaging, v0.1.0.
@@ -651,7 +651,7 @@ Future work (explicitly deferred)
 ---------------------------------
 
 * Chunk-level partial staging (protocol already range-ready).
-* File pinning (`sosfs pin <path> --tier <name>`), per-path policy overrides.
+* File pinning (`terrace pin <path> --tier <name>`), per-path policy overrides.
 * Indexed random access into compressed archives (ratarmount-style gzip indexes).
 * Wrapping a non-conforming archive/shard (no single top-level directory matching the stem)
   into a synthetic subtree instead of rejecting the mount (Phase 12 refinement).

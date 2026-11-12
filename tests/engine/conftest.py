@@ -14,10 +14,10 @@ from pathlib import Path, PurePosixPath
 from pytest import fixture
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
-from sosfs.tier.posix import PosixTier
-from sosfs.tier.protocol import FileMeta
-from sosfs.engine.overlay import OverlayEngine
+from terrace.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
+from terrace.tier.posix import PosixTier
+from terrace.tier.protocol import FileMeta
+from terrace.engine.overlay import OverlayEngine
 
 
 class Clock:

@@ -3,7 +3,7 @@
 
 """Integration tests: an S3 source with a POSIX staging stack against a real MinIO server.
 
-Point at a MinIO (or any S3) endpoint with the SOSFS_TEST_MINIO_* environment variables;
+Point at a MinIO (or any S3) endpoint with the TERRACE_TEST_MINIO_* environment variables;
 the suite skips when none is reachable. Defaults target a local MinIO on 127.0.0.1:9000
 with the stock minioadmin credentials — `docker compose up -d --wait` (see docker-compose.yml
 at the repo root) brings up exactly that.
@@ -23,17 +23,17 @@ from pathlib import PurePosixPath as P
 from pytest import fixture, mark
 
 # Internal libs
-from sosfs.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
-from sosfs.tier.s3 import S3Tier
-from sosfs.tier.protocol import FileMeta
-from sosfs.engine.overlay import OverlayEngine
+from terrace.tier.spec import OverlaySpec, TierSpec, WritebackSpec, S3Spec
+from terrace.tier.s3 import S3Tier
+from terrace.tier.protocol import FileMeta
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock
 
 
-ENDPOINT = os.environ.get('SOSFS_TEST_MINIO_ENDPOINT', 'http://127.0.0.1:9000')
-ACCESS_KEY = os.environ.get('SOSFS_TEST_MINIO_ACCESS_KEY', 'minioadmin')
-SECRET_KEY = os.environ.get('SOSFS_TEST_MINIO_SECRET_KEY', 'minioadmin')
-REGION = os.environ.get('SOSFS_TEST_MINIO_REGION', 'us-east-1')
+ENDPOINT = os.environ.get('TERRACE_TEST_MINIO_ENDPOINT', 'http://127.0.0.1:9000')
+ACCESS_KEY = os.environ.get('TERRACE_TEST_MINIO_ACCESS_KEY', 'minioadmin')
+SECRET_KEY = os.environ.get('TERRACE_TEST_MINIO_SECRET_KEY', 'minioadmin')
+REGION = os.environ.get('TERRACE_TEST_MINIO_REGION', 'us-east-1')
 
 
 def _minio_client():
@@ -61,7 +61,7 @@ pytestmark = [mark.integration,
 @fixture
 def minio_stack(tmp_path) -> Iterator[Tuple[OverlaySpec, S3Tier]]:
     """A fresh bucket, an overlay spec (MinIO source -> POSIX stage), and a seeding tier; bucket removed after."""
-    bucket = f'sosfs-it-{uuid4().hex[:12]}'
+    bucket = f'terrace-it-{uuid4().hex[:12]}'
     client = _minio_client()
     client.create_bucket(Bucket=bucket)
     url = f's3://{bucket}/space'

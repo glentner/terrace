@@ -14,7 +14,7 @@ lane: public
 ## Problem
 
 A read of a file that is already on its fastest tier writes to SQLite three times. `open` advances
-the copy's LRU clock (`catalog.touch`, `src/sosfs/engine/overlay.py:699`), and `release` runs
+the copy's LRU clock (`catalog.touch`, `src/terrace/engine/overlay.py:699`), and `release` runs
 `_record`, which updates the residency row and adjusts the tier's usage counter by a delta of zero
 inside one transaction (`overlay.py:915-922`). SQLite admits one writer at a time, so every open and
 every close in the mount passes through one lock, whatever the thread count and whichever interpreter
@@ -52,7 +52,7 @@ crash a stale clock costs a worse eviction order and nothing else.
 Two more costs on the same path, read from the code and not measured:
 
 - **The scheduler reads the whole queue every tick.** `WritebackScheduler.due` fetches every queued
-  row and computes deadlines in Python (`src/sosfs/engine/writeback.py:85-88`), once a second, though
+  row and computes deadlines in Python (`src/terrace/engine/writeback.py:85-88`), once a second, though
   `writeback_boundary` indexes `(to_tier, state, last_write)`.
 - **Each promotion fsyncs.** `PosixTier.put` fsyncs every file it writes, a stage copy of a clean file
   included. A promoted copy that is lost in a crash is re-promoted from its upstream, so the fsync
@@ -93,7 +93,7 @@ Draft R-IDs, to be firmed up at promotion.
   index already records, with no promotion and no inode. `issues/sharded-archive-sources.md` owns that
   choice.
 - The kernel can cache attributes and directory entries so that repeated `getattr` calls never reach
-  the daemon. The mount passes no cache timeouts (`src/sosfs/fuse/mount.py:310`); what is safe to
+  the daemon. The mount passes no cache timeouts (`src/terrace/fuse/mount.py:310`); what is safe to
   cache follows from the single-mount rule and is worth one criterion at shaping.
 - `PLAN.md` § *Future work* lists a kernel-passthrough adapter. With read-only handles on resident
   copies it would take the daemon out of `read` entirely; the binding in use does not expose it.

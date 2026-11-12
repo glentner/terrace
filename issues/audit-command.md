@@ -5,7 +5,7 @@ appetite: big
 lane: public
 ---
 
-# `sosfs audit` — reconcile the state database against the tiers
+# `terrace audit` — reconcile the state database against the tiers
 
 > **Candidate, not a contract.** `code terrace feature` promotes this into a `spec/{slug}/GOAL.md`, and
 > that promotion is where appetite, non-goals and the R-IDs get negotiated. `status: unshaped` means
@@ -18,7 +18,7 @@ both promise *intent → act → confirm* journaling for every managed-location 
 are needed for the promise to mean anything: the write side records intents, and the audit resolves
 them. Only the write side exists.
 
-`Journal.pending()` (`src/sosfs/state/journal.py:275`) carries the docstring "the audit's worklist".
+`Journal.pending()` (`src/terrace/state/journal.py:275`) carries the docstring "the audit's worklist".
 `grep -rn 'pending(' src/` returns exactly one hit — the definition. Every other reference is a test
 assertion that the list is empty. Intents written by a crashed process accumulate in the `intent`
 table with nothing that reads them, and `Journal.confirm` and `Journal.rollback` are the same
@@ -29,15 +29,15 @@ one by hand means deciding, per row, whether the bytes moved.
   (`_resolve`) at `:299-304`.
 
 The visible consequence is worse than accumulation. `OverlayEngine.start()` calls
-`lifecycle.begin_mount` at `src/sosfs/engine/overlay.py:108`; `begin_mount` raises `CrashDetected`
-when `shutdown_state == 'mounted'` (`src/sosfs/state/lifecycle.py:100-102`), and `Mount.start`
-(`src/sosfs/fuse/mount.py:213-215`) does not catch it. **After any SIGKILL, OOM kill or node loss the
-overlay is permanently unmountable and unfinalizable.** There is no recovery path at all: `sosfs
-mount` fails, and `sosfs commit` — the other way to reach the data — is itself a stub. The state
+`lifecycle.begin_mount` at `src/terrace/engine/overlay.py:108`; `begin_mount` raises `CrashDetected`
+when `shutdown_state == 'mounted'` (`src/terrace/state/lifecycle.py:100-102`), and `Mount.start`
+(`src/terrace/fuse/mount.py:213-215`) does not catch it. **After any SIGKILL, OOM kill or node loss the
+overlay is permanently unmountable and unfinalizable.** There is no recovery path at all: `terrace
+mount` fails, and `terrace commit` — the other way to reach the data — is itself a stub. The state
 database is intact and authoritative, and no shipped command will act on it. `PLAN.md` § *Audit* says
-the opposite: "`sosfs mount` runs the same code automatically whenever `shutdown_state != clean`".
+the opposite: "`terrace mount` runs the same code automatically whenever `shutdown_state != clean`".
 - 2026-11-06: `overlay.py:108` above holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-  the `begin_mount` call is at `src/sosfs/engine/overlay.py:117`.
+  the `begin_mount` call is at `src/terrace/engine/overlay.py:117`.
 
 The behavior is pinned as intended by `tests/engine/test_namespace.py:46`, which fakes a death and
 asserts the raise. It is also pinned in a way that shows exactly what is missing:
@@ -47,14 +47,14 @@ intents, then settle the flag` — `journal.rollback(intent)`, `lifecycle.end_mo
 `begin_mount` now succeeds. That five-line sequence is the entire recovery procedure available to an
 operator today, and it lives in a test.
 
-`sosfs audit` is `AuditApp(StubApp)` (`src/sosfs/__init__.py:167-171`) and raises
-`RuntimeError('Not implemented: sosfs audit (see ROADMAP.md, Phase 9)')`. The phase number is stale
+`terrace audit` is `AuditApp(StubApp)` (`src/terrace/__init__.py:167-171`) and raises
+`RuntimeError('Not implemented: terrace audit (see ROADMAP.md, Phase 9)')`. The phase number is stale
 twice over — the operations work was Phase 10, and the flat phase checklist no longer exists.
 
 Some of the substrate is already built and documented for this consumer. Markers and six
 `MarkerStatus` members exist (`lifecycle.py:129-138`, `Marker.write` atomic at `:174-183`);
 `TierRegistry.set_usage` (`registry.py:177`) is documented as "the audit's rebuild step";
-`Journal.is_temp_name` (`journal.py:42`) recognizes the `.sosfs/partial/{intent}-{name}` convention;
+`Journal.is_temp_name` (`journal.py:42`) recognizes the `.terrace/partial/{intent}-{name}` convention;
 `ExclusiveLock` (`db.py:157`) already writes the holder's `host:pid` into the lockfile (`db.py:192`)
 so a refusal can name it.
 
@@ -64,27 +64,27 @@ What is missing is more than a command:
   which bumps the generation and sets `shutdown_state = 'mounted'`. An audit that used it would
   overwrite the very flag it is diagnosing, and a crash *during* an offline audit would be
   indistinguishable from a crashed mount. The audit needs the tier attach and the catalog without the
-  lifecycle transition, and `sosfs commit` and offline `sosfs status` need the same path.
+  lifecycle transition, and `terrace commit` and offline `terrace status` need the same path.
 * **A whole-tier residency iterator.** Step 2 needs every residency row for tier X. The closest thing
   in `Catalog` is `least_recent` (`catalog.py:249`), which is LRU-ordered, defaults to
   `state='clean'`, and takes `limit=100`. This cycle adds catalog surface.
   - 2026-11-06: `catalog.py:249` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-    `least_recent` is at `src/sosfs/state/catalog.py:254`.
+    `least_recent` is at `src/terrace/state/catalog.py:254`.
 * **Checksum recording.** `--full` verifies clean copies against blake2b digests. `residency.checksum`
   exists (`schema.sql:95`), `Catalog.add_residency` accepts it (`catalog.py:195`), `spec.py:287`
   parses `checksum = true`, and **no caller ever passes a digest**. `--full` has nothing to verify
   against until something records one. See `issues/invariant-audit-gaps.md`.
   - 2026-11-06: `catalog.py:195` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-    `add_residency` is at `src/sosfs/state/catalog.py:200`.
+    `add_residency` is at `src/terrace/state/catalog.py:200`.
 * **Orphan-versus-temp triage that covers every temp this system actually writes.**
   `is_temp_name` recognizes the journal convention and, by directory, `posix.py:135`'s
   `put-{uuid4().hex}-{name}`. It does not recognize `archive.py:101`'s
   `.{archive}.{hex}.tmp`, which is a *sibling of the archive file* rather than a member of
-  `.sosfs/partial/`. An archive temp left by a crash is therefore quarantined as a true orphan — a
+  `.terrace/partial/`. An archive temp left by a crash is therefore quarantined as a true orphan — a
   reported managed-location violation for a file the system created itself. Also
   `issues/invariant-audit-gaps.md`.
 * **The loss report, the quarantine mechanism, the exit codes, and the auto-audit wiring.** `MountApp`
-  (`src/sosfs/__init__.py:81-101`) has neither `--no-audit` nor `--audit=full`.
+  (`src/terrace/__init__.py:81-101`) has neither `--no-audit` nor `--audit=full`.
 
 ## Why it was deferred
 
@@ -96,15 +96,15 @@ harness port was out of the question: it is a new subsystem, not a patch.
 
 Recorded in [`AGENTS.md`](../AGENTS.md) § *Invariants* § *Known open
 violations*, the row reading "The **audit does not exist**: `journal.pending()` has no consumer,
-`begin_mount` raises rather than recovering, and `sosfs audit` is a stub" against §§ 2 and 8.
+`begin_mount` raises rather than recovering, and `terrace audit` is a stub" against §§ 2 and 8.
 
 ## Outcome / vision
 
 A crashed overlay is recoverable by one command, and by the same code the next mount runs on its own.
-`sosfs audit spec.toml` takes the exclusive lock, walks the stack fastest-tier-first, repairs what it
+`terrace audit spec.toml` takes the exclusive lock, walks the stack fastest-tier-first, repairs what it
 can, reports what it could not, and exits 0 / 1 / 2 for consistent / repaired / losses. An operator
 who lost a node reads a per-tier summary and a loss report naming each rolled-back file and the age
-of the version it was rolled back to, rather than a `CrashDetected` traceback. `sosfs mount` on an
+of the version it was rolled back to, rather than a `CrashDetected` traceback. `terrace mount` on an
 unclean overlay audits and then mounts. And "converged after a crash" acquires an operational
 definition, which is what `issues/crash-fault-injection-suite.md` needs before it can assert
 anything.
@@ -114,7 +114,7 @@ anything.
 Draft R-IDs, to be firmed up at promotion.
 
 - **R1** — WHEN a state database is left with `shutdown_state = 'mounted'` and every tier root
-  intact, `sosfs audit spec.toml` SHALL exit 1, print a per-tier verified/recovered/lost/orphaned
+  intact, `terrace audit spec.toml` SHALL exit 1, print a per-tier verified/recovered/lost/orphaned
   summary, leave zero rows in `intent`, and leave `shutdown_state` at a value a subsequent
   `begin_mount` accepts. Gradeable mount-free: the state directory the crash harness in
   `tests/state/test_survival.py` produces is the fixture, driven under
@@ -132,14 +132,14 @@ Draft R-IDs, to be firmed up at promotion.
   tiers.
 - **R5** — WHEN `--dry-run` is passed, the audit SHALL perform no write to the state database and no
   mutation of any tier root, and SHALL still exit with the code it would otherwise have used.
-- **R6** — WHEN `sosfs mount` starts an overlay whose `shutdown_state` is neither `clean` nor
+- **R6** — WHEN `terrace mount` starts an overlay whose `shutdown_state` is neither `clean` nor
   `detached`, it SHALL run the audit and then mount; `--no-audit` SHALL instead fail with
   `CrashDetected` naming the recorded host. The engine half is gradeable against tmpdir tiers; the
   end-to-end mount is Linux-only with `/dev/fuse` and CI runs no integration job, so name the pass
   count rather than the exit status.
 - **R7** — WHEN the audit runs twice in succession against the same state, the second run SHALL exit
   0 and report zero repairs.
-- **R8** — WHILE a mount daemon holds the state lock, `sosfs audit` SHALL exit non-zero with
+- **R8** — WHILE a mount daemon holds the state lock, `terrace audit` SHALL exit non-zero with
   `DatabaseLocked` naming the holder as `host:pid`, and SHALL make no modification to the database.
 
 ## Notes
@@ -162,11 +162,11 @@ Draft R-IDs, to be firmed up at promotion.
 - `PLAN.md` § *Audit* is the specification and is unusually complete: the five-step walk (marker
   check, reconcile, resolve intents, rebuild, report), the `--fast` / `--full` modes, `--dry-run`, the
   exit codes, and the rule that the audit never moves data upstream because finalizing the source is
-  `sosfs commit`'s job. `PLAN.md` § *Lifecycle and recovery* defines the `shutdown_state` three-valued
+  `terrace commit`'s job. `PLAN.md` § *Lifecycle and recovery* defines the `shutdown_state` three-valued
   flag the audit settles. Under the plan-drift rule, anything this cycle decides differently goes back
   into `PLAN.md` first.
 - **CLI wiring.** Adding a real `audit` touches four places: the `Application` subclass, `APP_HELP`
-  (`src/sosfs/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
+  (`src/terrace/__init__.py:191`), the `commands` registry (`:219`), and `tests/test_cli.py`. Missing
   one is silent in exactly one direction — a command in `commands` but absent from `APP_HELP` fails
   `tests/test_cli.py:31`, while a command added to `APP_HELP` and not to `commands` passes and fails
   only at invocation. `tests/test_cli.py:42` parametrizes the stub list `['status', 'flush', 'commit',
@@ -174,13 +174,13 @@ Draft R-IDs, to be firmed up at promotion.
   landing. It also deletes one instance of the stale "Phase 9" pointer in `StubApp.run`.
 - Open questions for shaping, each with its real trade-off:
   - Does checksum recording land here or in `issues/offline-commit-command.md`? It is a write-path
-    change to `TransferPool.copy` (`src/sosfs/engine/transfer.py:78-108`), the single place where the
+    change to `TransferPool.copy` (`src/terrace/engine/transfer.py:78-108`), the single place where the
     intent bracket wraps a real byte move, so it is high-blast-radius wherever it goes and inflates
     whichever big cycle adopts it. The third option is to ship `--full` in a later cycle and say so in
     the help text rather than shipping a flag that silently verifies nothing.
     - 2026-11-06: `transfer.py:78-108` holds at `141aa86`; on the `deferred-rename-source-orphan`
-      tree the intent bracket in `TransferPool.copy` spans `src/sosfs/engine/transfer.py:85-118`.
-  - Where do quarantined orphans go? A `.sosfs/quarantine` directory per tier keeps the bytes
+      tree the intent bracket in `TransferPool.copy` spans `src/terrace/engine/transfer.py:85-118`.
+  - Where do quarantined orphans go? A `.terrace/quarantine` directory per tier keeps the bytes
     recoverable but consumes the tier's quota and adds a path the eviction scan must learn to ignore.
     A report-only listing is cheap and loses the file on the next sweep, which for a true orphan may
     be correct and for a misclassified file is not.
@@ -196,9 +196,9 @@ Draft R-IDs, to be firmed up at promotion.
     guards this at `overlay.py:949` by confirming before any purge; the audit does the same class of
     work and needs the same ordering, which is not expressible in the schema.
     - 2026-11-06: `overlay.py:949` holds at `141aa86`; on the `deferred-rename-source-orphan` tree
-      the confirm before the purge is at `src/sosfs/engine/overlay.py:1038`.
+      the confirm before the purge is at `src/terrace/engine/overlay.py:1038`.
     - 2026-11-08: `source-path-truncate-and-stat` moved it again; at `6425a21` it is at
-      `src/sosfs/engine/overlay.py:1061` (holds at `5e0d997`).
+      `src/terrace/engine/overlay.py:1061` (holds at `5e0d997`).
 - 2026-11-11 (whole-tree review at `64faf27`): the mount-time half is on the deployment path ahead of
   everything else here. A batch job killed at its time limit is the ordinary ending, and today that
   leaves an overlay no later job can mount. [`issues/read-only-mount.md`](read-only-mount.md) R4 is the
@@ -243,3 +243,10 @@ Draft R-IDs, to be firmed up at promotion.
   `PLAN.md` § Risks leave recovering the ones already on a source to this cycle. A mount adopts such
   an object as an ordinary entry (the GOAL's reproduction), so shaping decides whether the audit can
   tell one apart from user data at all, or records it as out of reach.
+- 2026-11-12: a refused attach leaves the crash flag set. `OverlayEngine.start` calls `begin_mount`
+  before it attaches the stack, and a marker status other than OK raises with no `end_mount`, so
+  `shutdown_state` stays `mounted` and the next mount stops at `CrashDetected` before it reaches the
+  marker. Seen by `spec/rename-to-terrace/verify/rename_gate.py contracts`, which mounts an overlay
+  written before the rename to Terrace: the first attempt reports the missing marker, and the state
+  database then reads `mounted`. The walk should expect a missing marker together with a crash flag
+  that no crash set.

@@ -17,7 +17,7 @@ lane: public
 § 10). It serializes every change to the source's namespace: namespace replay, `_vacate`'s collect
 and replay, `_purge_source`, `create` straight onto the source, and a data commit whose destination is
 the source. For a data commit it is held for the **whole copy**: `_commit_hop` takes it
-(`src/sosfs/engine/overlay.py:835-840` (holds at `0e6d14c`)), resolves where the source holds the entry, then runs
+(`src/terrace/engine/overlay.py:835-840` (holds at `0e6d14c`)), resolves where the source holds the entry, then runs
 `transfers.copy` to the source inside it. The `deferred-rename-source-orphan` cycle shipped it that way
 as deviation D4 of its plan, accepted at the PLAN/TECH sign-off (2026-11-06) with this seed as the
 follow-up.
@@ -39,8 +39,8 @@ there and recording it must sit in one region with `advance_source_path`.
 **The starting design: stage outside, publish inside** (research 04 § 3's recommendation, rejected for
 that cycle by D4):
 
-- `PosixTier.put` already writes to `<root>/.sosfs/partial/put-*`, fsyncs, applies metadata, then
-  `os.replace`s into the final path, which it resolves *before* the copy (`src/sosfs/tier/posix.py:127-150`).
+- `PosixTier.put` already writes to `<root>/.terrace/partial/put-*`, fsyncs, applies metadata, then
+  `os.replace`s into the final path, which it resolves *before* the copy (`src/terrace/tier/posix.py:127-150`).
   Split it into `stage(path) → temp` (the bytes, no mutex) and `publish(temp, place)`.
 - Under the mutex: re-resolve the entry's place (`source_path`, else its target), replay or vacate
   whatever occupies it, place ancestors by entry, `publish`, then record `source_path` for the entry and
@@ -49,10 +49,10 @@ that cycle by D4):
 
 **Why that cycle rejected it** (D4), which is this seed's problem statement:
 
-- It changes the `Tier` protocol in `src/sosfs/tier/posix.py` and `src/sosfs/tier/s3.py`, two more
+- It changes the `Tier` protocol in `src/terrace/tier/posix.py` and `src/terrace/tier/s3.py`, two more
   high-blast-radius regions (§ 4, tier atomicity), on top of a cycle that already edited the coupled
   core.
-- S3 has no cheap publish. `S3Tier.put` is one atomic PUT with no temp (`src/sosfs/tier/s3.py:181-190`),
+- S3 has no cheap publish. `S3Tier.put` is one atomic PUT with no temp (`src/terrace/tier/s3.py:181-190`),
   so S3 either holds the mutex across the PUT (no gain) or stages to a temp key and publishes with a
   server-side copy plus delete: a second full-size write on the provider and a temp-key orphan
   convention to define, recover and audit.
@@ -110,7 +110,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   here; that plan rejected copying out of a pinned, opened source object because `transfer.copy` would
   have to take one, and S3 and archive sources buffer the whole object anyway.
 - 2026-11-08: the `overlay.py:835-840` cite under Problem holds at `0e6d14c`; at `5b8dcaf` it is
-  `src/sosfs/engine/overlay.py:900-905`, and at `d557db2` `:915-920`.
+  `src/terrace/engine/overlay.py:900-905`, and at `d557db2` `:915-920`.
 - *Added 2026-11-09, retiring `truncate-recording-after-ancestor-rename`:* a user `rename` now holds
   the mutex too, from its `_vacate` through its catalog-move transaction, including that transaction's
   wait for SQLite's write lock and the `UPDATE` that moves every descendant's path (`AGENTS.md`

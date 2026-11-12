@@ -7,19 +7,11 @@ This is the operating manual: the architecture, the load-bearing invariants, and
 agent needs to make correct changes here without rediscovering them. When something below disagrees
 with the code, **the code is ground truth — fix this file.**
 
-> **Pending rename.** This project is being renamed `sosfs` → **Terrace**. The factory already
-> addresses this repository by the destination name (`code terrace feature` and the other verbs in the
-> operator's KB); the code does not. Everything in this file describes the tree as it is — the package
-> is `src/sosfs/`, the entry point is `sosfs`, the environment prefix is `SOSFS_`. The rename is
-> queued early (`issues/rename-to-terrace.md`); the namespace-replay fix it waited on has landed.
-> Because `PLAN.md` records `sosfs` as a decision rather than an accident, that cycle reconciles
-> `PLAN.md` before it touches code.
-
 ---
 
 ## Project
 
-`sosfs` is a clean reference implementation of managed data tiering for research computing. A FUSE
+Terrace is a clean reference implementation of managed data tiering for research computing. A FUSE
 mount presents one logical namespace over an ordered stack of storage tiers — e.g. `/project`
 (authoritative source) → `/scratch` → `/tmp` → `/dev/shm` — with S3 and TAR/ZIP archives available as
 tiers. Files promote toward fast tiers on access, write back toward the source on policy clocks
@@ -28,9 +20,9 @@ granularity in v1; the tier protocol is range-ready.
 
 The differentiating lifecycle: SIGINT/`umount` fully drains to the source; SIGTERM or
 `umount --detach` stops immediately after *rescuing* node-local dirty data one hop to the nearest
-shared tier; a standalone `sosfs commit` later finalizes the source from any host — so expensive
+shared tier; a standalone `terrace commit` later finalizes the source from any host — so expensive
 compute allocations never wait on data movement. SQLite state is authoritative after any crash
-(metadata-before-ack + intent journaling); `sosfs audit` reconciles.
+(metadata-before-ack + intent journaling); `terrace audit` reconciles.
 
 The design goal, stated in `PLAN.md`, is **legibility as a reference implementation**: the correct
 abstractions, modern Python, and no framework semantics leaking into the core model. That is the
@@ -73,11 +65,11 @@ uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
 uv run pytest -m integration                     # 10 tests: real mounts (Linux) + MinIO
 tools/lint.sh                                    # ruff + layering + SPDX + version + CLAUDE.md symlink
-tools/temp_site.sh uv run sosfs --version        # CLI drive in a throwaway site
+tools/temp_site.sh uv run terrace --version      # CLI drive in a throwaway site
 uv build                                         # sdist + wheel
 uv run sphinx-build docs docs/_build             # docs (docs/ does not exist yet)
-uv run sosfs --help                              # CLI surface
-uv run sosfs mount spec.toml /mnt/space -f       # foreground mount (debug: -d)
+uv run terrace --help                            # CLI surface
+uv run terrace mount spec.toml /mnt/space -f     # foreground mount (debug: -d)
 ```
 
 **Supported Python is 3.15+** (`requires-python = ">=3.15"`), and the **free-threaded build is a
@@ -102,18 +94,18 @@ that way proves nothing; assert a pass count.
 
 | Path | Responsibility |
 |------|----------------|
-| `src/sosfs/__init__.py` | `SOSFSApp` (cmdkit `ApplicationGroup`), `main()`, the subcommand registry. All CLI wiring lives here. |
-| `src/sosfs/core/` | `config.py` (layered TOML singleton), `logging.py` (`Logger.with_name`, TRACE), `platform.py` (XDG paths), `units.py` (size/duration/rate parsing), `fsm.py` (`StateThread`), `exceptions.py`. No domain logic. |
-| `src/sosfs/state/` | `schema.sql`, `db.py` (WAL, per-thread connections, the transaction helper), `sql.py` (PEP 750 t-string rendering), `catalog.py`, `journal.py` (the two write-ordering primitives), `lifecycle.py` (dirty bit + markers), `registry.py` (tier identity, drift, quota counters). |
-| `src/sosfs/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
-| `src/sosfs/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
-| `src/sosfs/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
+| `src/terrace/__init__.py` | `TerraceApp` (cmdkit `ApplicationGroup`), `main()`, the subcommand registry. All CLI wiring lives here. |
+| `src/terrace/core/` | `config.py` (layered TOML singleton), `logging.py` (`Logger.with_name`, TRACE), `platform.py` (XDG paths), `units.py` (size/duration/rate parsing), `fsm.py` (`StateThread`), `exceptions.py`. No domain logic. |
+| `src/terrace/state/` | `schema.sql`, `db.py` (WAL, per-thread connections, the transaction helper), `sql.py` (PEP 750 t-string rendering), `catalog.py`, `journal.py` (the two write-ordering primitives), `lifecycle.py` (dirty bit + markers), `registry.py` (tier identity, drift, quota counters). |
+| `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
+| `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
+| `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
 | `tests/` | 42 files, 741 tests (731 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
 
-Two directories `PLAN.md` describes do **not exist yet**: `src/sosfs/control/` (the unix-socket
+Two directories `PLAN.md` describes do **not exist yet**: `src/terrace/control/` (the unix-socket
 control channel) and `docs/`. Both are queued work.
 
 **Layering rule:** `fuse/` and the CLI call `engine/`; `engine/` calls `tier/` and `state/`; nothing
@@ -174,7 +166,7 @@ confirm composes into the same transaction as the residency row and the usage co
 `confirm` and `rollback` are the *same* `DELETE`; nothing records how an intent ended, and `rollback`
 undoes nothing. Confirm precedes any catalog purge, because `intent.entry` cascades.
 
-**Each tier adapter owns its own atomicity.** POSIX writes a temp under `.sosfs/partial/`, fsyncs,
+**Each tier adapter owns its own atomicity.** POSIX writes a temp under `.terrace/partial/`, fsyncs,
 and renames, applying metadata to the temp *before* the rename. S3 needs no temp key — a PUT is
 atomic per key, and a temp-key dance would make it less atomic, not more. Archives re-pack whole
 through an atomic inner write; append-supersede was considered and rejected, because stdlib
@@ -206,7 +198,7 @@ is a supported target, not an aspiration.
 
 ### High-blast-radius paths (human gate)
 
-A CONFIRMED finding in any of these files needs a human decision before the cycle lands; a plan touching one always runs research. The list only widens: when code moves, add the new home and never remove the old entry. Skills and templates cite this list and never copy it. Paths are relative to `src/sosfs/`, except the `tests/` row.
+A CONFIRMED finding in any of these files needs a human decision before the cycle lands; a plan touching one always runs research. The list only widens: when code moves, add the new home and never remove the old entry. Skills and templates cite this list and never copy it. Paths are relative to `src/terrace/`, except the `tests/` row.
 
 | Region | Why |
 |---|---|
@@ -305,7 +297,7 @@ review; where its grain differs from the table above, the table governs.
 
 ### 3. SQL construction
 
-- **`sosfs.state.sql.render` is the only way SQL reaches the driver, and it refuses plain strings.**
+- **`terrace.state.sql.render` is the only way SQL reaches the driver, and it refuses plain strings.**
   `Database.execute` takes a PEP 750 `Template` and nothing else. Interpolations bind as `?`
   parameters; `{name:id}` splices an identifier only after a full match against
   `[A-Za-z_][A-Za-z0-9_]*`; a nested `Template` splices as a fragment carrying its own params; a
@@ -335,7 +327,7 @@ review; where its grain differs from the table above, the table governs.
   records a complete clean residency. The audit verifies clean copies by size, so a same-size
   truncation-and-refill survives verification; a later promotion copies the corrupt bytes downstream
   and a commit writes them to the source.
-- **The POSIX temp lands under `.sosfs/partial/`** so the audit can recognize the orphan; the journal
+- **The POSIX temp lands under `.terrace/partial/`** so the audit can recognize the orphan; the journal
   classifies by the first two path components, not by filename. A temp moved elsewhere
   (`final.with_suffix('.tmp')`, `NamedTemporaryFile`) is never swept, and because it sits inside the
   tier root it is counted by `list` and `usage` — crash debris accumulates as visible overlay files
@@ -362,8 +354,8 @@ review; where its grain differs from the table above, the table governs.
   early — and every engine call site catches `FileNotFoundError`. A new call path that omits the
   guard turns a replayed journaled unlink, the normal crash-recovery case, into a hard failure on
   POSIX only.
-- **The `.sosfs` marker tree reads as absent and refuses mutation on every tier.** A tier that lets
-  `.sosfs/marker` be written through the overlay lets a user forge the tier identity, after which a
+- **The `.terrace` marker tree reads as absent and refuses mutation on every tier.** A tier that lets
+  `.terrace/marker` be written through the overlay lets a user forge the tier identity, after which a
   wiped tier reads OK and the evaporation path never fires.
 - **`usage()` is the rebuild oracle** for the quota counters and must exclude managed internals. If
   it starts counting temps or sentinels, every audit "corrects" the counters to a wrong value and
@@ -562,7 +554,7 @@ review; where its grain differs from the table above, the table governs.
 - **The signal mode is latched once and never overwritten**, and handlers stay installed across
   `shutdown()` — that is what makes the second-SIGINT downgrade reachable at all. Restoring handlers
   before the drain converts the second Ctrl-C into a `KeyboardInterrupt` inside a transfer.
-- The `shutdown_state` this code settles is what tells a later `sosfs commit` whether to audit.
+- The `shutdown_state` this code settles is what tells a later `terrace commit` whether to audit.
   **Settling `detached` asserts that metadata is trusted and node-local dirty data was rescued.** A
   path that settles it without having done the rescue is silent data loss with a clean exit code.
 
@@ -694,7 +686,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Keep the `Co-Authored-By: Claude <Model>` trailer** on commits that land on `main` (a cycle's
   landing squash commit; § Factory's `branch commits` row leaves cycle-branch commits without one).
   This repo records it. PR bodies end with the Claude Code generation line.
-- **Version is single-sourced** at `version = ` in `pyproject.toml`; `sosfs.__version__` reads it
+- **Version is single-sourced** at `version = ` in `pyproject.toml`; `terrace.__version__` reads it
   through `importlib.metadata`. No literal version string exists anywhere in `src/` or `tests/`; `tools/lint.sh`
   asserts both halves.
 - **Same-commit rule.** A change to behavior updates, in the *same commit*, whichever of these it
@@ -742,7 +734,7 @@ that touches the region should either fix it or say why not.
 | 5, 10 | A user `rmdir` racing a replayed `mkdir` that has placed the directory but not yet recorded it reads a `NULL` `source_path`, purges the entry and its intent row (the cascade), and the replay's confirm then raises; the source keeps a directory the catalog no longer has. Threaded; reproduced by a single-thread injection, and pre-existing (`141aa86` raises at its settle instead). | `issues/freethreaded-concurrency-stress.md` |
 | 8 | A **second SIGINT settles `detached` without running the rescue**, so node-local dirty data is stranded behind a state that promises it is safe. `umount --detach` is bounded by `drain_timeout` where PLAN says it completes, and an incomplete rescue is never recorded. | `issues/shutdown-rescue-gaps.md` |
 | 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staging copy silently wins over a newer source. | `issues/archive-journaling-and-locking.md` |
-| 2, 8 | The **audit does not exist**: `journal.pending()` has no consumer, `begin_mount` raises rather than recovering, and `sosfs audit` is a stub. The recovery half of §1 is unimplemented. | `issues/audit-command.md` |
+| 2, 8 | The **audit does not exist**: `journal.pending()` has no consumer, `begin_mount` raises rather than recovering, and `terrace audit` is a stub. The recovery half of §1 is unimplemented. | `issues/audit-command.md` |
 | 10 | **Nothing monitors pump liveness**; a dead scheduler is unbounded, unreported loss. | `issues/pump-liveness-and-loss-windows.md` |
 | 11 | `EngineError` and `LookupError` escape the VFS API; writing through a handle to an unlinked file fails where POSIX requires success. | `issues/engine-error-mapping.md` |
 | 4, Conventions | `ArchiveTier` is **unreachable from a spec file** — the tier types are rejected and the archive keys are unknown — so the archive capability PLAN.md documents cannot be configured. | `issues/archive-spec-plumbing.md` |
@@ -769,11 +761,11 @@ name the post-condition it asserts:
 - **Unit** — `uv run pytest -m unit`, scoped for a focused phase. Engine-first: most behavior is
   reachable against tmpdir tiers with no mount, which is the payoff of the layering rule.
 - **Behavioral, sandboxed** — `tools/temp_site.sh` for CLI drives and real mounts, with
-  `SOSFS_*` scrubbed and the XDG paths redirected. It isolates an *invocation*, never an in-process
-  `import sosfs`: `core/platform.py` reads the XDG variables into module constants at import and
+  `TERRACE_*` scrubbed and the XDG paths redirected. It isolates an *invocation*, never an in-process
+  `import terrace`: `core/platform.py` reads the XDG variables into module constants at import and
   creates directories as a side effect, which is why the pytest helpers shell out too. **Do not run
   pytest through it** — pytest loses its rootdir and exits 5, and the scrub strips
-  `SOSFS_TEST_MINIO_*`.
+  `TERRACE_TEST_MINIO_*`.
 - **Integration** — `uv run pytest -m integration` after `docker compose up -d --wait`. Not reachable
   on every machine and not run by CI; when a criterion needs it, say so.
 
@@ -827,7 +819,7 @@ import os
 from cmdkit.app import Application
 
 # Internal libs
-from sosfs.core.logging import Logger
+from terrace.core.logging import Logger
 
 # Public interface
 __all__ = ['Thing']
@@ -845,7 +837,7 @@ log = Logger.with_name(__name__)
   definition; halting is an `Event`, not a state.
 * Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail. `rich` is a
   declared dependency but is **not used** — formatting goes through `cmdkit.ansi`.
-* SQL is PEP 750 t-strings rendered by `sosfs.state.sql.render` (interpolations bind as parameters;
+* SQL is PEP 750 t-strings rendered by `terrace.state.sql.render` (interpolations bind as parameters;
   `{name:id}` splices whitelisted identifiers) — never hand-assemble SQL strings or placeholders.
   Static DDL lives in `schema.sql`.
 * Deferred imports are ordinary function-local imports, not PEP 810 `lazy import` syntax, which
@@ -898,7 +890,7 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | setup | `uv sync`: dependency refresh, run before any verify |
 | verify | `tools/lint.sh && uv run pytest -n auto -m unit`: the full gate. Assert the reported pass count, not the exit code: exit 0 is necessary but not sufficient (§ Verification), and `uv run pytest -m integration` exits 0 when every test skipped. Phases narrow it; publish and release run all of it |
 | throwaway environment | `tools/temp_site.sh <cmd…>` (contract below) |
-| coupled core | `src/sosfs/state/{db.py,journal.py,schema.sql,lifecycle.py,registry.py}`, `src/sosfs/engine/overlay.py`, `src/sosfs/engine/transfer.py` |
+| coupled core | `src/terrace/state/{db.py,journal.py,schema.sql,lifecycle.py,registry.py}`, `src/terrace/engine/overlay.py`, `src/terrace/engine/transfer.py` |
 | same-commit rules | see § Conventions |
 | high-blast-radius paths | see § Invariants |
 | security lane | on: undisclosed security findings go to gitignored `.security/`, never `issues/` |
@@ -958,7 +950,7 @@ Not on PyPI yet, so no mode publishes; the tag is bare (`0.1.0`, not `v0.1.0`) a
 6. pins tool discovery back to the repo;
 7. writes its own output to stderr and passes the command's exit status through.
 
-Here that means: every `SOSFS_*` variable is scrubbed, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` point into the sandbox, the command's working directory is the sandbox (which also isolates `./.sosfs.toml`), and `UV_PROJECT` points back at the repo so `uv run` exercises the current tree. `--keep` leaves the sandbox in place and prints its path, for inspecting a state database after a failed drive. It isolates an invocation, never an in-process `import sosfs`, and pytest must not run through it (§ Verification).
+Here that means: every `TERRACE_*` variable is scrubbed, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` point into the sandbox, the command's working directory is the sandbox (which also isolates `./.terrace.toml`), and `UV_PROJECT` points back at the repo so `uv run` exercises the current tree. `--keep` leaves the sandbox in place and prints its path, for inspecting a state database after a failed drive. It isolates an invocation, never an in-process `import terrace`, and pytest must not run through it (§ Verification).
 
 ### Where deferred work goes
 

@@ -15,7 +15,7 @@ lane: public
 
 The maintainer's user story of 2026-11-11 ([`issues/local-bundle-loop.md`](local-bundle-loop.md))
 names the source as "S3/SFTP tape or object store". Two inner locations exist, a POSIX path and an S3
-object (`src/sosfs/tier/archive.py:77-166`). An archive tape reached over SFTP is storage a research
+object (`src/terrace/tier/archive.py:77-166`). An archive tape reached over SFTP is storage a research
 computing center already runs, and it is the storage that most wants bundles: few large objects,
 written rarely, read whole.
 

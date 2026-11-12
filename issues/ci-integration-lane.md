@@ -64,7 +64,7 @@ docker compose up -d --wait && uv run pytest -m integration -q 2>&1 | grep -qE '
 The skips are decided at import time, in `pytestmark`, not per test. `tests/fuse/test_integration.py:30`
 defines `_linux_fuse()`, which requires `platform.system() == 'Linux'`, an existing `/dev/fuse`, and an
 importable `mfusepy`. `tests/tier/test_s3_integration.py:48` defines `_minio_available()`, which makes a
-real boto3 `list_buckets()` call against `SOSFS_TEST_MINIO_ENDPOINT` (default `http://127.0.0.1:9000`)
+real boto3 `list_buckets()` call against `TERRACE_TEST_MINIO_ENDPOINT` (default `http://127.0.0.1:9000`)
 with `connect_timeout=1`. Two consequences for whoever builds the lane. The predicate runs during
 *collection*, so on a runner where the endpoint hangs rather than refuses, collection stalls a second
 per attempt. And `docker-compose.yml` already publishes exactly those defaults — ports 9000/9001,
@@ -111,7 +111,7 @@ Draft R-IDs, to be firmed up at promotion.
   2026-11-08; `10 skipped, 530 deselected`, exit 0, at `d557db2`, 2026-11-09).
 - **R3** — The MinIO half shall be satisfied by the endpoint and credentials `docker-compose.yml`
   already publishes, with no edit to `tests/tier/test_s3_integration.py` and no new
-  `SOSFS_TEST_MINIO_*` value invented by the workflow.
+  `TERRACE_TEST_MINIO_*` value invented by the workflow.
 - **R4** — Where the FUSE half runs, `test_drain_umount_finalizes_source`,
   `test_detach_rescues_node_local_dirty` and `test_force_umount_skips_rescue` shall each report passed,
   and the job log shall carry the settled `shutdown_state` each asserts, so a reader can tell the

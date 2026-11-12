@@ -12,7 +12,7 @@ lane: public
 
 ## Problem
 
-Four findings in one region of `src/sosfs/tier/archive.py`. The first is a violation of a sacred
+Four findings in one region of `src/terrace/tier/archive.py`. The first is a violation of a sacred
 invariant; the rest share its blast radius, which for an archive source is the entire dataset.
 
 ### Re-pack and re-sync mutate a managed location outside any intent bracket
@@ -29,7 +29,7 @@ else.
 A crash mid-re-pack therefore leaves no record that anything was in flight. It also leaves debris the
 audit will misfile: `PosixInnerLocation.atomic_write` (`archive.py:97-109`) writes its temp as
 `.{name}.{hex}.tmp` **beside** the archive, while `journal.is_temp_name` (`journal.py:42-44`)
-classifies a temp by its first two path components being `.sosfs/partial`. So `PLAN.md:352`'s triage
+classifies a temp by its first two path components being `.terrace/partial`. So `PLAN.md:352`'s triage
 — recognizable transfer temps discarded, true orphans quarantined and reported — puts the temp in
 the wrong bucket, and `PLAN.md:355`'s "interrupted archive re-syncs restart from the extracted
 staging copy" has nothing to restart from, because nothing recorded that a re-sync began. The

@@ -16,13 +16,13 @@ from pathlib import Path
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
+from terrace.engine.overlay import OverlayEngine
+from terrace.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
 from tests.engine.conftest import Clock, build_spec, seed
 
 # Without libfuse these names stay unbound and tests/fuse/conftest.py skips every test here by name.
 try:
-    from sosfs.fuse.adapter import OverlayOperations, XATTR_TIERS, XATTR_DIRTY, XATTRS, BLOCK_SIZE
+    from terrace.fuse.adapter import OverlayOperations, XATTR_TIERS, XATTR_DIRTY, XATTRS, BLOCK_SIZE
     from mfusepy import ENOATTR
 except OSError:
     pass
@@ -219,7 +219,7 @@ def test_statfs_quota_fallback(tmp_path: Path, clock: Clock, monkeypatch) -> Non
         def _unbounded(_path: str):
             raise OSError('no filesystem behind this source')
 
-        monkeypatch.setattr('sosfs.fuse.adapter.os.statvfs', _unbounded)
+        monkeypatch.setattr('terrace.fuse.adapter.os.statvfs', _unbounded)
         stv = operations.statfs('/')
         assert stv['f_bsize'] == BLOCK_SIZE
         assert stv['f_blocks'] == 8

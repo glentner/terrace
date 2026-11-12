@@ -19,12 +19,12 @@ from pathlib import Path, PurePosixPath as P
 from pytest import fixture, mark, raises, approx
 
 # Internal libs
-from sosfs.core.units import parse_rate
-from sosfs.state.db import Database
-from sosfs.state.registry import TierRegistry
-from sosfs.tier.protocol import Tier, FileMeta, TierUsage
-from sosfs.tier.spec import S3Spec, LocationSpec
-from sosfs.tier.archive import (ArchiveTier, InnerLocation, PosixInnerLocation, S3InnerLocation,
+from terrace.core.units import parse_rate
+from terrace.state.db import Database
+from terrace.state.registry import TierRegistry
+from terrace.tier.protocol import Tier, FileMeta, TierUsage
+from terrace.tier.spec import S3Spec, LocationSpec
+from terrace.tier.archive import (ArchiveTier, InnerLocation, PosixInnerLocation, S3InnerLocation,
                                 inner_location, _zip_mtime)
 
 
@@ -196,11 +196,11 @@ def test_missing_archive_indexes_empty(db: Database, tmp_path: Path) -> None:
 
 
 def test_managed_internals_hidden(db: Database, tmp_path: Path) -> None:
-    """A '.sosfs' member inside the archive is excluded from the index, stats, and listings."""
-    write_zip(tmp_path / 'a.zip', [('.sosfs/marker', b'stowaway', 0o644), ('visible', b'x', 0o644)])
+    """A '.terrace' member inside the archive is excluded from the index, stats, and listings."""
+    write_zip(tmp_path / 'a.zip', [('.terrace/marker', b'stowaway', 0o644), ('visible', b'x', 0o644)])
     arc = tier(db, tmp_path / 'a.zip', 'zip')
-    assert arc.stat(P('/.sosfs')) is None
-    assert arc.stat(P('/.sosfs/marker')) is None
+    assert arc.stat(P('/.terrace')) is None
+    assert arc.stat(P('/.terrace/marker')) is None
     assert [e.name for e in arc.list(P('/'))] == ['visible']
 
 
@@ -418,13 +418,13 @@ def test_resync_noop_for_direct_update(db: Database, tmp_path: Path) -> None:
 
 
 def test_write_refuses_internal(db: Database, tmp_path: Path) -> None:
-    """The managed '.sosfs' tree refuses mutation like every other tier."""
+    """The managed '.terrace' tree refuses mutation like every other tier."""
     arc = tier(db, tmp_path / 'a.zip', 'zip')
     put(arc, '/visible', b'x')
     with raises(PermissionError):
-        put(arc, '/.sosfs/evil', b'x')
+        put(arc, '/.terrace/evil', b'x')
     with raises(PermissionError):
-        arc.rename(P('/visible'), P('/.sosfs/marker'))
+        arc.rename(P('/visible'), P('/.terrace/marker'))
 
 
 # -- S3 inner-location backing (moto): an archive source that lives on S3 ----------------------------------------

@@ -15,13 +15,13 @@ from pathlib import Path, PurePosixPath
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog
-from sosfs.state.journal import Journal
-from sosfs.state.registry import TierRegistry
-from sosfs.tier.protocol import FileMeta, TierError, TierUsage
-from sosfs.tier.posix import PosixTier
-from sosfs.engine.transfer import TransferPool, materialize_dirs
+from terrace.state.db import Database
+from terrace.state.catalog import Catalog
+from terrace.state.journal import Journal
+from terrace.state.registry import TierRegistry
+from terrace.tier.protocol import FileMeta, TierError, TierUsage
+from terrace.tier.posix import PosixTier
+from terrace.engine.transfer import TransferPool, materialize_dirs
 
 
 pytestmark = mark.unit

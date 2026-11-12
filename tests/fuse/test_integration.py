@@ -19,11 +19,11 @@ from pathlib import Path
 from pytest import mark, skip
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.lifecycle import Lifecycle
-from sosfs.tier.spec import OverlaySpec, WritebackSpec
-from sosfs.engine.overlay import DB_NAME
-from sosfs.fuse.mount import Mount, Shutdown, unmount, request_shutdown, MountError
+from terrace.state.db import Database
+from terrace.state.lifecycle import Lifecycle
+from terrace.tier.spec import OverlaySpec, WritebackSpec
+from terrace.engine.overlay import DB_NAME
+from terrace.fuse.mount import Mount, Shutdown, unmount, request_shutdown, MountError
 from tests.engine.conftest import build_spec, seed
 
 
@@ -67,7 +67,7 @@ def start_mount(tmp_path: Path, *, tiers: int = 2,
     overrides = {'scratch_writeback': FROZEN, 'tmp_writeback': FROZEN}
     spec = build_spec(tmp_path, tiers=tiers, **overrides)
     mount = Mount(spec, point, foreground=True, writeback_tick=0.2, evict_tick=0.5)
-    server = threading.Thread(target=mount.serve, name='sosfs-serve', daemon=True)
+    server = threading.Thread(target=mount.serve, name='terrace-serve', daemon=True)
     server.start()
     deadline = time.time() + MOUNT_TIMEOUT
     while time.time() < deadline and not os.path.ismount(point):
@@ -117,9 +117,9 @@ def test_xattr_exposes_tier_residency(tmp_path: Path) -> None:
     try:
         target = point / 'data.txt'
         target.write_bytes(b'payload')
-        assert 'user.sosfs.tiers' in os.listxattr(str(target))
-        assert b'scratch' in os.getxattr(str(target), 'user.sosfs.tiers')   # resident on the fast tier
-        assert os.getxattr(str(target), 'user.sosfs.dirty') == b'1'         # written, not yet committed
+        assert 'user.terrace.tiers' in os.listxattr(str(target))
+        assert b'scratch' in os.getxattr(str(target), 'user.terrace.tiers')  # resident on the fast tier
+        assert os.getxattr(str(target), 'user.terrace.dirty') == b'1'        # written, not yet committed
     finally:
         stop_mount(mount, server, point)
 

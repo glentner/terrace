@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for sosfs.core.units."""
+"""Unit tests for terrace.core.units."""
 
 # Type annotations
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.core.units import parse_bytes, parse_duration, parse_rate, Rate
+from terrace.core.units import parse_bytes, parse_duration, parse_rate, Rate
 
 
 pytestmark = mark.unit

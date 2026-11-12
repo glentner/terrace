@@ -77,19 +77,19 @@ put back to its source on its own delay or under pressure on scratch. A signal c
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
 
-### Rename `sosfs` to Terrace
+### Rename the project to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
 
 First, because the cost grows with every later cycle and the tree is quiet only while the parked cycles
 are held: 498 occurrences across 83 files at `6419966`, before the factory added its own. The mechanical
 two-thirds — distribution name, package directory, imports, class names, test modules, CI, prose — is a
-rename. The other third is not: the `SOSFS_*` environment prefix, the `user.sosfs.*` xattr namespace, the
-`.sosfs/marker` and `.sosfs/partial` directories in every managed tier root, and the default state path
-are **on-disk and user-visible contracts**, and changing the marker directory without a decision about
+rename. The other third is not: the environment prefix, the xattr namespace, the marker and partial
+directories in every managed tier root, and the default state path are **on-disk and user-visible
+contracts**, and changing the marker directory without a decision about
 existing overlays turns every managed location into an evaporated tier on the next mount. Nothing is
 deployed, which is what makes that decision cheap now. Stable row ids were ruled in on 2026-11-11, and
-the schema bump can ride with this format break. `PLAN.md` records `sosfs` as a technology decision
+the schema bump can ride with this format break. `PLAN.md` records the old name as a technology decision
 rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before it touches
 code.
 
@@ -304,7 +304,7 @@ durable even though its data is — a design decision rather than a drive-by fix
 docstring claims an atomicity S3 does not have. Placed before the audit, which reads several of these
 columns.
 
-### `sosfs audit` — reconcile the state database against the tiers
+### `terrace audit` — reconcile the state database against the tiers
 
 **Seed:** [`issues/audit-command.md`](issues/audit-command.md) · `feature` · appetite big
 
@@ -317,7 +317,7 @@ counters); whichever of the two is taken first builds it. It also defines what "
 fault-injection suite and unblocks the commit cycle. High-blast-radius as a whole, being the only
 component licensed to delete residency rows and quarantine files on its own reading of the world.
 
-### `sosfs commit` — finalize the source offline
+### `terrace commit` — finalize the source offline
 
 **Seed:** [`issues/offline-commit-command.md`](issues/offline-commit-command.md) · `feature` · appetite big
 
@@ -333,7 +333,7 @@ its calling thread; the seed carries that contradiction.
 
 **Seed:** [`issues/control-channel-and-status.md`](issues/control-channel-and-status.md) · `feature` · appetite small
 
-`src/sosfs/control/` does not exist. A unix-domain socket in the state directory serving
+`src/terrace/control/` does not exist. A unix-domain socket in the state directory serving
 line-oriented JSON, wired into the mount daemon, with a client library; `status` reading it live and
 falling back to a direct database read when no mount is running; `flush` forcing an upstream commit
 for the whole overlay or a subtree. The first cheap entry after two big ones, and it reuses the
@@ -426,6 +426,28 @@ that has been unlinked raises `LookupError` out of `mark_dirty`. The second is t
 maps neither, so it reaches libfuse as an unhandled exception. The existing test covers only the read
 case.
 
+### An empty or relative `XDG_*_HOME` is used as written
+
+**Seed:** [`issues/xdg-empty-and-relative-values.md`](issues/xdg-empty-and-relative-values.md) · `fix` · appetite small
+
+`core/platform.py` takes `XDG_CONFIG_HOME` and `XDG_STATE_HOME` as written whenever they are set. The
+XDG Base Directory specification treats an empty value as unset and ignores a relative one. Measured:
+with both empty, the per-user configuration file becomes `terrace/config.toml` relative to the working
+directory and an import creates `./terrace/log` there, with no error. A login script that clears a
+variable by assigning the empty string is enough to meet it. The rename to Terrace changed names only
+and left this as it was. The throwaway environment and the `temp_site` fixture always set both
+variables to absolute paths, so no test sees either case.
+
+### No unit test pins the extended-attribute names
+
+**Seed:** [`issues/xattr-names-unpinned.md`](issues/xattr-names-unpinned.md) · `test` · appetite small
+
+The adapter tests query `user.terrace.tiers` and `user.terrace.dirty` through the module's own
+constants, so they pass whatever the constants hold: rebinding both to another name pair leaves all
+six green. The only literal check is in the integration suite, which runs nowhere. A wrong name would
+pass the unit lane and break every script that reads the attribute. Tightening an existing assertion
+closes it without moving the unit count.
+
 ### A read-only mount
 
 **Seed:** [`issues/read-only-mount.md`](issues/read-only-mount.md) · `feature` · appetite small
@@ -477,7 +499,7 @@ detach-then-commit pattern depends on the lifecycle section and joins when that 
 
 What turns the sections above into a tagged version.
 
-### `sosfs config`
+### `terrace config`
 
 **Seed:** [`issues/config-command.md`](issues/config-command.md) · `feature` · appetite small
 

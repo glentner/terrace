@@ -89,11 +89,11 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import QuotaSpec, WritebackSpec
-from sosfs.engine.drain import drain
-from sosfs.engine.evict import EvictionManager
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.writeback import WritebackScheduler
+from terrace.tier.spec import QuotaSpec, WritebackSpec
+from terrace.engine.drain import drain
+from terrace.engine.evict import EvictionManager
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.writeback import WritebackScheduler
 from tests.engine.conftest import Clock, build_spec, seed
 
 
@@ -160,11 +160,11 @@ def test_double_rename_then_unlink_removes_source_copy(engine: OverlayEngine) ->
 # -- convergence helpers --------------------------------------------------------------------------------------
 
 def tree(root: Path) -> dict:
-    """{relative path: bytes | 'DIR'} for a tier root, blind to '.sosfs'."""
+    """{relative path: bytes | 'DIR'} for a tier root, blind to '.terrace'."""
     found = {}
     for item in sorted(root.rglob('*')):
         relative = item.relative_to(root).as_posix()
-        if relative.split('/')[0] == '.sosfs':
+        if relative.split('/')[0] == '.terrace':
             continue
         found[relative] = 'DIR' if item.is_dir() else item.read_bytes()
     return found

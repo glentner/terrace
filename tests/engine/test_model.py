@@ -21,8 +21,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, rule, invariant
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.writeback import WritebackScheduler
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.writeback import WritebackScheduler
 from tests.engine.conftest import Clock, build_spec, seed
 
 
@@ -40,10 +40,10 @@ ADVANCE = st.sampled_from([0, 1, 30, 59, 60, 61, 90, 120])
 
 
 def snapshot(root: Path) -> Dict[str, object]:
-    """{relative-posix-path: bytes | 'DIR'} for a tree, blind to '.sosfs'."""
+    """{relative-posix-path: bytes | 'DIR'} for a tree, blind to '.terrace'."""
     state: Dict[str, object] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(name for name in dirnames if name != '.sosfs')
+        dirnames[:] = sorted(name for name in dirnames if name != '.terrace')
         relative = os.path.relpath(dirpath, root)
         prefix = '' if relative == '.' else relative + '/'
         for name in dirnames:
@@ -82,7 +82,7 @@ class OverlayMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.root = Path(tempfile.mkdtemp(prefix='sosfs-model-'))
+        self.root = Path(tempfile.mkdtemp(prefix='terrace-model-'))
         seed(self.root / 'project', 'seeded.txt', b'initial-content')
         self.oracle = self.root / 'oracle'
         self.oracle.mkdir()

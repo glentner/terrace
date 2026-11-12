@@ -14,12 +14,12 @@ from importlib.resources import files
 from pytest import fixture, mark, raises
 
 # Internal libs
-import sosfs.state
+import terrace.state
 
 
 pytestmark = mark.unit
 
-SCHEMA = (files(sosfs.state) / 'schema.sql').read_text()
+SCHEMA = (files(terrace.state) / 'schema.sql').read_text()
 
 TABLES = {'overlay', 'tier', 'tier_usage', 'entry', 'residency', 'writeback', 'intent', 'archive_index'}
 

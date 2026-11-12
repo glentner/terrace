@@ -1,5 +1,5 @@
-sosfs — Simple Overlay Service
-==============================
+Terrace
+=======
 
 Managed data tiering for research computing: a FUSE mount presents one logical namespace
 over an ordered stack of storage tiers — e.g., `/project` → `/scratch` → `/tmp` →
@@ -14,9 +14,9 @@ and [ROADMAP.md](ROADMAP.md) for progress.
 Requires Python 3.15+.
 
 ```bash
-uv sync                                   # development install
-uv run sosfs --help                       # CLI surface
-uv run sosfs mount spec.toml /mnt/space   # mount an overlay (foreground: -f)
+uv sync                                    # development install
+uv run terrace --help                      # CLI surface
+uv run terrace mount spec.toml /mnt/space  # mount an overlay (foreground: -f)
 ```
 
 License: Apache-2.0

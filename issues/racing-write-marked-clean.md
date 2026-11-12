@@ -15,7 +15,7 @@ lane: public
 
 `_commit_hop` decides that a copy is clean from two signals, and a write can slip past both. After
 the copy it resets `marked_dirty` on every open handle, stats the holder, and marks the residency
-clean when size and mtime equal what it copied (`src/sosfs/engine/overlay.py:992-1007`). A writer
+clean when size and mtime equal what it copied (`src/terrace/engine/overlay.py:992-1007`). A writer
 takes no lock once its handle is marked: `write` reads `handle.marked_dirty` and then calls
 `os.pwrite` (`overlay.py:793-796`). The committer holds the path lock; the writer does not need it.
 
@@ -100,7 +100,7 @@ Draft R-IDs, to be firmed up at promotion.
   its transitions sit in `create`, `TransferPool.copy`, `Journal.mark_dirty`, `_commit_hop`,
   `commit_upstream`, `evict_copy`, `_remove`, `truncate` and `_record`. Declaring it (absent, clean,
   dirty, committing, evicting; who may move it and under which lock) is most of this fix.
-- `writeback.state` admits `'active'` (`src/sosfs/state/schema.sql:112`) and nothing ever sets it. A
+- `writeback.state` admits `'active'` (`src/terrace/state/schema.sql:112`) and nothing ever sets it. A
   commit in flight is the state the vocabulary was reserved for.
 - A handle-less `truncate` and `_record` write the same rows and belong in the same table.
 - `mmap` writes reach the engine as ordinary `write` callbacks, so one counter covers them.

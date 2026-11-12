@@ -13,10 +13,10 @@ from pathlib import Path
 from pytest import fixture, mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.lifecycle import Marker, MarkerStatus
-from sosfs.state.registry import TierRegistry, SpecDrift
-from sosfs.tier.protocol import TierUsage
+from terrace.state.db import Database
+from terrace.state.lifecycle import Marker, MarkerStatus
+from terrace.state.registry import TierRegistry, SpecDrift
+from terrace.tier.protocol import TierUsage
 
 
 pytestmark = mark.unit
@@ -126,7 +126,7 @@ def test_attach_detects_evaporation(registry: TierRegistry, tmp_path: Path) -> N
     root.mkdir()
     registry.attach('shm', position=2, type='posix', role='stage', scope='node',
                     root=root, uuid=UUID, now=100.0)
-    (root / '.sosfs' / 'marker').unlink()
+    (root / '.terrace' / 'marker').unlink()
     record, status = registry.attach('shm', position=2, type='posix', role='stage', scope='node',
                                      root=root, uuid=UUID, now=200.0)
     assert status is MarkerStatus.MISSING
@@ -141,7 +141,7 @@ def test_attach_detects_foreign_and_corrupt(registry: TierRegistry, tmp_path: Pa
     record, status = registry.attach('scratch', position=1, type='posix', role='stage', scope='shared',
                                      root=root, uuid=UUID, now=100.0)
     assert status is MarkerStatus.FOREIGN
-    (root / '.sosfs' / 'marker').write_text('not = [valid')
+    (root / '.terrace' / 'marker').write_text('not = [valid')
     record, status = registry.attach('scratch', position=1, type='posix', role='stage', scope='shared',
                                      root=root, uuid=UUID, now=200.0)
     assert status is MarkerStatus.CORRUPT

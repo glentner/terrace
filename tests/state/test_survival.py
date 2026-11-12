@@ -17,10 +17,10 @@ from pathlib import Path
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog
-from sosfs.state.journal import Journal, is_temp_name
-from sosfs.state.lifecycle import Lifecycle, CrashDetected
+from terrace.state.db import Database
+from terrace.state.catalog import Catalog
+from terrace.state.journal import Journal, is_temp_name
+from terrace.state.lifecycle import Lifecycle, CrashDetected
 
 
 pytestmark = mark.unit
@@ -31,10 +31,10 @@ UUID = 'a0000000-0000-0000-0000-000000000001'
 # readiness on stdout, then waits to be killed without any shutdown path.
 CHILD = f'''
 import signal, sys
-from sosfs.state.db import Database
-from sosfs.state.catalog import Catalog
-from sosfs.state.journal import Journal
-from sosfs.state.lifecycle import Lifecycle
+from terrace.state.db import Database
+from terrace.state.catalog import Catalog
+from terrace.state.journal import Journal
+from terrace.state.lifecycle import Lifecycle
 
 path, mode = sys.argv[1], sys.argv[2]
 db = Database(path)

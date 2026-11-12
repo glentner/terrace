@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
+from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock, build_spec, seed
 
 
@@ -114,7 +114,7 @@ def test_truncate_paths(engine: OverlayEngine) -> None:
 
 def test_bypass_size_skips_small_tier(tmp_path: Path, clock: Clock) -> None:
     """A file over a tier's bypass_size is never staged into it."""
-    from sosfs.tier.spec import QuotaSpec
+    from terrace.tier.spec import QuotaSpec
     seed(tmp_path / 'project', 'big.bin', b'B' * 1000)
     seed(tmp_path / 'project', 'small.bin', b's' * 10)
     spec = build_spec(tmp_path, tiers=3, tmp_quota=QuotaSpec(bypass_size=100))
@@ -131,7 +131,7 @@ def test_bypass_size_skips_small_tier(tmp_path: Path, clock: Clock) -> None:
 
 def test_quota_full_tier_skipped(tmp_path: Path, clock: Clock) -> None:
     """A tier without quota headroom is skipped at promotion."""
-    from sosfs.tier.spec import QuotaSpec
+    from terrace.tier.spec import QuotaSpec
     seed(tmp_path / 'project', 'a.bin', b'a' * 60)
     seed(tmp_path / 'project', 'b.bin', b'b' * 60)
     spec = build_spec(tmp_path, tiers=2, scratch_quota=QuotaSpec(size=100))

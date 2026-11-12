@@ -31,7 +31,7 @@ callbacks against transfers against eviction, which is the workload the product 
 
 The audit named three pieces of unguarded shared state, none of which any test would find:
 
-- **`Handle.written` and `Handle.marked_dirty`** are plain slots (`src/sosfs/engine/overlay.py:53`)
+- **`Handle.written` and `Handle.marked_dirty`** are plain slots (`src/terrace/engine/overlay.py:53`)
   written from callback threads with no lock: `overlay.py:650-653` in `write`, `:663` in
   `_mark_handle_dirty`, `:669-672` in `truncate`. They are read at `:707` (`fsync_policy == 'commit'
   and handle.written`) and `:738`. The write-back pump resets `marked_dirty = False` under
@@ -44,13 +44,13 @@ The audit named three pieces of unguarded shared state, none of which any test w
     the writes at `:678-681` (`write`), `:691` (`_mark_handle_dirty`) and `:697-700` (`truncate`),
     the reads at `:735` (`fsync`) and `:774` (`_record`), and the pump's reset at `:846-849`.
 - **`initialize_logging`'s guard is an unsynchronized load-then-store.**
-  `src/sosfs/core/logging.py:216-226`: `_INIT: bool = False`, then `if _INIT: return` and, in the
+  `src/terrace/core/logging.py:216-226`: `_INIT: bool = False`, then `if _INIT: return` and, in the
   `else`, `_INIT = True` before any of the work. Setting the flag first narrows the window to the gap
   between the load and the store instead of closing it: nothing serializes the two, so both threads
   can read `False`, both write `True`, and both go on to add the stream handler. Every subsequent log
   line is then emitted twice — including the TRACE per-operation lines that are the only diagnostic
   for a mount that is misbehaving.
-- **`ArchiveTier._members` and `_children`** (`src/sosfs/tier/archive.py:254-255`) are plain dicts
+- **`ArchiveTier._members` and `_children`** (`src/terrace/tier/archive.py:254-255`) are plain dicts
   rebuilt wholesale by `reindex` (`:311`, `:315`) and read from roughly a dozen call sites (`:468`,
   `:476`, `:481`, `:491`, `:511`, `:522`, `:602`, `:616`, `:631`, `:648`, `:665`, `:670`).
   `engine/locks.py` is path-keyed, so two writes to different members of the same archive are not
@@ -77,15 +77,15 @@ the tree that cycle landed.
     handle-less `truncate` on two threads, ordered by events at the mutex rather than by timing; no
     test yet runs a replay and a data commit for the same entry on two threads.
 - **Path locks do not cover descendants** (pre-existing; that cycle neither widened nor fixed it). A
-  directory `rename` holds `lock(old, new)` only (`src/sosfs/engine/overlay.py:425`), and
-  `Catalog.rename` rewrites every descendant's path (`src/sosfs/state/catalog.py:170`) while another
+  directory `rename` holds `lock(old, new)` only (`src/terrace/engine/overlay.py:425`), and
+  `Catalog.rename` rewrites every descendant's path (`src/terrace/state/catalog.py:170`) while another
   thread may hold `lock(child_old_path)`. The child's `transfer.copy` then fails with `LookupError`
-  (`src/sosfs/engine/transfer.py:85`) or reads a moved staging file.
+  (`src/terrace/engine/transfer.py:85`) or reads a moved staging file.
   - 2026-11-08: these line numbers hold at `5e0d997`; `source-served-open-race` moves the
     `overlay.py` one, to `:427` at `5b8dcaf`, and `truncate-recording-after-ancestor-rename` to
     `:431` at `d557db2`.
   - 2026-11-09 (`entry-identity-token`): `Catalog.purge` grew by a line, so `Catalog.rename` now
-    starts at line 171 of `src/sosfs/state/catalog.py`, one below the cite above.
+    starts at line 171 of `src/terrace/state/catalog.py`, one below the cite above.
   - 2026-11-08 (`truncate-recording-after-ancestor-rename`): a user `rename` now holds the source lock
     from its `_vacate` through its catalog move, which keeps the move out of the handle-less
     `truncate` from its lookup under that lock to its recording. Other calls hold a path lock and write the catalog by that path with no source lock,
@@ -107,7 +107,7 @@ the tree that cycle landed.
 
 *Added 2026-11-06 by `deferred-rename-source-orphan`, review cycle 1:* user removals take no source
 mutex. `unlink` and `rmdir` cancel an entry's queued rows and queue the removal under path locks alone
-(`_remove`, `src/sosfs/engine/overlay.py`), so one can land inside a replay's act. The review found a
+(`_remove`, `src/terrace/engine/overlay.py`), so one can land inside a replay's act. The review found a
 replay then settling the removal's own row, which had taken the cancelled row's id; replay now settles
 with `Journal.settle_current`, pinned by injected interleavings in `tests/engine/test_replay.py`. One
 more race of the same shape stays open:

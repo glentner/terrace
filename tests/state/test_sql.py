@@ -10,7 +10,7 @@ from __future__ import annotations
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.state.sql import render, SQLTemplateError
+from terrace.state.sql import render, SQLTemplateError
 
 
 pytestmark = mark.unit

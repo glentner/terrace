@@ -34,9 +34,9 @@ At `980f998` none of these queues drained at all: each raised `RecursionError`. 
 removed chain by chain scale as `nested-rmdir-replay-recursion` planned: 78 s at 5,000 chains.
 
 Mechanism, for orientation only; these cites hold at `60406ae`. Before an `rmdir` or `rename` row's
-needs, the replay reads the queue's marks again (`later()`, `src/sosfs/engine/overlay.py:1315-1321`,
-through `Journal.queued_marks`, `src/sosfs/state/journal.py:312`) and rebuilds the list of rows not
-yet run (`src/sosfs/engine/overlay.py:1363-1364`). Each of these is a full pass over the queue. When
+needs, the replay reads the queue's marks again (`later()`, `src/terrace/engine/overlay.py:1315-1321`,
+through `Journal.queued_marks`, `src/terrace/state/journal.py:312`) and rebuilds the list of rows not
+yet run (`src/terrace/engine/overlay.py:1363-1364`). Each of these is a full pass over the queue. When
 the removals interleave across chains, the replay evaluates on the order of N² needs, and each costs a
 pass. A profile of the level-order case puts most of the time in `queued_marks` and
 `Writeback.from_row`.

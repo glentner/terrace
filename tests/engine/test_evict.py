@@ -15,9 +15,9 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.tier.spec import QuotaSpec
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.evict import EvictionManager
+from terrace.tier.spec import QuotaSpec
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.evict import EvictionManager
 from tests.engine.conftest import Clock, build_spec, seed
 
 

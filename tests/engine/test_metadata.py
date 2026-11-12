@@ -14,8 +14,8 @@ from pathlib import Path, PurePosixPath
 from pytest import mark, raises
 
 # Internal libs
-from sosfs.engine.overlay import OverlayEngine
-from sosfs.engine.writeback import WritebackScheduler
+from terrace.engine.overlay import OverlayEngine
+from terrace.engine.writeback import WritebackScheduler
 from tests.engine.conftest import Clock, build_spec, seed
 
 
