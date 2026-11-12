@@ -140,5 +140,12 @@ commit boundary, not a wall-clock time.
   and a re-aggregation rebuilds the bundle from the catalog and the staged bytes
   ([`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md), decision 3), nothing re-packs
   per file and the engine has one call to make, on a clock.
+- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): the
+  story gives a bundle three triggers for its repack and push: its own write-back delay, quota pressure
+  on the tier that holds it, and a commit. The first is `max_frequency`, the third is the waiver at
+  drain; the second has no counterpart in the design, since a staged bundle is outside every quota
+  ([`issues/sharded-archive-sources.md`](sharded-archive-sources.md)). The story also puts altered files
+  on scratch as files beside the bundle until that repack, where the adapter as built writes each one
+  into the working archive at once.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work brief (dossier 2) and the tier-invariants brief.

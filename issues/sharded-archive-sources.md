@@ -153,6 +153,18 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   - **Many mounts read one dataset.** A multi-node job mounts on every node and a sweep runs many jobs at
     once. One mount per overlay means one staged copy per mount
     ([`issues/read-only-mount.md`](read-only-mount.md) R6).
+- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): two
+  things the story says that nothing here does.
+  - **A staged bundle is a unit the shared tier's quota counts.** The story's bundles are pulled to
+    scratch and decompressed there, and "ten thousand files on the shared filesystem" is a claim about
+    that tier's quota. As built, the working `.tar` sits at a `staging` path outside every tier root: no
+    quota counts it, nothing reclaims it, and a dataset whose every shard has been touched leaves every
+    shard decompressed on scratch for good. A clean staged bundle can be dropped and pulled again; a
+    dirty one is re-aggregated and pushed first.
+  - **Members land in the fast tier from the staged bundle, and the bundle is not unpacked.** That is
+    the ordinary promotion off the source, which `ArchiveTier` serves by offset from the working
+    `.tar`. It answers the question in the note above: members cascade one at a time to the fast
+    tiers, and scratch holds the bundle whole, with no file made there for a member nobody changed.
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed
   by the invariant audit run during the software-factory port (2026-08-22) — tier-layer review.

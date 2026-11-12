@@ -170,5 +170,10 @@ Draft R-IDs, to be firmed up at promotion.
   construct the tier, index, read) is the first step of the bundle loop
   ([`issues/local-bundle-loop.md`](local-bundle-loop.md)) and all a read-only mount needs
   ([`issues/read-only-mount.md`](read-only-mount.md)). Shaping may split read from write here.
+- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): in the
+  story the bundles land on the shared scratch tier, beside the altered files. In `PLAN.md`'s examples
+  `staging` is a path of its own on the source tier, which no overlap rule sees and no quota counts.
+  Shaping should decide whether a bundle's working copy lives inside the first shared stage tier, managed
+  and counted like anything else there, and whether `staging` is then a key at all.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   tier-invariants and remaining-work briefs.

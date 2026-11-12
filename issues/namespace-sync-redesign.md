@@ -189,5 +189,10 @@ before any code, under the plan-drift rule.
 - Related: `spec/deferred-rename-source-orphan/`, `spec/entry-identity-token/`,
   `spec/nested-rmdir-replay-recursion/`; `AGENTS.md` § *Invariants* § 5, § 10; `PLAN.md` § *Overlay
   engine* → Deferred-op replay, § *Risks and mitigations*.
+- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): an
+  input to decision 4. The story counts the staged bundles and "altered versions of files alongside them
+  on Scratch" as the durable set a halted job recovers from. Stage copies addressed by entry id would
+  make that set unreadable without the state database. That weighs for a namespace lock and stage trees
+  that mirror the overlay's paths.
 - Found by: an out-of-cycle review of the whole tree at `64faf27` (2026-11-11). The reproduction was
   run with Python 3.15.2 on macOS against tmpdir tiers through the engine API.

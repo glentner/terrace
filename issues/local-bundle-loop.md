@@ -20,6 +20,23 @@ bundle staged and indexed below it; members read through the overlay; members wr
 renamed and removed; the bundle rebuilt on a delay and pushed back as one object; and a fresh engine
 reading the result from the bucket.
 
+**The story, as the maintainer told it on 2026-11-11:**
+
+> The big user-story I want to tell is that we define a TOML config that points to S3/SFTP tape or
+> object store which contains either a single bundle or a multi-bundle (think 10k tar.gz from full
+> imagenet), and the config defines a cascade down to Lustre Scratch where the bundles would be
+> lazily pulled and decompressed (but not unpacked in full yet), the node-local /dev/shm lands single
+> files from that .tar bundles as necessary, and writes them back up to node-local /tmp, and then
+> back up to Lustre Scratch along-side the .tar sources. As changes landed to working copies in
+> /dev/shm, those altered files either due to eviction or write-back delay get committed back up the
+> stack. The source bundles and altered versions of files alongside them on Scratch represent durable
+> storage (if a job halts we're okay and can recover). The source bundles are repacked either due to
+> quota (eviction) or write-back delay themselves and put back to the source over S3/SFTP. A 'commit'
+> flushes everything back up the stack.
+
+The scenario below is that story at the size of a laptop: an object store for the source, a
+directory for scratch, two more for the node-local tiers.
+
 Every piece exists alone and none can be joined:
 
 - `ArchiveTier` has 36 unit tests, some over an S3 inner location (`tests/tier/test_archive.py`), and

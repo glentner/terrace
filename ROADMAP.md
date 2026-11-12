@@ -72,6 +72,15 @@ re-aggregated into those bundles on a delay. Everything here runs on a developer
 local object store, engine first. The decisions about identity and source synchronization are taken
 in this section.
 
+The story it builds toward, from the maintainer's statement of 2026-11-11 (quoted in full in
+[`issues/local-bundle-loop.md`](issues/local-bundle-loop.md)): a spec points at an object store, or a
+tape reached over SFTP, holding one bundle or ten thousand. Bundles are pulled lazily to shared
+scratch and decompressed there without being unpacked. Single files land in the RAM tier as they are
+read. Altered files are committed back up the stack, to node-local disk and then to scratch beside
+the bundles, by eviction or by their write-back delay. What is on scratch is durable, so a job that
+halts can recover. A bundle is repacked and put back to its source on its own delay or under quota
+pressure, and a commit flushes everything up the stack.
+
 ### Rename `sosfs` to Terrace
 
 **Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
@@ -138,6 +147,17 @@ ahead of the bundle write-back because a re-aggregation reads staged copies it b
 a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
 namespace work, and how wide the second route is on a production kernel is one measurement away.
 
+### Evicting a dirty copy commits it all the way to the source
+
+**Seed:** [`issues/eviction-one-hop.md`](issues/eviction-one-hop.md) · `fix` · appetite small
+
+When a pressured tier has no clean copy left, eviction commits each dirty copy to the source before
+dropping it, and `AGENTS.md` § 7 states that as a rule. The user story says a dirty file moves back up
+the stack one tier at a time, and a bundle is repacked on triggers of its own. For a bundle source the
+difference is the cost model: pressure in the RAM tier would otherwise turn every evicted file into a
+re-aggregation and a push to an object store or to tape. The reason § 7 gives for the rule does not
+follow from the code. Small, and it has to be settled before the re-aggregation is built on it.
+
 ### Rebuild how the namespace reaches the source
 
 **Seed:** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) · `refactor` · appetite big
@@ -203,6 +223,16 @@ is a prerequisite rather than an optimization: archive I/O is whole-blob in memo
 of that size cannot pass through RAM. Two questions were added on 2026-11-11: whether a member is
 served by offset from the staged shard instead of being unpacked to a file of its own, and how many
 mounts may read one staged dataset.
+
+### A bundle source over SFTP
+
+**Seed:** [`issues/sftp-inner-location.md`](issues/sftp-inner-location.md) · `feature` · appetite small
+
+The user story names a tape reached over SFTP beside an object store. Bundles are fetched and replaced
+whole, which is how tape wants to be used, so the adapter is three methods; the open questions are
+around it: the client library, atomic replacement over a rename, a recall that takes minutes while
+other calls must not wait, and a local server for tests. Split out of the extended archive sources on
+2026-11-11. Last in this section because it reuses the streaming read the sharding cycle builds.
 
 ## Queued: the lifecycle around the loop
 
@@ -452,9 +482,9 @@ bundle loop alone is a question for the maintainer once that section closes.
 **Seed:** [`issues/extended-archive-sources.md`](issues/extended-archive-sources.md) · `feature` · appetite big
 
 Post-v0.1.0 by design in both `PLAN.md` and the original phase outline. Two capabilities remain behind
-one entry: SFTP and Globus inner locations over the existing three-method protocol, and
-synthetic-subtree wrapping for a non-conforming archive. What is left has no user asking for it yet,
-and an honest SFTP backing wants the ranged read the sharding cycle has to build first.
+one entry: a Globus inner location, which is a submit-and-wait transfer rather than a stream, and
+synthetic-subtree wrapping for a non-conforming archive. Sharding, the priority lane and the SFTP
+inner location were split out as each found a user. What is left has no one asking for it yet.
 
 ## Held behind the namespace decision
 
