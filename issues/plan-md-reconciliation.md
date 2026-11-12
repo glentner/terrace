@@ -84,9 +84,10 @@ The four that do not hold:
   `issues/freethreaded-concurrency-stress.md` owns the missing tests.
 
 **What this seed does not hold.** Anything a later cycle changes by doing its own work is reconciled
-in that cycle's diff, under the same-commit rule — not parked here. `issues/rename-to-terrace.md`
-rewrites `PLAN.md:484` and the path and prefix strings, and its diff passes straight through line 50,
-so whichever of the two lands first carries item 1 and the other drops it.
+in that cycle's diff, under the same-commit rule — not parked here. The rename to Terrace
+(`spec/rename-to-terrace/`, landed 2026-11-12) rewrote the package row in Technology decisions and
+the path and prefix strings, and passed through line 50 changing only the name: its GOAL left the
+command list as it was, so item 1 stays here.
 `issues/shutdown-rescue-gaps.md` owns the `umount --detach` completion semantics, which is a design
 change and belongs in `PLAN.md` as part of that cycle rather than as a documentation edit here.
 `issues/audit-command.md` owns the CLI table's promise that `mount` auto-audits after an unclean
@@ -140,8 +141,8 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
 
 ## Notes
 
-- Related: `issues/rename-to-terrace.md` (overlaps `PLAN.md:50` and owns the technology row at
-  `:484`); `issues/ci-integration-lane.md`, `issues/crash-fault-injection-suite.md` and
+- Related: `spec/rename-to-terrace/` (landed 2026-11-12; renamed `PLAN.md:50` and rewrote the
+  package row, leaving item 1 here); `issues/ci-integration-lane.md`, `issues/crash-fault-injection-suite.md` and
   `issues/freethreaded-concurrency-stress.md` own the *work* behind three of the four overstated
   testing bullets; `issues/shutdown-rescue-gaps.md` and `issues/audit-command.md` own the design
   reconciliations deliberately excluded above; `issues/documentation-and-v0.1.0.md` must consume a

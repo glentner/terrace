@@ -157,8 +157,9 @@ Draft R-IDs, to be firmed up at promotion.
   obligation: its convergence assertion *is* audit + remount. `issues/archive-spec-plumbing.md` and
   `issues/archive-finalization-integration.md` change what a tier walk means once an archive tier can
   be constructed, so shaping should decide whether the audit covers archive sources in this cycle or
-  in a follow-up. `issues/rename-to-terrace.md` moves `MARKER_DIR` and `PARTIAL_DIR`, which are the
-  two on-disk conventions this command reads.
+  in a follow-up. The rename to Terrace (`spec/rename-to-terrace/`, landed 2026-11-12) moved
+  `MARKER_DIR` and `PARTIAL_DIR` to `.terrace` and `.terrace/partial`, the two on-disk conventions this
+  command reads.
 - `PLAN.md` § *Audit* is the specification and is unusually complete: the five-step walk (marker
   check, reconcile, resolve intents, rebuild, report), the `--fast` / `--full` modes, `--dry-run`, the
   exit codes, and the rule that the audit never moves data upstream because finalizing the source is
