@@ -156,3 +156,120 @@ Unmapped changes (minor, supporting the helper, none harmful): `ruff` and the SP
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (the orchestrator's ruling for this pass).
+
+## Review cycle 2 — changes-requested (2026-11-12)
+
+- **Reviewed commit:** `ae420d1` (the one remediation commit for F1 and F2)  ·  **Base:** `main`
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3, mirroring `review.cycle` in `TECH.md`
+- **Mode:** **scoped**, by the foreman's ruling: verifying the remediation of F1 and F2, plus the two
+  sites the remediation changed beyond them (the `refuses()` probe in `tests/loop/test_helper.py` and
+  the helper's signal handler in `tools/bundle_loop.py`). Not a fresh pass over the full diff. One
+  fresh blind reviewer, given `GOAL.md`, the rubric, `AGENTS.md` by path and the view
+  `git diff 14a2b56..ae420d1 -- . ':(exclude)spec/'`; the seed and `ROADMAP.md` hunks in that range
+  were out of its scope. The subagent route ran; the sequential fallback did not. No `debate`, no
+  completeness sub-pass.
+- **Contract:** `GOAL.md` unchanged since cycle 1 (`git log` shows only the shape and the plan
+  sign-off commits).
+- **Triage of cycle 1's F2:** the foreman's call was **fix**; it was remediated in `ae420d1` and is
+  verified below.
+
+The reviewer's evidence lives in the worktree's gitignored `.local/review2/` (named `R2/` below).
+
+### Verification run
+
+- The profile's `verify` (`tools/lint.sh && uv run pytest -n auto -m unit`), one full run at
+  `ae420d1` (`R2/verify.log`): lint "all checks passed", ruff, layering, SPDX on 85 files, version
+  and symlink checks; the suite gave **773 passed, 9 xfailed in 30.91 s**, no failed, error, skipped
+  or xpassed. This matches the remediation's claim. Not hollow, not aggregated: pytest ran after lint
+  exited 0, and the counts were read from the log.
+- F1, repeat under load (`R2/f1_drive.py`, `R2/f1-head.log`): 20 processes on a 10-core host, four
+  exchanges at the tap (short chunked, 4 MiB chunked, chunked with `Expect: 100-continue`, 4 MiB
+  with `Content-Length`), 10,000 each: **0 failures** (95 % upper bound 0.03 %, against cycle 1's
+  ~4 %); 0 refused bodies in the bucket, 0 counted as forwarded. Negative control
+  (`R2/f1-old.log`): the same drive with the tap's draining disabled fails 23–100 %, so the drive
+  sees the defect. The two committed tap tests, 400 × 2 under 16-way load: 0 failures, bound 0.75 %
+  (`R2/f1-pytest-repeat.log`). The tap's other early-close paths need a malformed request (bad
+  `Content-Length`, unknown method, oversize line); none is reachable from the scenario.
+- F2 (read against R4 and R6): stages 3 and 7 assert no write to the source; stage 5 asserts an empty
+  window before the interval's expiry and exactly one `PUT` of the changed bundle's key after it;
+  stage 8 asserts no read of a bundle key by the engine started after the commit; stage 9 asserts
+  R4's byte-identity only. The diff removes exactly the two over-asks of cycle 1 and nothing R6 asks
+  for.
+- Helper signals (`R2/helper_drive.py`, `R2/helper-signals.log`): 122 trials, 0 failures across
+  SIGINT, SIGTERM, SIGHUP, a second signal at 0–100 ms, 20-signal bursts, SIGINT started ignored,
+  command exit 0 and 3, a long command killed, and a process-group Ctrl-C; each checked a fresh empty
+  `TMPDIR` and a refusing endpoint afterwards. Default botocore retry mode, a signal during bucket
+  setup: 230 trials, no hang, teardown complete (`R2/helper-startup.log`). Standard retry mode: A1.
+- `refuses()` negative control (`R2/refuses_control.py`, `R2/refuses-control.log`): live listeners
+  give 0 of 1,200 reported refused; a full backlog raises, never reports a refusal; closed and free
+  ports give 2,200 of 2,200 refused.
+- `AGENTS.md` figures (`R2/figures.log`, `R2/serial-unit.log`): 801 collected, 782 unit,
+  19 integration (`-m integration`: 19 skipped, 782 deselected), 51 `.py` files under `tests/`,
+  serial unit lane 64.3 s, `-n auto` 30.9 s. Each figure the commit changed equals the tree.
+- `grep` for spec R/P/F ids in the changed source: no match.
+- CI: **not observed**.
+
+### Scoped matrix
+
+| Item | Verdict | Verified how | Who |
+|---|---|---|---|
+| F1 (cycle 1, HIGH/CONFIRMED) | ✅ remediated | Load drive, 40,000 exchanges, 0 failures; negative control fails; no refused body forwarded | reviewer |
+| F2 (cycle 1, MEDIUM/PLAUSIBLE, triaged *fix*) | ✅ remediated | Stages 3, 8, 9 read against R4 and R6; no R6 assertion lost | reviewer |
+| Helper signal handler (`tools/bundle_loop.py`) | ❌ A1 | 122 trials clean on the named paths; hangs under standard retry mode | reviewer |
+| `refuses()` probe (`tests/loop/test_helper.py`) | ✅ | Negative control: no live endpoint reported refused | reviewer |
+| Full `verify` | ✅ | 773 passed, 9 xfailed, 30.91 s | reviewer |
+| `AGENTS.md` figures | ✅ | Each changed figure measured equal | reviewer |
+| R2 | ❌ (A1) | — | reviewer |
+| R4, R6 | ✅ | — | reviewer |
+| R8 bound | ✅ | Lane 30.9 s | reviewer |
+| R9 | ✅ | — | reviewer |
+| GOAL outcome: "`verify` reports no failure" | ✅ | One full run green; the F1 flake not reproduced under load | reviewer |
+
+R1, R3, R5 and R7 were not re-graded in this scoped pass; cycle 1's grades stand for code the
+remediation did not touch.
+
+### Findings
+
+#### A1 [MEDIUM/CONFIRMED] A signal during bucket setup can leave the helper unkillable but by SIGKILL, and SIGKILL leaks the directory
+
+- **Where:** `tools/bundle_loop.py:228-232` (`on_signal`, which now calls `quiet()` before raising
+  `Stop`), introduced by `ae420d1`.
+- **Failure scenario:** a signal lands while boto3 is sending a setup request. botocore wraps the
+  raised `Stop` in `HTTPClientError`; under standard retry mode (`AWS_RETRY_MODE=standard`, or
+  `retry_mode` in the user's AWS config) that error is retried, so `Stop` is swallowed. Setup
+  completes and the helper reaches `signal.pause()` with SIGINT, SIGTERM and SIGHUP all ignored. Only
+  SIGKILL ends it, and that leaves the temporary directory behind: R2's interrupt and termination
+  paths fail.
+- **Evidence:** at head, 8 of 12 trials hung through two signals
+  (`R2/helper-startup-retry-standard-head.log`); an earlier, stopped run's SIGKILLed trials left
+  their `bundle-loop.*` directories (`R2/helper-startup-retry-standard-leftovers.log`; the reviewer
+  removed them). Control at `14a2b56` (`R2/helper-startup-retry-standard-control-old.log`): the same
+  8 of 12 swallowed the first signal, and each tore down cleanly on the second, status 0, nothing
+  left. So the swallowing predates the cycle, and `ae420d1` turned it from "needs a second signal"
+  into "cannot be stopped".
+- **Touches:** R2. Not a § Invariants section; `tools/` is not on the high-blast-radius list. Edge
+  path (non-default retry mode and a signal inside the setup window), hence MEDIUM.
+- **Route (the property, both sides):** every interrupt or termination signal the helper receives,
+  at any point from start to the end of teardown, ends in teardown and exit, whatever library code
+  is on the stack when it lands (liveness: no layer may absorb the stop, and the first signal must
+  suffice, under every retry mode botocore offers); and a signal that arrives once teardown has begun
+  never cuts teardown short (completeness, the property `ae420d1` was protecting). Sweep the domain:
+  every window in which the helper calls into boto3 or the store (setup, `close()`), under default
+  and standard retry modes. Pin it with a drive that signals inside the setup window under standard
+  retry mode and asserts teardown on the first signal, and keep a pin for the second-signal-during-
+  teardown case.
+
+#### Out of Scope
+
+- Under the default retry mode, a signal in the setup window exits 1 with a traceback
+  (`R2/helper-startup-stderr.log`), with teardown complete; it predates the cycle (`Stop` subclasses
+  `Exception`). R2 asks for teardown, not an exit status. It sits in A1's window, so A1's sweep will
+  meet it; no separate seed.
+- The twelve `bundle-loop.*` directories in the session temp directory are cycle 1's (dated 01:16
+  and 01:43); the reviewer's cycle 2 trials left none.
+
+### Human-gate triggers
+
+- None. A1 sits in `tools/bundle_loop.py`, which is not on § Invariants' high-blast-radius list, and
+  violates no § Invariants section tagged *[human gate]*.
