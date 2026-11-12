@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: refactor/rename-to-terrace
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: uv run --no-project --python 3.15 python -I spec/rename-to-terrace/verify/rename_gate.py identity suite
 - id: P2
   name: Tier roots, the environment, the paths and the attributes carry the new name
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -152,16 +152,16 @@ namespace are held back for P2 (`PLAN.md` § 2, the contract forms).
 `terrace`, the attributes are `user.terrace.*`, and nothing in the code scope spells an old name. An
 overlay written before the rename is refused and left as it was. The state store is unchanged.
 
-- [ ] `python3 -I spec/rename-to-terrace/rename.py p2`. It rewrites the marker file's first line,
+- [x] `python3 -I spec/rename-to-terrace/rename.py p2`. It rewrites the marker file's first line,
   then applies rules 3 and 4 with nothing held back.
-- [ ] Read the diff of `state/lifecycle.py`, `state/journal.py`, `tier/s3.py`, `fuse/adapter.py`,
+- [x] Read the diff of `state/lifecycle.py`, `state/journal.py`, `tier/s3.py`, `fuse/adapter.py`,
   `core/config.py`, `core/platform.py`, `tests/__init__.py`, `tests/conftest.py` and
   `tools/temp_site.sh` in full: these hold every literal the GOAL names as a hazard.
-- [ ] Stage by name: `src tests tools docker-compose.yml`.
-- [ ] R8: the gate runs the adapter's unit tests and drives the adapter without a mount. The check
+- [x] Stage by name: `src tests tools docker-compose.yml`.
+- [x] R8: the gate runs the adapter's unit tests and drives the adapter without a mount. The check
   on a real mount (`tests/fuse/test_integration.py`, `-m integration`) is **not run** in this cycle.
   Say so in the phase commit's body.
-- [ ] `core/platform.py` uses an `XDG_*_HOME` value as written, empty or relative. This phase
+- [x] `core/platform.py` uses an `XDG_*_HOME` value as written, empty or relative. This phase
   changes the directory name and nothing else there. The seed was filed with the plan:
   deferred to `issues/xdg-empty-and-relative-values.md`.
 - **Verify:** `rename_gate.py contracts suite`. Dry-run green on the prototype's P2 tree; `census`

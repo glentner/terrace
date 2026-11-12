@@ -77,7 +77,7 @@ class Tier(Protocol):
     The storage contract every tier adapter implements (PLAN.md -> Tier protocol).
 
     Paths are overlay-absolute POSIX paths ('/x/y'); each adapter maps them beneath
-    its own root and keeps managed internals (the '.sosfs' marker directory) out of
+    its own root and keeps managed internals (the '.terrace' marker directory) out of
     stats and listings. Path-shaped failures raise standard `OSError` subclasses
     (`FileNotFoundError`, `FileExistsError`, `NotADirectoryError`, ...) so callers
     map errno directly; failures with no OSError shape raise `TierError`. Adapters

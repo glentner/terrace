@@ -29,8 +29,8 @@ __all__ = ['OverlayOperations', 'XATTR_TIERS', 'XATTR_DIRTY']
 log = Logger.with_name(__name__)
 
 
-XATTR_TIERS = 'user.sosfs.tiers'                 # comma-separated tiers holding a copy, source-first
-XATTR_DIRTY = 'user.sosfs.dirty'                 # '1' when a copy is uncommitted upstream, else '0'
+XATTR_TIERS = 'user.terrace.tiers'               # comma-separated tiers holding a copy, source-first
+XATTR_DIRTY = 'user.terrace.dirty'               # '1' when a copy is uncommitted upstream, else '0'
 XATTRS = (XATTR_TIERS, XATTR_DIRTY)
 
 TYPE_BITS: Dict[str, int] = {'file': stat.S_IFREG, 'dir': stat.S_IFDIR, 'symlink': stat.S_IFLNK}

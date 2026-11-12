@@ -16,9 +16,9 @@ from pytest import fixture
 
 @fixture(scope='function')
 def temp_site(tmp_path: Path, monkeypatch) -> Path:
-    """Isolated site: scrub SOSFS_* variables and redirect XDG paths into a tmp dir."""
+    """Isolated site: scrub TERRACE_* variables and redirect XDG paths into a tmp dir."""
     for name in list(os.environ):
-        if name.startswith('SOSFS_'):
+        if name.startswith('TERRACE_'):
             monkeypatch.delenv(name)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))

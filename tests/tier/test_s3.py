@@ -181,18 +181,18 @@ def test_usage_excludes_internals(tier: S3Tier) -> None:
 
 
 def test_managed_internals_hidden_and_guarded(tier: S3Tier) -> None:
-    """'.sosfs' reads as absent, is excluded from listings, and refuses mutation."""
+    """'.terrace' reads as absent, is excluded from listings, and refuses mutation."""
     tier.write_marker(Marker(uuid=UUID, tier='cloud', generation=0, written=100.0))
-    assert tier.stat(P('/.sosfs')) is None
-    assert tier.stat(P('/.sosfs/marker')) is None
+    assert tier.stat(P('/.terrace')) is None
+    assert tier.stat(P('/.terrace/marker')) is None
     put(tier, '/visible', b'x')
     assert [entry.name for entry in tier.list(P('/'))] == ['visible']
-    for operation in (lambda: put(tier, '/.sosfs/evil', b'x'),
-                      lambda: tier.delete(P('/.sosfs/marker')),
-                      lambda: tier.mkdir(P('/.sosfs/sub')),
-                      lambda: tier.rmdir(P('/.sosfs')),
-                      lambda: tier.rename(P('/.sosfs/marker'), P('/stolen')),
-                      lambda: tier.rename(P('/visible'), P('/.sosfs/marker'))):
+    for operation in (lambda: put(tier, '/.terrace/evil', b'x'),
+                      lambda: tier.delete(P('/.terrace/marker')),
+                      lambda: tier.mkdir(P('/.terrace/sub')),
+                      lambda: tier.rmdir(P('/.terrace')),
+                      lambda: tier.rename(P('/.terrace/marker'), P('/stolen')),
+                      lambda: tier.rename(P('/visible'), P('/.terrace/marker'))):
         with raises(PermissionError):
             operation()
 
@@ -207,9 +207,9 @@ def test_set_meta_verifies_existence(tier: S3Tier) -> None:
 
 
 def test_set_meta_refuses_internal(tier: S3Tier) -> None:
-    """The managed '.sosfs' tree refuses metadata mutation like every other write."""
+    """The managed '.terrace' tree refuses metadata mutation like every other write."""
     with raises(PermissionError):
-        tier.set_meta(P('/.sosfs/marker'), FileMeta(size=0, mtime=1.0, mode=0o600))
+        tier.set_meta(P('/.terrace/marker'), FileMeta(size=0, mtime=1.0, mode=0o600))
 
 
 def test_escape_refused(tier: S3Tier) -> None:

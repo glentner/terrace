@@ -122,7 +122,7 @@ class Lifecycle:
         return Overlay.from_row(row)
 
 
-MARKER_DIR: Final[str] = '.sosfs'
+MARKER_DIR: Final[str] = '.terrace'
 MARKER_NAME: Final[str] = 'marker'
 
 
@@ -140,7 +140,7 @@ class MarkerStatus(Enum):
 @dataclass(frozen=True)
 class Marker:
     """
-    A managed-location marker (`.sosfs/marker` at a tier root).
+    A managed-location marker (`.terrace/marker` at a tier root).
 
     A missing or mismatched marker tells the audit a tier evaporated wholesale or
     was swapped, rather than files going missing one by one. Serialization is TOML;
@@ -155,7 +155,7 @@ class Marker:
 
     def dump(self) -> str:
         """Serialize to marker-file text."""
-        return ('# sosfs managed-location marker — do not edit\n'
+        return ('# Terrace managed-location marker — do not edit\n'
                 f'uuid = "{self.uuid}"\n'
                 f'tier = "{self.tier}"\n'
                 f'generation = {self.generation}\n'

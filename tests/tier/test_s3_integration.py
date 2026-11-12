@@ -3,7 +3,7 @@
 
 """Integration tests: an S3 source with a POSIX staging stack against a real MinIO server.
 
-Point at a MinIO (or any S3) endpoint with the SOSFS_TEST_MINIO_* environment variables;
+Point at a MinIO (or any S3) endpoint with the TERRACE_TEST_MINIO_* environment variables;
 the suite skips when none is reachable. Defaults target a local MinIO on 127.0.0.1:9000
 with the stock minioadmin credentials — `docker compose up -d --wait` (see docker-compose.yml
 at the repo root) brings up exactly that.
@@ -30,10 +30,10 @@ from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock
 
 
-ENDPOINT = os.environ.get('SOSFS_TEST_MINIO_ENDPOINT', 'http://127.0.0.1:9000')
-ACCESS_KEY = os.environ.get('SOSFS_TEST_MINIO_ACCESS_KEY', 'minioadmin')
-SECRET_KEY = os.environ.get('SOSFS_TEST_MINIO_SECRET_KEY', 'minioadmin')
-REGION = os.environ.get('SOSFS_TEST_MINIO_REGION', 'us-east-1')
+ENDPOINT = os.environ.get('TERRACE_TEST_MINIO_ENDPOINT', 'http://127.0.0.1:9000')
+ACCESS_KEY = os.environ.get('TERRACE_TEST_MINIO_ACCESS_KEY', 'minioadmin')
+SECRET_KEY = os.environ.get('TERRACE_TEST_MINIO_SECRET_KEY', 'minioadmin')
+REGION = os.environ.get('TERRACE_TEST_MINIO_REGION', 'us-east-1')
 
 
 def _minio_client():

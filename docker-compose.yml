@@ -1,7 +1,7 @@
 # S3-compatible MinIO for the Terrace integration suite (tests/tier/test_s3_integration.py).
 #
 # The test harness never launches a server itself: it looks for one at the
-# SOSFS_TEST_MINIO_* endpoint (defaulting to this service) and skips when none is
+# TERRACE_TEST_MINIO_* endpoint (defaulting to this service) and skips when none is
 # reachable. This file is that server, on demand:
 #
 #     docker compose up -d --wait     # start MinIO, block until it reports healthy
@@ -17,11 +17,11 @@ services:
     image: quay.io/minio/minio
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"                     # S3 API  -> SOSFS_TEST_MINIO_ENDPOINT (http://127.0.0.1:9000)
+      - "9000:9000"                     # S3 API  -> TERRACE_TEST_MINIO_ENDPOINT (http://127.0.0.1:9000)
       - "9001:9001"                     # web console
     environment:
-      MINIO_ROOT_USER: minioadmin       # -> SOSFS_TEST_MINIO_ACCESS_KEY
-      MINIO_ROOT_PASSWORD: minioadmin   # -> SOSFS_TEST_MINIO_SECRET_KEY
+      MINIO_ROOT_USER: minioadmin       # -> TERRACE_TEST_MINIO_ACCESS_KEY
+      MINIO_ROOT_PASSWORD: minioadmin   # -> TERRACE_TEST_MINIO_SECRET_KEY
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
       interval: 5s

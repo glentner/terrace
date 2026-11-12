@@ -266,7 +266,7 @@ class ArchiveTier:
 
     @staticmethod
     def _internal(pure: PurePosixPath) -> bool:
-        """Whether `pure` is the managed '.sosfs' directory at the tier root (or within it)."""
+        """Whether `pure` is the managed '.terrace' directory at the tier root (or within it)."""
         return pure.parts[1:2] == (MARKER_DIR, )
 
     def _guard(self, pure: PurePosixPath) -> None:

@@ -39,17 +39,17 @@ state_home: Final[str] = os.getenv('XDG_STATE_HOME', os.path.join(home, '.local'
 site = Namespace(system='/', user=home, local=cwd)
 path = Namespace({
     'system': {
-        'config': os.path.join(site.system, 'etc', 'sosfs', 'config.toml'),
-        'log': os.path.join(site.system, 'var', 'log', 'sosfs'),
-        'state': os.path.join(site.system, 'var', 'lib', 'sosfs')},
+        'config': os.path.join(site.system, 'etc', 'terrace', 'config.toml'),
+        'log': os.path.join(site.system, 'var', 'log', 'terrace'),
+        'state': os.path.join(site.system, 'var', 'lib', 'terrace')},
     'user': {
-        'config': os.path.join(config_home, 'sosfs', 'config.toml'),
-        'log': os.path.join(state_home, 'sosfs', 'log'),
-        'state': os.path.join(state_home, 'sosfs')},
+        'config': os.path.join(config_home, 'terrace', 'config.toml'),
+        'log': os.path.join(state_home, 'terrace', 'log'),
+        'state': os.path.join(state_home, 'terrace')},
     'local': {
-        'config': os.path.join(site.local, '.sosfs.toml'),
-        'log': os.path.join(state_home, 'sosfs', 'log'),
-        'state': os.path.join(state_home, 'sosfs')},
+        'config': os.path.join(site.local, '.terrace.toml'),
+        'log': os.path.join(state_home, 'terrace', 'log'),
+        'state': os.path.join(state_home, 'terrace')},
 })
 
 

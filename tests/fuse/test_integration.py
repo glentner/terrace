@@ -117,9 +117,9 @@ def test_xattr_exposes_tier_residency(tmp_path: Path) -> None:
     try:
         target = point / 'data.txt'
         target.write_bytes(b'payload')
-        assert 'user.sosfs.tiers' in os.listxattr(str(target))
-        assert b'scratch' in os.getxattr(str(target), 'user.sosfs.tiers')   # resident on the fast tier
-        assert os.getxattr(str(target), 'user.sosfs.dirty') == b'1'         # written, not yet committed
+        assert 'user.terrace.tiers' in os.listxattr(str(target))
+        assert b'scratch' in os.getxattr(str(target), 'user.terrace.tiers')  # resident on the fast tier
+        assert os.getxattr(str(target), 'user.terrace.dirty') == b'1'        # written, not yet committed
     finally:
         stop_mount(mount, server, point)
 

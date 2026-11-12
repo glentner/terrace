@@ -31,7 +31,7 @@ ACTIONS: Final[frozenset] = frozenset({'promote', 'commit', 'evict', 'compact', 
 
 NAMESPACE_OPS: Final[frozenset] = frozenset({'create', 'unlink', 'rename', 'mkdir', 'rmdir', 'meta'})
 
-PARTIAL_DIR: Final[str] = '.sosfs/partial'
+PARTIAL_DIR: Final[str] = '.terrace/partial'
 
 
 def temp_name(intent_id: int, path: str) -> str:
@@ -41,7 +41,7 @@ def temp_name(intent_id: int, path: str) -> str:
 
 def is_temp_name(name: str) -> bool:
     """Whether a tier-relative name is a transfer temp by convention (an orphan if unjournaled)."""
-    return PurePosixPath(name).parts[:2] == ('.sosfs', 'partial')
+    return PurePosixPath(name).parts[:2] == ('.terrace', 'partial')
 
 
 @dataclass(frozen=True)

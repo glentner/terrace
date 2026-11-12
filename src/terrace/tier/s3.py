@@ -35,7 +35,7 @@ log = Logger.with_name(__name__)
 
 ROOT = PurePosixPath('/')
 MARKER_KEY = f'{MARKER_DIR}/{MARKER_NAME}'
-KEEP = '.sosfs.keep'                              # reserved zero-byte sentinel that makes an empty prefix a directory
+KEEP = '.terrace.keep'                            # reserved zero-byte sentinel that makes an empty prefix a directory
 
 
 @contextmanager
@@ -78,8 +78,8 @@ class S3Tier:
     arbitrary mtime (the catalog remains authoritative for those, PLAN.md -> State
     store). Directories are emulated: a prefix that contains any object reads as a
     directory, and `mkdir` holds an otherwise-empty one with a reserved zero-byte
-    '.sosfs.keep' sentinel (a trailing-slash marker aliases with `head` on this
-    backend). The managed '.sosfs' tree reads as absent and refuses mutation, exactly
+    '.terrace.keep' sentinel (a trailing-slash marker aliases with `head` on this
+    backend). The managed '.terrace' tree reads as absent and refuses mutation, exactly
     as on POSIX. `delete` and `rmdir` marker removal are idempotent — re-running a
     committed removal never fails.
     """
@@ -105,7 +105,7 @@ class S3Tier:
 
     @staticmethod
     def _internal(pure: PurePosixPath) -> bool:
-        """Whether `pure` is the managed '.sosfs' directory at the tier root (or within it)."""
+        """Whether `pure` is the managed '.terrace' directory at the tier root (or within it)."""
         return pure.parts[1:2] == (MARKER_DIR, )
 
     def _is_dir(self, key: str) -> bool:
@@ -130,7 +130,7 @@ class S3Tier:
             return TierStat(kind='dir', size=0, mtime=0.0) if self._is_dir(key) else None
 
     def list(self, path: PurePosixPath) -> Iterator[TierEntry]:
-        """Entries of the directory at `path`, name-sorted, excluding markers and '.sosfs'."""
+        """Entries of the directory at `path`, name-sorted, excluding markers and '.terrace'."""
         pure, key = self._split(path)
         prefix = '' if pure == ROOT else key + '/'
         if pure != ROOT:
@@ -270,7 +270,7 @@ class S3Tier:
             obstore.put(self.store, f'{key_new}/{KEEP}', b'')
 
     def usage(self) -> TierUsage:
-        """Sum object sizes and counts across the prefix, excluding markers and '.sosfs' internals."""
+        """Sum object sizes and counts across the prefix, excluding markers and '.terrace' internals."""
         total, count = 0, 0
         for chunk in obstore.list(self.store):
             for obj in chunk:
@@ -281,10 +281,10 @@ class S3Tier:
                 count += 1
         return TierUsage(bytes=total, files=count)
 
-    # -- managed-location marker (privileged small-object I/O; bypasses the '.sosfs' guard) ----------------------
+    # -- managed-location marker (privileged small-object I/O; bypasses the '.terrace' guard) --------------------
 
     def read_marker(self) -> Optional[Marker]:
-        """Read the '.sosfs/marker' object; None when missing, `MarkerError` when corrupt."""
+        """Read the '.terrace/marker' object; None when missing, `MarkerError` when corrupt."""
         try:
             text = bytes(obstore.get(self.store, MARKER_KEY).bytes()).decode()
         except (FileNotFoundError, NotFoundError):
@@ -292,6 +292,6 @@ class S3Tier:
         return Marker.load(text)
 
     def write_marker(self, marker: Marker) -> None:
-        """Write the '.sosfs/marker' object (reusing the shared TOML serialization)."""
+        """Write the '.terrace/marker' object (reusing the shared TOML serialization)."""
         obstore.put(self.store, MARKER_KEY, marker.dump().encode())
         log.trace(f'Marker written (tier={marker.tier}, generation={marker.generation}, bucket={self.store})')

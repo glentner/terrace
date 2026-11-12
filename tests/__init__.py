@@ -19,7 +19,7 @@ __all__ = ['main', 'main_lines', 'assert_output']
 
 def main(argv: List[str], env: Optional[Dict[str, str]] = None, timeout: float = 30) -> Tuple[int, str, str]:
     """Run the Terrace CLI in a subprocess; returns (returncode, stdout, stderr)."""
-    base_env = {name: value for name, value in os.environ.items() if not name.startswith('SOSFS_')}
+    base_env = {name: value for name, value in os.environ.items() if not name.startswith('TERRACE_')}
     result = subprocess.run([sys.executable, '-m', 'terrace', *argv],
                             env={**base_env, **(env or {})},
                             capture_output=True, text=True, timeout=timeout)

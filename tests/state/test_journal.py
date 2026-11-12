@@ -176,7 +176,7 @@ def test_pending_scope_and_order(site) -> None:
 
 def test_temp_name_convention() -> None:
     """Temp names are tier-relative, unique per intent, and recognizable."""
-    assert temp_name(3, '/data/x.bin') == '.sosfs/partial/3-x.bin'
-    assert is_temp_name('.sosfs/partial/3-x.bin')
+    assert temp_name(3, '/data/x.bin') == '.terrace/partial/3-x.bin'
+    assert is_temp_name('.terrace/partial/3-x.bin')
     assert not is_temp_name('data/x.bin')
-    assert not is_temp_name('.sosfs/marker')
+    assert not is_temp_name('.terrace/marker')

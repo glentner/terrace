@@ -38,9 +38,9 @@ class PosixTier:
     `resolve` and `open_direct` so the engine can hand out passthrough file handles
     for hot I/O on resident copies (reads and writes on an already-resident file do
     not funnel through `read`/`put`). `put` is atomic: content lands in a temp under
-    '.sosfs/partial' (the journal's recognizable convention), is fsynced, and renames
+    '.terrace/partial' (the journal's recognizable convention), is fsynced, and renames
     into place — a crash never leaves a partial file at the final path, only an
-    orphan temp the audit discards. Managed internals ('.sosfs' at the root) read as
+    orphan temp the audit discards. Managed internals ('.terrace' at the root) read as
     absent and refuse mutation; special files (devices, sockets, fifos) read as
     absent (out of scope for v1).
     """
@@ -60,7 +60,7 @@ class PosixTier:
 
     @staticmethod
     def _internal(pure: PurePosixPath) -> bool:
-        """Whether `pure` is the managed '.sosfs' directory at the tier root (or within it)."""
+        """Whether `pure` is the managed '.terrace' directory at the tier root (or within it)."""
         return pure.parts[1:2] == (MARKER_DIR, )
 
     def resolve(self, path: PurePosixPath | str) -> Path:

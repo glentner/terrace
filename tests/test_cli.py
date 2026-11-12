@@ -63,8 +63,8 @@ def test_unknown_command() -> None:
 
 
 def test_temp_site_isolation(temp_site) -> None:
-    """The temp_site fixture scrubs SOSFS_* and redirects XDG paths."""
+    """The temp_site fixture scrubs TERRACE_* and redirects XDG paths."""
     import os
-    assert not [name for name in os.environ if name.startswith('SOSFS_')]
+    assert not [name for name in os.environ if name.startswith('TERRACE_')]
     assert os.environ['XDG_CONFIG_HOME'].startswith(str(temp_site))
     assert os.environ['XDG_STATE_HOME'].startswith(str(temp_site))

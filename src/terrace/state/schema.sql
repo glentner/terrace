@@ -38,7 +38,7 @@ CREATE TABLE tier (
     type       TEXT    NOT NULL,                 -- posix | s3 | zip | tar | tar.gz
     role       TEXT    NOT NULL DEFAULT 'stage' CHECK (role IN ('source', 'stage')),
     scope      TEXT    NOT NULL DEFAULT 'shared' CHECK (scope IN ('shared', 'node')),
-    generation INTEGER NOT NULL DEFAULT 0,       -- must match the on-disk .sosfs marker
+    generation INTEGER NOT NULL DEFAULT 0,       -- must match the on-disk .terrace marker
     meta       TEXT                              -- JSON adapter state (e.g., archive file identity)
 ) WITHOUT ROWID;
 

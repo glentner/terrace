@@ -332,7 +332,7 @@ class OverlayEngine:
     def residencies(self, path: str) -> List[Residency]:
         """
         Every tier holding a copy of `path`, source-first — the read behind the
-        FUSE observability xattrs (`user.sosfs.tiers`, `user.sosfs.dirty`).
+        FUSE observability xattrs (`user.terrace.tiers`, `user.terrace.dirty`).
         """
         entry = self.getattr(path)
         return self.catalog.residencies(entry.path)

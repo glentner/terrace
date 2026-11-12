@@ -97,7 +97,7 @@ def load_file(filepath: str) -> Namespace:
 
 def reload_env() -> Environ:
     """Force reloading environment variables and expanding hierarchy as namespace."""
-    return Environ(prefix='SOSFS').expand()
+    return Environ(prefix='TERRACE').expand()
 
 
 @functools.lru_cache(maxsize=None)
@@ -142,7 +142,7 @@ def blame(base: Configuration, *varpath: str) -> Optional[str]:
     if source in ('system', 'user', 'local'):
         return f'from: {path.get(source).config}'
     elif source == 'env':
-        return 'from: SOSFS_' + '_'.join([node.upper() for node in varpath])
+        return 'from: TERRACE_' + '_'.join([node.upper() for node in varpath])
     else:
         return f'from: <{source}>'
 
@@ -196,7 +196,7 @@ def reload_local(filepath: Optional[str] = None) -> Configuration:
 
 
 try:
-    if (local_config := os.getenv('SOSFS_CONFIG_FILE', None)) is not None:
+    if (local_config := os.getenv('TERRACE_CONFIG_FILE', None)) is not None:
         path.local.config = local_config  # Modified as to not lie to the user
         config = reload_local(local_config)
     else:

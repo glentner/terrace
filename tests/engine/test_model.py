@@ -40,10 +40,10 @@ ADVANCE = st.sampled_from([0, 1, 30, 59, 60, 61, 90, 120])
 
 
 def snapshot(root: Path) -> Dict[str, object]:
-    """{relative-posix-path: bytes | 'DIR'} for a tree, blind to '.sosfs'."""
+    """{relative-posix-path: bytes | 'DIR'} for a tree, blind to '.terrace'."""
     state: Dict[str, object] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(name for name in dirnames if name != '.sosfs')
+        dirnames[:] = sorted(name for name in dirnames if name != '.terrace')
         relative = os.path.relpath(dirpath, root)
         prefix = '' if relative == '.' else relative + '/'
         for name in dirnames:

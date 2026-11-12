@@ -160,11 +160,11 @@ def test_double_rename_then_unlink_removes_source_copy(engine: OverlayEngine) ->
 # -- convergence helpers --------------------------------------------------------------------------------------
 
 def tree(root: Path) -> dict:
-    """{relative path: bytes | 'DIR'} for a tier root, blind to '.sosfs'."""
+    """{relative path: bytes | 'DIR'} for a tier root, blind to '.terrace'."""
     found = {}
     for item in sorted(root.rglob('*')):
         relative = item.relative_to(root).as_posix()
-        if relative.split('/')[0] == '.sosfs':
+        if relative.split('/')[0] == '.terrace':
             continue
         found[relative] = 'DIR' if item.is_dir() else item.read_bytes()
     return found
