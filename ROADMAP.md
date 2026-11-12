@@ -426,6 +426,18 @@ that has been unlinked raises `LookupError` out of `mark_dirty`. The second is t
 maps neither, so it reaches libfuse as an unhandled exception. The existing test covers only the read
 case.
 
+### An empty or relative `XDG_*_HOME` is used as written
+
+**Seed:** [`issues/xdg-empty-and-relative-values.md`](issues/xdg-empty-and-relative-values.md) · `fix` · appetite small
+
+`core/platform.py` takes `XDG_CONFIG_HOME` and `XDG_STATE_HOME` as written whenever they are set. The
+XDG Base Directory specification treats an empty value as unset and ignores a relative one. Measured:
+with both empty, the per-user configuration file becomes `terrace/config.toml` relative to the working
+directory and an import creates `./terrace/log` there, with no error. A login script that clears a
+variable by assigning the empty string is enough to meet it. The rename to Terrace changed names only
+and left this as it was. The throwaway environment and the `temp_site` fixture always set both
+variables to absolute paths, so no test sees either case.
+
 ### A read-only mount
 
 **Seed:** [`issues/read-only-mount.md`](issues/read-only-mount.md) · `feature` · appetite small
