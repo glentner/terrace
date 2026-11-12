@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:rename-to-terrace
 kind: refactor
 appetite: big
 lane: public
