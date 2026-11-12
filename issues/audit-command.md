@@ -205,11 +205,10 @@ Draft R-IDs, to be firmed up at promotion.
   smallest slice of the walk (markers, intents, a size check, counters) and needs no loss report, because
   a read-only overlay has nothing to lose. Shaping should consider building that slice first and the
   reconcile, quarantine, loss report and exit codes on top of it.
-- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): if
-  the durable tier describes itself ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R3), the
-  audit of that tier is a rescan of its files, and losing a mount's database loses an index. What is left
-  for the walk specified here is the node-local tiers, which a killed job has usually lost with its node.
-  Shape this after that decision; it may be much smaller.
+- 2026-11-11 (the maintainer's ruling): everything lives in the one database, which stays the authority
+  for every tier. The walk specified here stands. Its most common caller is now known: a mount on another
+  node after a soft unmount, which today is refused
+  ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)).
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the state-store
   invariants topic (the intent journal has no consumer) and the remaining-work topic (dossier 4).
 - *Added 2026-11-06 by `deferred-rename-source-orphan` (review cycle 1):* **catalog and residency

@@ -25,12 +25,11 @@ maintainer's statement of the same date about what the project is for. Between a
 every engine cycle worked on one mechanism, deferred namespace replay against a POSIX source, and no
 entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
 bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
-delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation.
-The first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
-developer machine against a local object store. The lifecycle around the loop and the mount a
-researcher uses follow. Mounting one spec on many nodes is not in the first release; the first
-release is designed so that it can be added. The order is a proposal until the decisions in the next
-section are ruled.
+delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation. The
+first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
+developer machine against a local object store. The lifecycle around the loop and the mount a researcher
+uses follow. Sharing the staged bundles between read-only mounts may come early; many writers on one
+overlay are for a later day. The order is a proposal until the decisions in the next section are ruled.
 
 Unremediated security findings are indexed separately in `.security/ROADMAP.md`, which is gitignored.
 See [`AGENTS.md`](AGENTS.md) for why.
@@ -48,12 +47,6 @@ down.
   finish the write-back transaction machinery first; or drive a thin slice of the whole bundle loop
   locally and harden outward from it. The sections below are the third, and the maintainer agreed
   the direction on 2026-11-11.
-- **Where the database lives.** Ruled on 2026-11-11: the database tracks every copy and negotiates
-  every move between tiers. Open: whether it sits on the durable tier itself, or on node-local
-  storage while mounted and is written to the durable tier at a soft unmount, with that tier's own
-  files enough to rebuild it. A halted job's recovery, a commit from a login node and a later
-  multi-node mode all turn on it, and SQLite's documentation rules its journal mode out on a network
-  filesystem. It is the largest decision here.
 - **How a source catches up.** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)
   lists the choices. For a bundle source one is forced: mark the bundle dirty and rebuild it from
   state. Adopting the seed holds four others and folds two parked cycles into it; declining it
@@ -63,10 +56,11 @@ down.
 - **The two parked cycles.** `rename-over-tombstoned-child` and `model-commit-route-reach` sit on
   pushed branches with open worktrees. Resume them as planned, or fold them into the rebuild as its
   acceptance tests.
-- **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an
-  unmount helper, and how a Python 3.15 runtime arrives. It does not gate the first section. It is
+- **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an unmount
+  helper, how a Python 3.15 runtime arrives, and whether SQLite's locks and journal mode are sound on the
+  home filesystem, where the one database is ruled to live. It does not gate the first section. It is
   minutes of checking, and it decides what the third section is
-  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1 and 2).
+  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
 
 ## Queued: the bundle loop, driven locally
 
@@ -119,15 +113,14 @@ section turns those stages green in order.
 
 **Seed:** [`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md) · `docs` · appetite big
 
-`PLAN.md` and the invariants describe a different product from the one in the user story, and every
-cycle is graded against them: eviction that commits to the source, a state database that is the
-authority for every tier, changes replayed against the source one operation at a time, sharding and
-SFTP after the release, and many mounts as the first non-goal. This cycle writes the contract the
-later ones build to: the tier model, the durable tier and what is authoritative for it, how a bundle
-is rebuilt, what a signal and a commit do, stable ids, and what a multi-node mode will need left
-alone. It writes no engine code. Two throwaway prototypes on the local loop's helper keep its
-decisions from being made by reading. Before any engine cycle, because a builder working toward the
-story today is working against its own contract.
+`PLAN.md` and the invariants describe a different product from the one in the user story, and every cycle
+is graded against them: eviction that commits to the source, changes replayed against the source one
+operation at a time, a soft unmount that leaves the next node unable to mount, and sharding and SFTP
+after the release. This cycle writes the contract the later ones build to: the tier model, what the
+durable tier holds, the one database and where it lives, how a bundle is rebuilt, what a soft unmount and
+a commit do, stable ids, and what sharing a staged tier between mounts needs. It writes no engine code.
+Two throwaway prototypes on the local loop's helper keep its decisions from being made by reading. Before
+any engine cycle, because a builder working toward the story today is working against its own contract.
 
 ### Reconcile `PLAN.md` against the implementation
 
@@ -259,11 +252,9 @@ other calls must not wait, and a local server for tests. Split out of the extend
 
 ## Queued: the lifecycle around the loop
 
-Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop
-at once and finalize its source later. The engine half exists and the recovery half does not. How
-much of this section is left to build depends on the durable-tier decision above: a tier that
-describes itself is recovered by reading it. This section can run beside the next one; which leads
-is a decision for when the loop closes.
+Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop at
+once and finalize its source later. The engine half exists and the recovery half does not. This section
+can run beside the next one; which leads is a decision for when the loop closes.
 
 ### The write-back scheduler dies on a source-only stack
 
@@ -448,7 +439,19 @@ stage copies, with nothing to report lost. That recovery is the read-only slice 
 is on the deployment path regardless: a batch job that reaches its time limit is killed, and today
 the next mount of the same overlay raises `CrashDetected`. The seed also states the question the
 one-mount-per-overlay rule leaves open for this workload, where a multi-node job mounts on every node
-and a sweep runs many jobs over one dataset; `issues/multi-node-mounts.md` takes that up.
+and a sweep runs many jobs over one dataset; the next entry takes that up.
+
+### Share the staged bundles between read-only mounts
+
+**Seed:** [`issues/shared-staged-tier.md`](issues/shared-staged-tier.md) · `feature` · appetite big
+
+The maintainer's suggestion of 2026-11-11 for the time being: the top durable tier shared read-only
+between mounts, each with tiers of its own below. A multi-node job and a sweep then pull and decompress
+each bundle once, where today every mount stages a copy of its own. It is tractable because a staged
+bundle is a function of its source alone, so overlapping pulls are harmless and a lock only saves work;
+one left by a killed mount can lapse. What forbids it today is the marker that ties a tier to one
+overlay, a member index kept in each overlay's own database, and limits and eviction that assume one
+owner. Requires a read-only mount, which is why it follows one.
 
 ### Opening a resident file costs three database writes
 
@@ -506,20 +509,18 @@ bundle loop alone is a question for the maintainer once that section closes.
 
 ## Queued: after the first release
 
-Wanted, and deliberately not in the first tag. The first is designed for from the start.
+Wanted, and not in the first tag.
 
-### Mount one overlay on many nodes at once
+### Many writers on one overlay
 
 **Seed:** [`issues/multi-node-mounts.md`](issues/multi-node-mounts.md) · `feature` · appetite big
 
-Not a goal for the first release, and asked for in user consultations more than once: the same spec
-mounted on many nodes, each with node-local speed in its own fast tiers, negotiating at the durable
-tier with directory locks, consistent eventually. High-throughput workloads are the case it changes
-most. The tree forbids it at every level, and SQLite cannot be the shared piece. The seed is filed
-now for the five choices the first release makes anyway that decide whether this is a feature later
-or a rewrite; they are settled in the plan cycle that leads the roadmap. It builds in steps: many
-readers of one staged dataset, then writers on bundles of their own, then, if ever wanted, writers
-within one bundle.
+Asked for in user consultations more than once, and named by the maintainer as the change that would
+matter most for high-throughput work: the same spec mounted on many nodes, each writing, the nodes
+negotiating at the durable tier with directory locks. Set aside by his ruling of 2026-11-11. Everything
+lives in one database, one database has one writer, and "full multi-node writers is a challenge for
+another day". The seed keeps the statement, the reason it is deferred, and what a first scoping pass
+should decide. The reading half is not deferred; it is the shared staged tier in the section above.
 
 ### Extended archive sources
 

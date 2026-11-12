@@ -23,7 +23,7 @@ against its own contract.
 |---|---|
 | Pressure or delay moves a copy one tier up, and no further | Eviction commits a dirty copy to the source (§ 7), and drops a clean one |
 | The bundles and altered files on scratch are the durable set; a halted job recovers from them | The state database is the authority for every tier; a killed mount needs an audit that does not exist |
-| A commit from a login node rebuilds what changed | The state directory must be on shared storage for that, and SQLite's documentation rules its journal mode out there |
+| A commit from a login node rebuilds what changed | Agrees, with the state directory on storage both hosts see; SQLite's journal mode on that filesystem is unverified |
 | A bundle is repacked on its own delay, under quota pressure, or at a commit | The adapter re-packs on every call; the working copy sits outside every tier and every quota |
 | A change inside a bundle | Queued and replayed against the source one operation at a time (§ 5) |
 | One bundle or ten thousand, on an object store or on tape over SFTP | Sharding and SFTP are both scheduled after v0.1.0 |
@@ -42,7 +42,7 @@ already requires it: a design that moves is reconciled in `PLAN.md` first, with 
 
 `PLAN.md` opens with the user story and every section under it can be traced to a sentence of it. A
 builder knows what each tier holds, what moves a copy and how far, what the durable tier's files are,
-what a rebuild reads, what a signal does, and what a later multi-node mode will need left alone. A
+what a rebuild reads, what a signal does, and what sharing a staged tier between mounts needs. A
 reviewer grades against that, and knows which invariants are scheduled to change and by which cycle.
 
 ## Sketch of the acceptance criteria
@@ -54,11 +54,12 @@ alternative turned down.
 - **R2** — **The tier model.** Every stage tier has a size limit, a count limit and a delay. Pressure and
   delay each move a copy one tier up and no further. A clean copy under pressure is kept one tier up when
   that tier has room (ruled 2026-11-11, [`issues/eviction-one-hop.md`](eviction-one-hop.md)).
-- **R3** — **The durable tier and the database.** The maintainer's word of 2026-11-11: the database
-  tracks every copy, knows where the fastest one is, and negotiates every move between tiers. That
-  settles what decides while a mount is live. This criterion settles the rest: what the durable tier
-  holds (staged bundles, their indexes, altered files, the record of removals); where the database itself
-  lives; what a process on another host reads when the mount is gone; which steps change the durable tier
+- **R3** — **The database and the durable tier.** Ruled by the maintainer on 2026-11-11: everything lives
+  in the one database. It tracks every copy, knows where the fastest one is, and negotiates every move
+  between tiers. It sits in the overlay's state directory, on durable storage every host of the workflow
+  sees and outside every tier; on the maintainer's clusters that is the home filesystem. This criterion
+  records the rest: what the durable tier holds (staged bundles, altered files); the journal mode and the
+  locks the database uses on a network filesystem, verified on one; which steps change the durable tier
   and why each is atomic; and what its limits count.
 - **R4** — **How a source catches up.** A bundle is rebuilt from the durable tier: unchanged members from
   the staged bundle, changed ones from the files beside it, removed ones left out. Its triggers are its
@@ -71,15 +72,17 @@ alternative turned down.
   mount does after a kill.
 - **R6** — **Identity and local state.** Row ids that are never reused, as a schema bump taken before
   anything is deployed. What a mount's database holds once the durable tier describes itself.
-- **R7** — **Many nodes.** Designed for and not built: the five choices in
-  [`issues/multi-node-mounts.md`](multi-node-mounts.md), and the non-goals rewritten to match.
+- **R7** — **Sharing.** A top durable tier shared read-only between mounts, each with tiers of its own
+  below ([`issues/shared-staged-tier.md`](shared-staged-tier.md)): what it needs from the marker, the
+  member index and the pull. Many writers on one overlay are not designed for here and are scoped when
+  reached ([`issues/multi-node-mounts.md`](multi-node-mounts.md)); the non-goals SHALL say both.
 - **R8** — **What the tree does not yet do.** Each decision the code contradicts SHALL be listed with the
   seed that owns the change, and `AGENTS.md` § *Known open violations* SHALL gain a row for each
   invariant a decision overturns, so a review of a later cycle grades against the new rule.
 - **R9** — **Two prototypes** on the local loop's helper, measured against a plain-directory oracle and
   thrown away afterwards: a rebuild of one bundle after members are changed, created, renamed and
-  removed, a directory rename among them; and two processes sharing one durable tier that pull one bundle
-  once.
+  removed, a directory rename among them; and two read-only mounts sharing one durable tier that pull one
+  bundle once.
 
 ## Notes
 
@@ -96,14 +99,14 @@ alternative turned down.
   re-aggregation into compressed bundles on a remote source, many bundles, and the batch lifecycle.
 - This cycle absorbs most of [`issues/plan-md-reconciliation.md`](plan-md-reconciliation.md)'s
   residue; what it leaves is that seed's.
-- **Where the database lives is the open half of R3.** Two shapes fit the maintainer's words. The
-  database on the durable tier itself: one file every later process can open, on a filesystem where
-  SQLite's documentation says its journal mode does not work and where the locks it needs are not
-  always enabled, and with every change of state paid at shared-filesystem latency. Or the database
-  on node-local storage while mounted, written to the durable tier at a soft unmount and at
-  intervals, with the durable tier's own files enough to rebuild it after a kill. The second keeps
-  SQLite where it is supported, keeps the hot path local, and gives each node of a later multi-node
-  mode a database of its own.
+- **The alternative turned down for R3.** A database on node-local storage while mounted, written to the
+  durable tier at a soft unmount, with that tier's files enough to rebuild it. It was proposed for three
+  reasons: SQLite's documentation says its WAL mode does not work over a network filesystem, every change
+  of state would be paid at local latency, and a later many-writers mode would want a database per node.
+  The maintainer chose one database, and accepted that many writers do not work with it. What the choice
+  leaves to check, on the filesystem that will hold the state directory: that SQLite's locks work there,
+  and which journal mode is sound; the documentation's objection to WAL is to several hosts at once, and
+  this workflow has one at a time.
 - It writes no engine code. R9's prototypes exist to stop a decision being made by reading, which is
   how the last seven cycles were steered.
 - Sources: Linux kernel documentation, *Overlay Filesystem*,

@@ -51,8 +51,10 @@ reading the result from the bucket.
   the fastest one is;
 - a soft unmount, asked for directly or by a signal, ends with the database recording every modified
   file on the first durable tier and nothing on any tier below it;
-- mounting one spec on many nodes at once is wanted and is not a goal for the first release
-  ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
+- everything lives in the one database, in a state directory on durable storage every host sees; on his
+  clusters, the home filesystem. Many writers on one overlay do not work with that and are for another
+  day ([`issues/multi-node-mounts.md`](multi-node-mounts.md)). A top durable tier shared read-only
+  between mounts may come first ([`issues/shared-staged-tier.md`](shared-staged-tier.md)).
 
 The scenario below is that story at the size of a laptop: an object store for the source, a
 directory for scratch, two more for the node-local tiers.
@@ -104,13 +106,12 @@ Draft R-IDs, to be firmed up at promotion.
 - **R2a** — THE scenario SHALL include a pressure stage: with the fastest tier's limits set below the
   bytes read, every read SHALL still succeed, each copy pushed out SHALL be found one tier up, and the
   stage SHALL make no write to the source.
-- **R2b** — THE scenario SHALL include a release stage: after changes in the fastest tier, the
-  engine is told to detach, and every change SHALL then be on the durable tier with the source
-  untouched, and no copy recorded on any node-scope tier. A second process, given the spec and the
-  durable tier and nothing of the first
-  process's node-local tiers, SHALL run the full commit; the bundle's object SHALL then match the
-  oracle, and the staged bundle SHALL still be on the durable tier, so a mount after it pulls
-  nothing.
+- **R2b** — THE scenario SHALL include a release stage: after changes in the fastest tier, the engine is
+  told to detach, and every change SHALL then be on the durable tier with the source untouched, and no
+  copy recorded on any node-scope tier. A second process, given the spec, the state directory and the
+  durable tier, and nothing of the first process's node-local tiers, SHALL run the full commit; the
+  bundle's object SHALL then match the oracle, and the staged bundle SHALL still be on the durable tier,
+  so a mount after it pulls nothing.
 - **R3** — Each stage of the scenario the tree cannot yet pass SHALL be a strict expected failure
   that names the seed owning it, so a stage that starts passing fails the run until its marker is
   removed.

@@ -71,8 +71,7 @@ Draft R-IDs, to be firmed up at promotion.
 - **R5** — WHEN an overlay holds dirty state from an earlier read-write mount, a read-only mount SHALL
   refuse with a message naming `commit`.
 - **R6** — `PLAN.md` SHALL record whether read-only mounts of one dataset may share a staged tier, and
-  if so what owns the staging. [`issues/multi-node-mounts.md`](multi-node-mounts.md) takes this up:
-  shared reading is its first step and needs no conflict rule.
+  if so what owns the staging. [`issues/shared-staged-tier.md`](shared-staged-tier.md) takes this up.
 
 ## Notes
 

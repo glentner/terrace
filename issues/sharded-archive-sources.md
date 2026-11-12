@@ -170,7 +170,7 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   ([`issues/eviction-one-hop.md`](eviction-one-hop.md)): a clean one is dropped, since the source holds
   it; one with altered files beside it is rebuilt and pushed first. Pulling and decompressing a bundle is
   work that must happen once, which is where a second mount first meets the first
-  ([`issues/multi-node-mounts.md`](multi-node-mounts.md)).
+  ([`issues/shared-staged-tier.md`](shared-staged-tier.md)).
 - 2026-11-11 (the maintainer, on reading from a staged bundle): reading a member back from its staged
   bundle should be cheap, in his words because "we would already have a complete mapping of the inside of
   the bundle (maybe with a pool of open handles to recent bundles so as to not negotiate a new open too

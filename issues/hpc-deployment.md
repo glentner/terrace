@@ -131,9 +131,11 @@ or a faithful stand-in; none is checkable in CI as it stands.
      next mount raises. Recovery at mount is a prerequisite for a second job on the same overlay
      ([`issues/audit-command.md`](audit-command.md)).
 - 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
-  three updates. Question 6 above goes away if the durable tier describes itself and the state database
-  stays node-local ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R3, R6). Question 7 has a
-  seed of its own ([`issues/multi-node-mounts.md`](multi-node-mounts.md)). And for question 4, the job
+  three updates. Question 6 above is now the first to check. Ruled the same day: everything lives in one
+  database, in a state directory on the home filesystem. Verify there that SQLite's locks work, and
+  choose the journal mode: its documentation says WAL does not work over a network filesystem, an
+  objection aimed at several hosts at once where this workflow has one at a time. Question 7 has a seed
+  of its own ([`issues/shared-staged-tier.md`](shared-staged-tier.md)). And for question 4, the job
   script should ask the scheduler for a signal ahead of the limit and forward it to the mount, instead of
   relying on the grace after the terminating signal
   ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)).

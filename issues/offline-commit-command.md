@@ -175,10 +175,9 @@ Draft R-IDs, to be firmed up at promotion.
 - 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
   three things the story fixes for this command. It is run from a login node after the job's node is
   released. It rebuilds the bundles that changed and no others. And it leaves the staged bundles on the
-  durable tier, so the next mount pulls nothing. A fourth follows if the durable tier describes itself
-  ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R3): the command needs the spec and that
-  tier, and not the mount's state database, which removes "the state directory must be on shared storage"
-  from the cross-host story above.
+  durable tier, so the next mount pulls nothing. The command reads the one database (ruled 2026-11-11),
+  so the state directory has to be on storage the login node sees, which the cross-host story above
+  already requires; on the maintainer's clusters that is the home filesystem.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work topic (dossier 5) for the command surface, and the state-invariants topic for the
   offline construction constraint and the checksum gap.

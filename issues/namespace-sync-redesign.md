@@ -140,14 +140,11 @@ before any code, under the plan-drift rule.
      rename takes alone; or stage copies addressed by entry id, so a rename moves no stage object.
      The second gives up stage trees a person can read by name, which matters when a state database is
      lost.
-  5. **The database and the durable tier.** The maintainer's word of 2026-11-11: the database tracks
-     every copy and negotiates every move, which settles what decides while a mount is live. Open:
-     where the database lives, and what a process on another host reads once the mount is gone. The
-     database on the durable tier; or local while mounted and written there at a soft unmount, with
-     the staged bundle, its index, the altered files and the record of removals kept as files a
-     reader can rebuild it from. The second is what a commit on a host that never saw the mount, a
-     recovery after a kill and a later mount on a second node
-     ([`issues/multi-node-mounts.md`](multi-node-mounts.md)) all need.
+  5. **The database and the durable tier.** Ruled by the maintainer on 2026-11-11: everything lives in
+     the one database, in a state directory on durable storage every host of the workflow sees. It is the
+     authority for every tier, and a soft unmount records in it that every modified file is on the first
+     durable tier and nothing is below. A rebuild of a bundle therefore reads the database for what the
+     bundle should hold, and the durable tier for the bytes.
 - **R2** — WHEN an entry is purged, its id SHALL never name another entry in the same state database.
 - **R3** — WHEN a removed or moved-away entry's former name is taken by a create, a mkdir or a rename
   at any depth, the call SHALL succeed as it does on a plain directory. The reproduction above SHALL
