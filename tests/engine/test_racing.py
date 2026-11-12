@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, List
+from typing import Callable, Dict, List
 
 # Standard libs
 import errno
@@ -684,5 +684,81 @@ def test_failed_copy_leaves_no_record(tmp_path: Path, clock: Clock, monkeypatch)
         commit_row(engine)
         assert engine.catalog.get_residency(PATH, HOLDER).state == 'clean'
         engine.release(handle)
+    finally:
+        engine.stop()
+
+
+def test_writer_that_never_pauses_lets_commit_upstream_return(tmp_path: Path, clock: Clock, monkeypatch) -> None:
+    """
+    A handle that writes again inside every hop, from a fresh thread, after the hop's last look at the holder and
+    before the hop takes its record. The first hop meets the write and resets the handle's flag, so the second
+    write marks and waits on the path lock the commit holds: the second hop meets nothing, and the commit returns
+    after exactly two copies. The write the commit did not carry stays queued and reaches the source.
+    """
+    rounds = 6                                              # a commit that admits every offered write copies 7 times
+    engine = make_engine(tmp_path, clock)
+    try:
+        handle = dirty(engine, b'AAAA')
+        real_copy, real_stat, real_hold = engine.transfers.copy, engine.tiers[HOLDER].stat, engine.locks.hold
+        copies: List[str] = []
+        outcomes: List[str] = []
+        waiting: Dict[int, threading.Event] = {}            # writer thread -> set when it asks for the path lock
+        writers: List[threading.Thread] = []
+        errors: List[BaseException] = []
+        armed = [True]
+
+        def copy(path, source, dest, **kwargs):
+            result = real_copy(path, source, dest, **kwargs)
+            copies.append(dest.name)
+            return result
+
+        def hold(*paths):
+            if threading.get_ident() in waiting:
+                waiting[threading.get_ident()].set()
+            return real_hold(*paths)
+
+        def place(number: int) -> str:
+            """One whole write from a fresh thread: it returns, or it asks for the path lock this thread holds."""
+            settled, returned = threading.Event(), threading.Event()
+
+            def run() -> None:
+                waiting[threading.get_ident()] = settled
+                try:
+                    engine.write(handle, bytes([65 + number]) * 4, 0)
+                except BaseException as error:              # surfaced on the test thread below
+                    errors.append(error)
+                finally:
+                    returned.set()
+                    settled.set()
+
+            thread = threading.Thread(target=run)
+            writers.append(thread)
+            thread.start()
+            assert settled.wait(WAIT)
+            return 'admitted' if returned.is_set() else 'waits on the path lock'
+
+        def stat(path):
+            result = real_stat(path)
+            if armed[0] and str(path) == PATH and len(copies) > len(outcomes) and len(outcomes) < rounds:
+                outcomes.append(place(len(outcomes) + 1))   # the hop's last look, before its record
+            return result
+
+        monkeypatch.setattr(engine.transfers, 'copy', copy)
+        monkeypatch.setattr(engine.tiers[HOLDER], 'stat', stat)
+        monkeypatch.setattr(engine.locks, 'hold', hold)
+        try:
+            commit_upstream(engine)
+        finally:
+            armed[0] = False
+            for thread in writers:
+                thread.join(WAIT)
+        assert not any(thread.is_alive() for thread in writers) and errors == []
+        assert outcomes == ['admitted', 'waits on the path lock']
+        assert copies == [UPSTREAM, UPSTREAM]
+        assert stored(tmp_path, UPSTREAM) == b'BBBB'
+        assert stored(tmp_path, HOLDER) == b'CCCC'
+        assert_truthful(engine, tmp_path)
+        engine.release(handle)
+        assert_reaches_source(engine, tmp_path, b'CCCC')
     finally:
         engine.stop()

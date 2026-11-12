@@ -1,4 +1,4 @@
-tree: the commit that carries this file (its parent is 4b4b7ec60e3a19a763f155b7c29027c9f23bf65a)
+tree: the commit that carries this file (its parent is fbec95fcae0f7657e5010e2e9107f9fd1503955e)
 command: tools/lint.sh && uv run pytest -n auto -m unit
 
 PASSED test_write_held_past_the_commit_reaches_the_source[commit_row]
@@ -32,7 +32,8 @@ PASSED test_write_held_before_admission_across_a_whole_commit
 PASSED test_hop_whose_copy_opens_no_record_stays_dirty
 PASSED test_first_write_is_admitted_under_the_path_lock
 PASSED test_failed_copy_leaves_no_record
+PASSED test_writer_that_never_pauses_lets_commit_upstream_return
 PASSED test_mid_copy_write_rearms_instead_of_settling
 PASSED test_open_handle_requeues_after_background_commit
 
-unit suite: 762 passed, 0 failed, 0 errors (base: 731 passed)
+unit suite: 763 passed, 0 failed, 0 errors (base: 731 passed)

@@ -3,7 +3,7 @@ slug: racing-write-marked-clean
 title: A write racing a commit is never recorded clean
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/racing-write-marked-clean
 base: main
 current_phase: done
@@ -26,7 +26,7 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/verify/racing_gate.py base suite records ledger
+  verify: uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F2-frozen-gate.py base suite records ledger && uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F2-liveness-pin.py && uv run --no-project --python 3.15 python -I spec/racing-write-marked-clean/remediation/F1-agents-figures.py
 review:
   last_reviewed_commit: 99851a7d51ab48a06aef141deb423fb737a6a98b
   verdict: changes-requested
@@ -233,6 +233,53 @@ names. The gate finds the package directory itself (`src/*/engine/overlay.py`).
    is still unguarded and that the mutex's contention is not measured.
 4. *The fail-once mutation* ran `suite` alone, as the checklist says; `records` and `ledger` were
    not mutated.
+
+**Remediation, review cycle 1 (build, 2026-11-12).** `REVIEW.md` requested changes on `99851a7`: F1
+(HIGH) and F2 (LOW, in `_commit_hop`). P1 is reopened, and its `verify:` is retuned to run the frozen
+gate under a wrapper, then the two class checkers, the F1 checker last. No engine change.
+
+- [x] **F1, the class: every measured figure `AGENTS.md` carries equals what the tree measures.**
+      Re-measured every count this cycle's diff can move, after F2's test landed: 763 `unit`, 10
+      `integration`, 773 in all, 425 in `tests/engine`, 43 `.py` files under `tests/`, 76 under `src/`
+      and `tests/`. Corrected § *Commands* (762), § *Repository map* (772 and 762), § *Architecture*
+      (393, the review's instance), § *Conventions*' integration gate (762 deselected), § *Verification*
+      (762) and § *Code style* (75, the review's instance); the integration figures and the file count
+      under `tests/` held. Checker: `remediation/F1-agents-figures.py` reads the 12 figures in their 8
+      sentences, the number word "ten" included, requires each sentence once, and compares each with
+      pytest's collection and the file walk `tools/lint.sh` uses. It went red on two planted stale
+      figures. The timings are approximate and not checked; the gate run below measured the
+      parallel unit run at 30.54 s against the stated ~30 s.
+- [x] **F2, the pin: the flag reset after a hop is pinned on both sides.** Liveness:
+      `tests/engine/test_racing.py::test_writer_that_never_pauses_lets_commit_upstream_return` offers
+      a write from a fresh thread at each hop's last look at the holder, before the hop takes its
+      record, up to six; it asserts the first is admitted, the second asks for the path lock, the
+      commit returns after exactly two copies, the source holds the first write, and the second stays
+      queued and reaches the source. The schedule is injected (the holder's `stat`, the copy, and
+      `locks.hold` observed); there is no sleep and no ratio. Completeness, the other side: a write
+      that finds its flag reset marks under the path lock
+      (`test_write_held_before_admission_across_a_whole_commit`,
+      `test_first_write_is_admitted_under_the_path_lock`), and a write admitted inside a hop is on its
+      record and leaves the copy dirty (`test_same_size_write_behind_an_unchanged_stat_reaches_the_source`,
+      `test_second_handles_first_write_inside_the_hop`,
+      `test_write_admitted_inside_the_hop_and_still_in_flight_at_its_end`); the new test also asserts
+      the copy is truthful. Checker: `remediation/F2-liveness-pin.py` runs the six tests on the tree,
+      then plants the review's surviving mutant (the reset written `bool(met)`) in a copy of `src/`
+      under `.local/` and requires the new test to fail on its outcome assertion while the other five
+      pass.
+
+5. *The frozen gate under a wrapper.* `verify/racing_gate.py` requires `test_racing.py` to hold
+   exactly the tests it names, on the base and on the tree, so F2's test makes it red: run unchanged,
+   its `suite` mode stopped on "the new module holds the tests this gate names, and no other" (seen
+   red before the wrapper was written). `remediation/F2-frozen-gate.py` loads the gate from its path,
+   adds the new test to `MECHANISM` (a test of the record's reset, which the base lacks: not run there,
+   required to pass here) and calls its `main`. The gate's file is not edited.
+6. *The mutant sweep.* The module-wide sweep the review routed for F2 is not run in this cycle, by the
+   foreman's ruling: the plan planted 15 mutants and the review ran a 612-case injection matrix and 12
+   mutants, and the one survivor is now killed. The sweep is filed as a dated note on
+   `issues/freethreaded-concurrency-stress.md`, which `ROADMAP.md` lists.
+7. *Teeth.* The F2 mutant was also planted in place, with a `cp` backup restored and checked by
+   `cmp -s`: the new test failed (six writes admitted, against one), and the module's other 31 tests
+   passed. The new test passed 200 runs in 20 concurrent processes beside a full `-n auto` unit run.
 
 ---
 

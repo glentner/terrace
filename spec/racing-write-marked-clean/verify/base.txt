@@ -32,5 +32,6 @@ NOT RUN test_write_held_before_admission_across_a_whole_commit (a test of the re
 NOT RUN test_hop_whose_copy_opens_no_record_stays_dirty (a test of the record itself, which the base lacks)
 NOT RUN test_first_write_is_admitted_under_the_path_lock (a test of the record itself, which the base lacks)
 NOT RUN test_failed_copy_leaves_no_record (a test of the record itself, which the base lacks)
+NOT RUN test_writer_that_never_pauses_lets_commit_upstream_return (a test of the record itself, which the base lacks)
 
 base unit suite: 731 passed

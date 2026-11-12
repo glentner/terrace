@@ -59,7 +59,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 762 tests, ~60 s — must pass before every commit
+uv run pytest -m unit                            # 763 tests, ~60 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -100,7 +100,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 43 files, 772 tests (762 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 43 files, 773 tests (763 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -125,7 +125,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 393 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 425 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -738,7 +738,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 762 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 763 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -785,7 +785,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **762 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **763 unit tests in ~60 s serial, ~30 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
@@ -831,7 +831,7 @@ symbols, documented invariants, `PLAN.md` sections.
 
 Follows hypershell conventions (the author's house style):
 
-* `src/` layout; 120-character lines; SPDX headers on every module (all 75 `.py` files carry them;
+* `src/` layout; 120-character lines; SPDX headers on every module (all 76 `.py` files carry them;
   `lint.sh` keeps it that way).
 * Module template:
 

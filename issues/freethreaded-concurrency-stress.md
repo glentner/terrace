@@ -282,6 +282,15 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   unguarded. Every change through a handle now takes that engine-wide mutex twice, where a handle already
   marked dirty took no lock. Measure its contention under the stress suite on the free-threaded build
   before anything else is put behind it.
+- 2026-11-12 (`racing-write-marked-clean`, after its first review): a mutant sweep over every decision of
+  the hop record was not run in that cycle. Its domain: in `overlay.py`, `_commit_hop` and its
+  `before_read`, `_change`, `_meet`, `_mark_handle_dirty`, `write` and `truncate`; in `transfer.py`, the
+  `before_read` call in `TransferPool.copy`; each mutant under `commit_row` and `commit_upstream`, with
+  every equivalent mutant recorded and why. The cycle's plan planted 15 mutants and its review ran a
+  612-case injection matrix and 12 more mutants; the one survivor, the handles' flag reset to the hop's
+  record instead of unconditionally, is killed by
+  `tests/engine/test_racing.py::test_writer_that_never_pauses_lets_commit_upstream_return`. Run the sweep
+  beside this suite, on the free-threaded build as well as with the GIL.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the FUSE/CLI/
   layering review named the handle fields and the logging initializer, and the verification-substrate
   review measured that both CI jobs run the same command.
