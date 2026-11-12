@@ -114,8 +114,12 @@ class Tier(Protocol):
     def delete(self, path: PurePosixPath) -> None:
         """Remove the file at `path`."""
 
-    def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
-        """Create the directory at `path` with permission bits `mode`; the parent must already exist."""
+    def mkdir(self, path: PurePosixPath, mode: int = 0o777, *,
+              uid: Optional[int] = None, gid: Optional[int] = None) -> None:
+        """
+        Create the directory at `path` with permission bits `mode`; the parent must already exist.
+        `uid`/`gid`, when given, are its owner, applied as `put` applies a `FileMeta`'s.
+        """
 
     def rmdir(self, path: PurePosixPath) -> None:
         """Remove the directory at `path`; it must be empty."""

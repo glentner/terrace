@@ -59,7 +59,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 731 tests, ~60 s — must pass before every commit
+uv run pytest -m unit                            # 744 tests, ~60 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -100,7 +100,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 741 tests (731 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 44 files, 754 tests (744 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -706,7 +706,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 731 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 744 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -722,7 +722,7 @@ Violations are HIGH, not auto-CRITICAL.
 
 ### Known open violations
 
-Defects the harness port's audit found and reproduced, and four a review of the whole tree reproduced
+Defects the harness port's audit found and reproduced, and three a review of the whole tree reproduced
 on 2026-11-11, each recorded so a reviewer neither re-files it nor mistakes it for an accepted
 standard. **These are violations, not exceptions.** Each names the seed that owns the repair; a cycle
 that touches the region should either fix it or say why not.
@@ -744,7 +744,6 @@ that touches the region should either fix it or say why not.
 | 1, 6, 7 | A **write racing a commit is recorded clean**. `_commit_hop` clears a copy from a flag it resets and a stat it compares; a write that read the flag before the reset and lands after the stat, or one of the same size inside one timestamp tick, leaves the holder clean with bytes its upstream lacks, and the next eviction deletes them. Both routes reproduced by injection. | `issues/racing-write-marked-clean.md` |
 | 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
 | 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
-| 5, 9 | **Entries created through the mount are recorded `0:0`.** `create` and `mkdir` default the owner to root and the FUSE adapter passes no caller identity, so the catalog disagrees with the source it commits to. The engine half is measured; the adapter half is read from the code. | `issues/posix-surface-gaps.md` |
 
 Several of these are also `PLAN.md` inaccuracies rather than pure code defects. Under the repository's
 plan-drift rule the reconciliation belongs in `PLAN.md` first, with the maintainer; that work is
@@ -752,7 +751,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **731 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **744 unit tests in ~60 s serial, ~30 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 

@@ -15,7 +15,7 @@ import threading
 from pathlib import PurePosixPath
 
 # External libs
-from mfusepy import Operations, FuseOSError, ENOATTR
+from mfusepy import Operations, FuseOSError, ENOATTR, fuse_get_context
 
 # Internal libs
 from terrace.core.logging import Logger
@@ -144,8 +144,9 @@ class OverlayOperations(Operations):
     # -- namespace ----------------------------------------------------------------------------------------------
 
     def mkdir(self, path: str, mode: int) -> int:
-        """Create a directory."""
-        self.engine.mkdir(path, mode)
+        """Create a directory owned by the calling process (the engine applies the group rule)."""
+        uid, gid, _ = fuse_get_context()
+        self.engine.mkdir(path, mode, uid=uid, gid=gid)
         return 0
 
     def rmdir(self, path: str) -> int:
@@ -162,6 +163,10 @@ class OverlayOperations(Operations):
         """Rename, replacing any file (or empty directory) at the destination."""
         self.engine.rename(old, new)
         return 0
+
+    def link(self, target: str, source: str) -> int:
+        """Hard links are not supported: every call fails with EPERM, as for a file system without them."""
+        raise FuseOSError(errno.EPERM)
 
     # -- metadata (setattr) -------------------------------------------------------------------------------------
 
@@ -187,8 +192,9 @@ class OverlayOperations(Operations):
     # -- data path ----------------------------------------------------------------------------------------------
 
     def create(self, path: str, mode: int, flags: int = os.O_WRONLY | os.O_CREAT) -> int:
-        """Create an empty file and return an open handle on its serving tier."""
-        self.engine.create(path, mode)
+        """Create an empty file owned by the calling process and return an open handle on its serving tier."""
+        uid, gid, _ = fuse_get_context()
+        self.engine.create(path, mode, uid=uid, gid=gid)
         return self._register(self.engine.open(path, flags))
 
     def open(self, path: str, flags: int) -> int:

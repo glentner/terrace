@@ -3,15 +3,15 @@ slug: posix-surface-gaps
 title: Entries created through the mount belong to their creator, and link is refused plainly
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/posix-surface-gaps
 base: main
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: Created entries take the caller's owner and the setgid group; link fails with EPERM
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -109,7 +109,7 @@ that retires the row, so the documents cannot split from the code.
 R4's README line and R6's `AGENTS.md` edits are **committed documents**: the orchestrator grades them,
 not the blind reviewer. R5's root `PLAN.md` sentence likewise.
 
-- [ ] **Tests first, red on the merge base.** Write `tests/fuse/test_surface.py` and
+- [x] **Tests first, red on the merge base.** Write `tests/fuse/test_surface.py` and
       `tests/engine/test_ownership.py` as `PLAN.md` § 2 *Tests* lists them (`pytestmark = mark.unit`;
       the adapter's caller identity is a stand-in set with
       `monkeypatch.setattr(terrace.fuse.adapter, 'fuse_get_context', …, raising=False)`). Before any
@@ -120,21 +120,21 @@ not the blind reviewer. R5's root `PLAN.md` sentence likewise.
       copied in, removed with plain `git worktree remove`. Expected: every R1, R2, R3, R7 test and the
       `link` test fail on an assertion; the two R5 guards pass. Quote the per-test lines in the commit
       body or the build report.
-- [ ] **Adapter** (`src/terrace/fuse/adapter.py`): module-scope `from mfusepy import … fuse_get_context`;
+- [x] **Adapter** (`src/terrace/fuse/adapter.py`): module-scope `from mfusepy import … fuse_get_context`;
       `mkdir` and `create` pass the caller's `uid` and `gid` from `fuse_get_context()` (called by its
       module-level name); add `link(self, target, source)` raising `FuseOSError(errno.EPERM)`. No other
       state, no group logic, no `access`, no `symlink`.
-- [ ] **Engine** (`src/terrace/engine/overlay.py`): in `create` and `mkdir`, `None` identity defaults to
+- [x] **Engine** (`src/terrace/engine/overlay.py`): in `create` and `mkdir`, `None` identity defaults to
       `os.getuid()` / `os.getgid()`; under a parent whose recorded mode has `stat.S_ISGID`, `gid` is the
       parent's; `mkdir` there ORs `S_ISGID` into the recorded mode and the queued row's `detail['mode']`;
       `create` passes `uid`/`gid` in the `FileMeta` it hands `dest.put`. `_execute_namespace_locked`'s
       `mkdir` branch and `_place_parents` pass `uid=entry.uid, gid=entry.gid` to `self.source.mkdir`.
-- [ ] **Tiers**: `Tier.mkdir` in `src/terrace/tier/protocol.py` gains keyword-only
+- [x] **Tiers**: `Tier.mkdir` in `src/terrace/tier/protocol.py` gains keyword-only
       `uid: Optional[int] = None, gid: Optional[int] = None`; `PosixTier.mkdir` applies them through
       `_apply_meta` (owner only) after `os.mkdir` and before its exact-mode `os.chmod`; `S3Tier.mkdir`
       and `ArchiveTier.mkdir` accept and ignore them (say so in their docstrings). `_apply_meta` itself
       is unchanged. Update any test fake tier whose `mkdir` an engine calls.
-- [ ] **Documents, same commit**: `README.md` gains a `Limitations` list with one bullet (hard links
+- [x] **Documents, same commit**: `README.md` gains a `Limitations` list with one bullet (hard links
       are not supported; `link` fails with `EPERM`). Root `PLAN.md` § FUSE adapter gains one sentence,
       on its own new line after the paragraph: the mount records permission bits and does not enforce
       them (no `default_permissions`, no `access` callback); check `git diff --numstat <merge base> --
@@ -144,7 +144,7 @@ not the blind reviewer. R5's root `PLAN.md` sentence likewise.
       (§ Commands, § Repository map, § Conventions' integration line, § Verification) by the delta
       between `uv run pytest -m unit --collect-only -q` at the merge base and at this commit (and the
       file count by the two new modules), never to numbers copied from the plan.
-- [ ] **Deferral ledger** (last phase): this plan defers nothing new (symlink creation already sits in
+- [x] **Deferral ledger** (last phase): this plan defers nothing new (symlink creation already sits in
       `issues/symlink-create.md` from the shape commit). Walk this phase for "do not fix here", "known
       limitation" or "follow-up" phrasing in list items and prose (not headings) and confirm each has an
       `issues/` file and a `ROADMAP.md` entry; the real-mount check of R1, R2 and R4 is recorded as
