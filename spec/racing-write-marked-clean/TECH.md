@@ -3,7 +3,7 @@ slug: racing-write-marked-clean
 title: A write racing a commit is never recorded clean
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/racing-write-marked-clean
 base: main
 current_phase: done
