@@ -247,6 +247,16 @@ around it: the client library, atomic replacement over a rename, a recall that t
 other calls must not wait, and a local server for tests. Split out of the extended archive sources on
 2026-11-11. Last in this section because it reuses the streaming read the sharding cycle builds.
 
+### The bundle loop's self-excuse audit reads one file
+
+**Seed:** [`issues/loop-excuse-audit-scope.md`](issues/loop-excuse-audit-scope.md) · `test` · appetite small
+
+The audit that keeps a loop stage from excusing its own failure parses `tests/loop/stages.py` alone.
+An `xfail` raised in `tests/loop/conftest.py`, a collection hook that widens a stage's marker, or an
+indirect `getattr(pytest, 'xfail')` call passes it, the second with unchanged counts. Nothing of the
+kind is in the tree; found as surviving mutants in the loop's own review (2026-11-12). Small, and
+independent of the order above.
+
 ## Queued: the lifecycle around the loop
 
 Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop at
