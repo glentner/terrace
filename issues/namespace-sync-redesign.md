@@ -171,14 +171,15 @@ before any code, under the plan-drift rule.
   this one and do not resume. `rename-over-tombstoned-child` becomes R3 and `model-commit-route-reach`
   becomes R7. Their records: branch `fix/rename-over-tombstoned-child` at `efe3c8c` and branch
   `test/model-commit-route-reach` at `1f33386`, both pushed, each holding its `spec/{slug}/GOAL.md` with
-  the rulings made in it. Their unfinished work is on the foreman's host only, as commit objects under
-  `refs/park/`: the tombstone fix with its 29 tests (`rename-over-tombstoned-child-prototype`,
-  `f3fe3fa`), the widened model (`model-commit-route-reach-prototype`, `8766694`) and its plan
-  (`model-commit-route-reach-plan`, `3572ed9`). All of it predates the rename and is written against the
-  replay; it is material to port, not to merge. `issues/replay-cost-at-scale.md` and
-  `issues/replay-defensive-branch-coverage.md` describe a function this deletes: R6 carries the first,
-  and the second has no object once `_replay_through` is gone. Neither is retired by this ruling; that
-  waits for this cycle to land. `issues/source-commit-staged-publish.md` depends on decision 4.
+  the rulings made in it. Their unfinished work is on the remote as commit objects under `refs/park/`,
+  which are not branches and are fetched by name: the tombstone fix with its 29 tests
+  (`rename-over-tombstoned-child-prototype`, `f3fe3fa`), the widened model
+  (`model-commit-route-reach-prototype`, `8766694`) and its plan (`model-commit-route-reach-plan`,
+  `3572ed9`). All of it predates the rename and is written against the replay; it is material to port,
+  not to merge. `issues/replay-cost-at-scale.md` and `issues/replay-defensive-branch-coverage.md`
+  describe a function this deletes: R6 carries the first, and the second has no object once
+  `_replay_through` is gone. Neither is retired by this ruling; that waits for this cycle to land.
+  `issues/source-commit-staged-publish.md` depends on decision 4.
 - **Two stages.** The model, the schema and the bundle source first, where there is no replay to
   port. POSIX and object-prefix sources second, where `_replay_through` is deleted. Shaping decides
   whether that is one cycle or two; the first stage is what the bundle loop waits on
