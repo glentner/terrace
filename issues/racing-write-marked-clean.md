@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:racing-write-marked-clean
 kind: fix
 appetite: small
 lane: public

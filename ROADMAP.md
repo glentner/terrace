@@ -143,6 +143,18 @@ ahead of the bundle write-back because a re-aggregation reads staged copies it b
 a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
 namespace work, and how wide the second route is on a production kernel is one measurement away.
 
+### A write through a handle on a stage is lost once a faster tier commits over its file
+
+**Seed:** [`issues/stage-handle-outlives-its-file.md`](issues/stage-handle-outlives-its-file.md) · `fix` · appetite small
+
+One entry can have handles open on two tiers: one opened on a slower stage, and a later one promoted to
+a faster tier. A commit from the faster tier renames a new file over the slower tier's, and a write
+through the first handle then returns success into a file no path reaches; the next commit records the
+copy clean without it. Reproduced on a three-tier stack by the design review of
+`racing-write-marked-clean`, with the same result before and after that cycle's change. Placed beside
+that cycle because it breaks the same promise, a clean copy whose upstream holds its bytes; the
+placement has not been negotiated.
+
 ### Pressure or delay moves a copy one tier up, and no further
 
 **Seed:** [`issues/eviction-one-hop.md`](issues/eviction-one-hop.md) · `fix` · appetite small

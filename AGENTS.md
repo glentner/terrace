@@ -59,7 +59,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 731 tests, ~60 s — must pass before every commit
+uv run pytest -m unit                            # 763 tests, ~60 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -100,7 +100,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 42 files, 741 tests (731 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
+| `tests/` | 43 files, 773 tests (763 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
 | `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -125,7 +125,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 393 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 425 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -211,7 +211,7 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 | `state/registry.py` — `_attach` | The only thing standing between an evaporated tier and silent re-adoption of its residency rows. |
 | `state/sql.py` — `IDENTIFIER`; `state/catalog.py` — `META_FIELDS` / `RESIDENCY_FIELDS` | The only barrier between a userspace-derived name and SQL text. |
 | `engine/overlay.py` — `_commit_hop`, `commit_upstream`, `commit_to_shared`, `evict_copy` | The sole clean-transition point and the only code that destroys bytes on purpose. A wrong edit is silent data loss, not a crash. |
-| `engine/overlay.py` — `write`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack. Reordering two statements is undetectable in review and unrecoverable in production. |
+| `engine/overlay.py` — `write`, `_change`, `_meet`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack, and the admission a hop's record depends on. Reordering two statements is undetectable in review and unrecoverable in production. |
 | `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge`, `_purge_source`, `_vacate`, `rename`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
 | `engine/overlay.py` — `open`, `_serve`, `_lookup_again`, `_ensure`, `_named`, `_adopt`, `_watch`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, promoting off the source, stating the bytes a handle serves, and cutting them without a handle) and the lookup under the source lock that decides it, with the purge watch that tells the entry from a file that took its id, `bypass_size`, quota admission. |
 | `engine/transfer.py` — `copy` | The single place an intent bracket wraps a real byte move, and where tier counters are adjusted. |
@@ -235,7 +235,7 @@ review; where its grain differs from the table above, the table governs.
 | Region | Why |
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
-| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
+| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_change`/`_meet`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
 | `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`/`queued_marks`; `state/catalog.py` — `holder`/`held`/`advance_source_path`/`purge` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
@@ -245,8 +245,8 @@ review; where its grain differs from the table above, the table governs.
 
 - **Metadata before acknowledgment.** A clean→dirty transition commits to SQLite *before* the write
   that caused it is acknowledged. `Journal.mark_dirty` flips the residency row and inserts or
-  refreshes the write-back queue row in one transaction; `OverlayEngine.write` calls
-  `_mark_handle_dirty` and only then `os.pwrite`. Both truncate paths mark first.
+  refreshes the write-back queue row in one transaction; `OverlayEngine.write` runs its `os.pwrite`
+  inside `_change`, which calls `_mark_handle_dirty` first. Both truncate paths mark first.
 - Reversing the order leaves the fast-tier copy newer than the source with no record saying so.
   After a `SIGKILL` the audit sees a clean residency, treats the source as authoritative, and rolls
   the file back to the stale upstream version. **Silent data loss with a clean exit code** — no
@@ -494,11 +494,32 @@ review; where its grain differs from the table above, the table governs.
   by path instead leaves the source tree correct in shape and wrong in permissions (or, at a path since
   reused, carrying another entry's mode), and the divergence is invisible to the catalog. Stage tiers
   keep `materialize_dirs`, whose paths are logical because stage copies move with the catalog.
-- **After a copy, `changed` detection re-arms rather than settles.** A write racing the commit must
-  never mark the holder clean: the residency goes clean only when the stat matches what was copied,
-  and open handles have `marked_dirty` reset *before* the stat so a subsequent write re-queues.
-  Moving the reset after the stat loses a write that lands between them — no journal row, no
-  residency evidence, nothing for the audit to reconcile against.
+- **A copy goes clean on the engine's own record of the hop, never on a stat.** A hop opens a record
+  for its holder when its copy starts reading (`TransferPool.copy` calls the hop's `before_read` before
+  its stat of the holder), and every change to a holder's bytes is written to it under
+  `_handles_mutex`: a `write` or a `truncate` through a handle is admitted before its bytes land
+  (`_change`) and counted in flight until it returns, and a `truncate` with no handle writes the record
+  before its cut (`_meet`). The record opens already met when a change is in flight on the holder.
+  After the copy the hop stats the holder and then, in one hold of the mutex, takes the record and
+  resets `marked_dirty` on the holder's open handles. The holder goes clean only when no change met the
+  hop *and* the stat still equals what was copied; otherwise the row is re-clocked and the holder stays
+  dirty. A hop with no record is read as met, and a copy that raises removes its record. The stat can
+  only veto: it catches bytes changed behind the engine's back, and an equal size and mtime are not
+  evidence that nothing was written.
+- **A handle's flag is read and its change admitted in one hold of the mutex**, so a change either
+  meets the hop or finds its flag reset and re-marks on the path lock the commit holds. Reading the
+  flag outside the mutex, admitting a change after its bytes land, taking the record before the stat,
+  or skipping the reset each lets a write land on a copy recorded clean: no journal row, no residency
+  evidence, nothing for the audit to reconcile against. The reset is unconditional: after a hop a
+  change met, it is what makes the writer's next change wait on the path lock, which is what lets
+  `commit_upstream`'s loop end under a writer that never pauses. So a handle whose write met a hop
+  pays one dirty mark on its next write, although its copy is still dirty.
+- **While one admitted change is in flight, `commit_upstream` copies the file again.** The record
+  opens met, the hop re-arms, and the loop takes the same hop at once, with the path lock held, until
+  that call returns; nothing bounds it but the call (`issues/pump-liveness-and-loss-windows.md`). A
+  change the engine admitted counts as met whether or not its bytes had landed when the copy read, and
+  whether or not its call then fails. The rule rests on a handle's fd naming its tier's current file
+  for the entry, which a commit from a faster tier breaks; see § *Known open violations*.
 - **All policy logic takes an injectable clock.** `poll` takes an explicit `now`; every deadline is
   arithmetic on stored timestamps. A test that sleeps is testing the one-second scan tick, not the
   sixty-second delay: it either takes a minute or asserts nothing.
@@ -631,6 +652,17 @@ review; where its grain differs from the table above, the table governs.
   `rename` takes it around its `_vacate`, and the cut around `_serve`, which takes it again to promote
   off the source; a replay does not nest it, since it runs every row it reaches under the hold its caller
   took, through `_execute_namespace_locked`.
+- **The handle mutex** (`OverlayEngine._handles_mutex`) guards the open-handle table, each handle's
+  `marked_dirty` and `changing`, and the open hop records, `_hops` (§ 6). It is held for a few
+  statements and never across I/O, SQL or a wait; nothing is acquired while it is held, and nothing
+  takes it inside a transaction. Its holders beyond the table's own (`open`, `release`, `getattr`,
+  `evict_copy`): `write` and `truncate` through a handle, twice each and with no other lock
+  (`_change`); `_mark_handle_dirty`, under the path lock, after its `mark_dirty` has committed; a hop,
+  to open its record from inside `TransferPool.copy` (after the intent's insert has committed, and
+  under the source mutex when the hop commits to the source) and to take it after its stat; and
+  `truncate` with no handle, under the path lock and the source mutex. `Handle.written` is not
+  guarded by it. It is engine-wide, so every change through a handle contends on it; that cost is
+  not measured. Its place in the order is unchanged.
 - **The purge-watch mutex** (`OverlayEngine._watches_mutex`) guards the open purge watches and the ids
   recorded in them (§ 5). It is a leaf, last in the order. Its holders: `_purge`, inside its transaction,
   after the SQLite write lock, to record a purged id; `_adopt`, inside its insert's transaction, to clear
@@ -706,7 +738,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 731 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 763 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -722,10 +754,11 @@ Violations are HIGH, not auto-CRITICAL.
 
 ### Known open violations
 
-Defects the harness port's audit found and reproduced, and four a review of the whole tree reproduced
-on 2026-11-11, each recorded so a reviewer neither re-files it nor mistakes it for an accepted
-standard. **These are violations, not exceptions.** Each names the seed that owns the repair; a cycle
-that touches the region should either fix it or say why not.
+Defects the harness port's audit found and reproduced, three a review of the whole tree reproduced
+on 2026-11-11, and one a design review reproduced on 2026-11-12, each recorded so a reviewer neither
+re-files it nor mistakes it for an accepted standard. **These are violations, not exceptions.** Each
+names the seed that owns the repair; a cycle that touches the region should either fix it or say why
+not.
 
 | § | Violation | Seed |
 |---|---|---|
@@ -741,7 +774,7 @@ that touches the region should either fix it or say why not.
 | Conventions | The **integration suite runs on no automated machine**; CI has no integration job. | `issues/ci-integration-lane.md` |
 | — | Smaller measured gaps: `residency.checksum` is never written though the spec parses the flag; `tier.generation` never advances in production; `intent.temp_name` is dead and the archive's sibling `.tmp` is outside the orphan convention; `statfs` reports 100% full for an unquota'd non-POSIX source; no directory `fsync` anywhere; `S3Tier.rename`'s docstring claims an atomicity S3 does not have. | `issues/invariant-audit-gaps.md` |
 | — | The daemonized (default) mount **fails on a first-ever mount** — the log file is opened before the state directory exists. No test covers the daemonized branch. | `issues/daemonized-mount-first-run.md` |
-| 1, 6, 7 | A **write racing a commit is recorded clean**. `_commit_hop` clears a copy from a flag it resets and a stat it compares; a write that read the flag before the reset and lands after the stat, or one of the same size inside one timestamp tick, leaves the holder clean with bytes its upstream lacks, and the next eviction deletes them. Both routes reproduced by injection. | `issues/racing-write-marked-clean.md` |
+| 6, 7 | A **write through a handle on a stage is lost once a commit from a faster tier replaces that stage's file**. One entry can have handles open on two tiers; the faster tier's commit renames a new file over the slower tier's, a write through the older handle then returns success into a file no path reaches, and the next commit records the copy clean without it. No commit is in flight when the write is lost. Reproduced on a three-tier stack. | `issues/stage-handle-outlives-its-file.md` |
 | 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
 | 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
 | 5, 9 | **Entries created through the mount are recorded `0:0`.** `create` and `mkdir` default the owner to root and the FUSE adapter passes no caller identity, so the catalog disagrees with the source it commits to. The engine half is measured; the adapter half is read from the code. | `issues/posix-surface-gaps.md` |
@@ -752,7 +785,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **731 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **763 unit tests in ~60 s serial, ~30 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
@@ -798,7 +831,7 @@ symbols, documented invariants, `PLAN.md` sections.
 
 Follows hypershell conventions (the author's house style):
 
-* `src/` layout; 120-character lines; SPDX headers on every module (all 75 `.py` files carry them;
+* `src/` layout; 120-character lines; SPDX headers on every module (all 76 `.py` files carry them;
   `lint.sh` keeps it that way).
 * Module template:
 
