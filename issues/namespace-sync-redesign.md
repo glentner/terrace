@@ -190,9 +190,10 @@ before any code, under the plan-drift rule.
   any mechanism. Tests in `tests/engine/test_replay.py` that assert an outcome (the source equals the
   oracle, one holder per place) carry over; those that inject at a named internal step do not, and
   shaping should count each kind before the appetite is agreed.
-- **Order with the rename.** `issues/rename-to-terrace.md` changes the marker directory and this
-  changes the schema version. Both break the on-disk format, and both are free only until something is
-  deployed.
+- **Order with the rename.** Discharged: the rename to Terrace landed on 2026-11-12
+  (`spec/rename-to-terrace/`) and moved the marker directory with no schema change, ruling the version
+  bump and stable row ids out of that cycle and into this one. The schema version break is this seed's
+  alone, and it is free only until something is deployed.
 - Open question — **is deferral wanted for a POSIX source at all?** `GOAL.md` asks for delayed
   write-back of data, to bound write amplification. A rename or a mkdir is not amplified by repetition.
   For an object-store source a directory rename is one copy per object, which is the case for keeping

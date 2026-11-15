@@ -43,6 +43,9 @@ The audit named three pieces of unguarded shared state, none of which any test w
     `deferred-rename-source-orphan` moved the code. On its tree the slots are at `overlay.py:54`,
     the writes at `:678-681` (`write`), `:691` (`_mark_handle_dirty`) and `:697-700` (`truncate`),
     the reads at `:735` (`fsync`) and `:774` (`_record`), and the pump's reset at `:846-849`.
+  - 2026-11-12 (`racing-write-marked-clean`): `marked_dirty` is now read and written only under
+    `_handles_mutex`, on the callback's side too (`_change`, `_mark_handle_dirty`) and in `_commit_hop`.
+    `written` is still a plain slot written with no lock.
 - **`initialize_logging`'s guard is an unsynchronized load-then-store.**
   `src/terrace/core/logging.py:216-226`: `_INIT: bool = False`, then `if _INIT: return` and, in the
   `else`, `_INIT = True` before any of the work. Setting the flag first narrows the window to the gap
@@ -274,6 +277,20 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   proposes to remove (its R4). If that seed is adopted, this one keeps the workload and R1–R6, and R7–R9
   become that cycle's tests. Its place late in the roadmap fits a stress suite; it never fitted the
   defects filed in it.
+- 2026-11-12 (`racing-write-marked-clean`): `Handle.marked_dirty` is now read and written only under
+  `_handles_mutex`, with a new `Handle.changing` and the hop records (`_hops`); `Handle.written` is still
+  unguarded. Every change through a handle now takes that engine-wide mutex twice, where a handle already
+  marked dirty took no lock. Measure its contention under the stress suite on the free-threaded build
+  before anything else is put behind it.
+- 2026-11-12 (`racing-write-marked-clean`, after its first review): a mutant sweep over every decision of
+  the hop record was not run in that cycle. Its domain: in `overlay.py`, `_commit_hop` and its
+  `before_read`, `_change`, `_meet`, `_mark_handle_dirty`, `write` and `truncate`; in `transfer.py`, the
+  `before_read` call in `TransferPool.copy`; each mutant under `commit_row` and `commit_upstream`, with
+  every equivalent mutant recorded and why. The cycle's plan planted 15 mutants and its review ran a
+  612-case injection matrix and 12 more mutants; the one survivor, the handles' flag reset to the hop's
+  record instead of unconditionally, is killed by
+  `tests/engine/test_racing.py::test_writer_that_never_pauses_lets_commit_upstream_return`. Run the sweep
+  beside this suite, on the free-threaded build as well as with the GIL.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the FUSE/CLI/
   layering review named the handle fields and the logging initializer, and the verification-substrate
   review measured that both CI jobs run the same command.

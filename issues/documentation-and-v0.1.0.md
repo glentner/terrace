@@ -20,9 +20,10 @@ and has never been installed by anything: `[tool.uv] default-groups = ["dev"]` (
 and `.venv/bin` contains no `sphinx-build`. Neither dependency has been exercised even to the extent
 of proving it resolves on 3.15.
 
-The rest of the release surface is at scaffolding level. `README.md` is 22 lines. `CHANGELOG.md` is
-15 lines whose single unreleased bullet — "Project scaffolding: packaging, license, documentation
-stubs" — covers eight completed phases. `pyproject.toml:7` reads `version = "0.1.0.dev0"`, single-
+The rest of the release surface is at scaffolding level. `README.md` is 22 lines. `CHANGELOG.md`'s
+unreleased section has one `### Added` bullet — "Project scaffolding: packaging, license,
+documentation stubs" — for eight completed phases, and one `### Changed` entry, the rename to
+Terrace. `pyproject.toml:7` reads `version = "0.1.0.dev0"`, single-
 sourced and read at runtime through `importlib.metadata`; `uv run terrace --version` prints
 `terrace v0.1.0.dev0 (CPython 3.15.0a3)`.
 
@@ -109,10 +110,10 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   [`issues/benchmark-harness.md`](benchmark-harness.md). Root `PLAN.md` → § *CLI surface* (the
   table the CLI reference must match), § *Lifecycle and recovery* (the drain/detach semantics the
   operations guide explains), § *Phase outline*.
-- The rename comes first. [`issues/rename-to-terrace.md`](rename-to-terrace.md) is the head of the
-  queue, so by the time this cycle runs the documented entry point, environment prefix and xattr
-  namespace should already be `terrace`. If the rename slips past this cycle, the documentation is
-  written twice; that ordering is worth confirming at promotion rather than discovering at review.
+- The rename came first, as this note asked: the rename to Terrace landed on 2026-11-12
+  (`spec/rename-to-terrace/`), so the entry point, environment prefix and xattr namespace this cycle
+  documents are already `terrace`, and the ordering constraint is discharged. That cycle also wrote
+  the `CHANGELOG.md` entry announcing the rename, which this seed was once to carry.
 - Open question — **does the docs build join CI as a fourth job?** It catches rot, which is the whole
   reason R3 exists as a test rather than a review item; it also adds a Sphinx install to every pull
   request, and `-W` turns a Sphinx minor release into a red build on a change that touched no

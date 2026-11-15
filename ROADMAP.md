@@ -77,22 +77,6 @@ put back to its source on its own delay or under pressure on scratch. A signal c
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
 
-### Rename the project to Terrace
-
-**Seed:** [`issues/rename-to-terrace.md`](issues/rename-to-terrace.md) · `refactor` · appetite big
-
-First, because the cost grows with every later cycle and the tree is quiet only while the parked cycles
-are held: 498 occurrences across 83 files at `6419966`, before the factory added its own. The mechanical
-two-thirds — distribution name, package directory, imports, class names, test modules, CI, prose — is a
-rename. The other third is not: the environment prefix, the xattr namespace, the marker and partial
-directories in every managed tier root, and the default state path are **on-disk and user-visible
-contracts**, and changing the marker directory without a decision about
-existing overlays turns every managed location into an evaporated tier on the next mount. Nothing is
-deployed, which is what makes that decision cheap now. Stable row ids were ruled in on 2026-11-11, and
-the schema bump can ride with this format break. `PLAN.md` records the old name as a technology decision
-rather than an accident, so under the plan-drift rule this cycle reconciles `PLAN.md` before it touches
-code.
-
 ### Drive the bundle loop end to end on a local object store
 
 **Seed:** [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md) · `test` · appetite small
@@ -158,6 +142,18 @@ the residency reads clean and the queue is empty, so the next eviction deletes t
 ahead of the bundle write-back because a re-aggregation reads staged copies it believes are clean, so
 a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
 namespace work, and how wide the second route is on a production kernel is one measurement away.
+
+### A write through a handle on a stage is lost once a faster tier commits over its file
+
+**Seed:** [`issues/stage-handle-outlives-its-file.md`](issues/stage-handle-outlives-its-file.md) · `fix` · appetite small
+
+One entry can have handles open on two tiers: one opened on a slower stage, and a later one promoted to
+a faster tier. A commit from the faster tier renames a new file over the slower tier's, and a write
+through the first handle then returns success into a file no path reaches; the next commit records the
+copy clean without it. Reproduced on a three-tier stack by the design review of
+`racing-write-marked-clean`, with the same result before and after that cycle's change. Placed beside
+that cycle because it breaks the same promise, a clean copy whose upstream holds its bytes; the
+placement has not been negotiated.
 
 ### Pressure or delay moves a copy one tier up, and no further
 
