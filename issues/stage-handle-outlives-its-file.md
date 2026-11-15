@@ -73,7 +73,7 @@ Draft R-IDs, to be firmed up at promotion.
   open handles; or re-point the handles after the rename.
 - `open` decides the serving tier from `eligible_tier(entry.size)`, so the pair of handles needs the
   entry's size to cross a `bypass_size` or a quota while the first handle is open.
-- Related: `issues/racing-write-marked-clean.md` and `spec/racing-write-marked-clean/PLAN.md` § 5;
+- Related: `spec/racing-write-marked-clean/` (landed) and its `PLAN.md` § 5;
   `issues/freethreaded-concurrency-stress.md` (a promotion that copies over a stage copy written
   meanwhile, after an ancestor's rename); `AGENTS.md` § 7.
 - Found by: `racing-write-marked-clean`, plan step, adversarial design review.

@@ -126,7 +126,7 @@ Draft R-IDs, to be firmed up at promotion.
   through the engine once the code exists; this one states the target the code is built toward.
 - The stages map onto seeds in order: reaching a bundle from a spec file
   (`issues/archive-spec-plumbing.md`); a clean transition that can be trusted on the copies a
-  re-aggregation reads (`issues/racing-write-marked-clean.md`); what pressure does
+  re-aggregation reads (shipped, `spec/racing-write-marked-clean/`); what pressure does
   (`issues/eviction-one-hop.md`); the synchronization model
   (`issues/namespace-sync-redesign.md`, first stage); the journal bracket and the lock around a
   rebuild (`issues/archive-journaling-and-locking.md`); the delayed re-aggregation itself

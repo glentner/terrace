@@ -271,7 +271,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
 - 2026-11-11 (whole-tree review at `64faf27`): this seed has become a record of defects, not only of a
   missing test, and two readings in it need correcting. The handle fields are not benign: a writer's
   stale read of `marked_dirty` lets a write land on a copy the commit records clean, reproduced by
-  injection, and [`issues/racing-write-marked-clean.md`](racing-write-marked-clean.md) now owns that fix.
+  injection, and `spec/racing-write-marked-clean/` has since landed that fix.
   The sequences under "Path locks do not cover descendants" and "An ancestor's round trip" are engine
   defects with one cause, which [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md)
   proposes to remove (its R4). If that seed is adopted, this one keeps the workload and R1–R6, and R7–R9

@@ -131,18 +131,6 @@ because it reads as done. The loop's first stage: the read side alone — admit 
 construct the tier, index, read — turns the scenario's read stage green, and shaping may split the
 cycle there.
 
-### A write racing a commit can be recorded clean
-
-**Seed:** [`issues/racing-write-marked-clean.md`](issues/racing-write-marked-clean.md) · `fix` · appetite small
-
-A commit decides a copy is clean from a flag it resets and a stat it compares, and a write can pass
-both: one that read the flag before the reset and lands after the stat, or one of the same size inside
-one timestamp tick. Both reproduced by injection: the stage holds the new bytes, the source the old,
-the residency reads clean and the queue is empty, so the next eviction deletes the write. Placed
-ahead of the bundle write-back because a re-aggregation reads staged copies it believes are clean, so
-a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
-namespace work, and how wide the second route is on a production kernel is one measurement away.
-
 ### A write through a handle on a stage is lost once a faster tier commits over its file
 
 **Seed:** [`issues/stage-handle-outlives-its-file.md`](issues/stage-handle-outlives-its-file.md) · `fix` · appetite small
@@ -151,9 +139,22 @@ One entry can have handles open on two tiers: one opened on a slower stage, and 
 a faster tier. A commit from the faster tier renames a new file over the slower tier's, and a write
 through the first handle then returns success into a file no path reaches; the next commit records the
 copy clean without it. Reproduced on a three-tier stack by the design review of
-`racing-write-marked-clean`, with the same result before and after that cycle's change. Placed beside
-that cycle because it breaks the same promise, a clean copy whose upstream holds its bytes; the
-placement has not been negotiated.
+`racing-write-marked-clean`, with the same result before and after that cycle's change. That cycle has
+since landed (`spec/racing-write-marked-clean/`). Placed beside the clean-transition work because it
+breaks the same promise, a clean copy whose upstream holds its bytes; the placement has not been
+negotiated.
+
+### The copy's lifecycle is declared, not spread over five fields
+
+**Seed:** [`issues/copy-lifecycle-state-machine.md`](issues/copy-lifecycle-state-machine.md) · `refactor` · appetite small
+
+Whether a copy is absent, clean, dirty, committing or evicting is not stored anywhere as one thing. It is
+read off `residency.state`, the queued `data` row, an intent row, and a handle's `marked_dirty` and
+`written`, and nine functions move it. The fix for a write racing a commit
+added one more transition, a hop's own record of the changes that met it, and still no table says who may
+move a copy or when. `writeback.state` also admits an `'active'` value that nothing sets, the state a commit
+in flight was reserved for. Deferred out of `racing-write-marked-clean` by its non-goals, and the seed it
+was sent to does not carry it. Placed beside the clean-transition entries it describes.
 
 ### Pressure or delay moves a copy one tier up, and no further
 
@@ -354,7 +355,7 @@ operations surface closes, so a defect it finds still has a natural home.
 The 3.15t job runs the same suite as every other job; there are no targeted stress tests despite
 free-threading being a first-class target. Parallel FUSE callbacks against transfers against eviction,
 and race hunting with the sampling profiler. Until 2026-11-11 this seed also held the engine's known
-races, several reproduced by injection; those are defects and now belong to `racing-write-marked-clean`
+races, several reproduced by injection; those are defects and now belong to `racing-write-marked-clean` (landed, `spec/racing-write-marked-clean/`)
 and `namespace-sync-redesign`. What stays here is the workload, which needs a surface that has stopped
 moving.
 

@@ -185,7 +185,7 @@ before any code, under the plan-drift rule.
   whether that is one cycle or two; the first stage is what the bundle loop waits on
   ([`issues/archive-finalization-integration.md`](archive-finalization-integration.md)).
 - **What it does not touch.** The data path's clean transition
-  (`issues/racing-write-marked-clean.md`), the pumps, drain and rescue, and the tier adapters.
+  (shipped as `spec/racing-write-marked-clean/`; its lifecycle table is `issues/copy-lifecycle-state-machine.md`), the pumps, drain and rescue, and the tier adapters.
 - **The test asset carries over.** The model compares the engine with a plain directory, so it judges
   any mechanism. Tests in `tests/engine/test_replay.py` that assert an outcome (the source equals the
   oracle, one holder per place) carry over; those that inject at a named internal step do not, and
