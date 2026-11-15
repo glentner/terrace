@@ -3,15 +3,15 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_review
+status: in_progress
 branch: test/local-bundle-loop
 base: main
-current_phase: done
-last_updated: '2026-11-12'
+current_phase: P1
+last_updated: '2026-11-15'
 phases:
 - id: P1
   name: Stand the loop up with one command
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -263,6 +263,42 @@ behind on any exit path; its own tests prove each of those.
   - P1 is earlier than P3, so its gate runs P1's rows, then P3's whole gate (rows, collect, variant,
     ledger, figures and the lane, which is the full unit suite), then cycle 1's F1 checker, whose
     repeats include the helper's tests, then this checker.
+- **Amended at remediation (2026-11-15, CI at `7bb80ea`).** P1 reopened for the macOS CI leg; review
+  cycle 2's verdict stands. Run 43207432166 failed `test_a_signal_in_any_window_tears_down_on_the_first`
+  in all six suite cases, each a `TimeoutExpired` at its 20 s wait, on every attempt; lint and both
+  Linux legs were green, so the Linux teardown fix above holds there. This host passes the six in
+  about 1 s each. The runner's interpreter (Homebrew's framework build of 3.15.2, which `uv sync`
+  picks on the runner) is not installed here, so the failure is not reproduced. The phase is split
+  in two runs around the CI wait (code-build Step 7): this one merges `main`, makes the failure say
+  where the helper is, and pushes; the next reads the runner's report, fixes the cause, runs this
+  phase's gate and closes P1.
+  - [x] `main` merged at `7fb6648` (racing-write-marked-clean), a merge commit. `AGENTS.md`
+        conflicted only on measured figures; each conflict took this cycle's text and the figures
+        were measured again on the merged tree, by `spec/racing-write-marked-clean/remediation/F1-agents-figures.py`'s
+        method (collection counts, the file walk): 820 unit, 19 integration, 839 in all, 52 files
+        under `tests/`, 425 engine tests, and 86 `.py` files under `src/`, `tests/` and `tools/`
+        (lint prints the same). That checker reads this file's wording in two places it was not
+        written for (the SPDX sentence names `tools/`; "nineteen" is past its number words), so
+        those two figures were checked by hand.
+  - [x] Diagnostics; what the test asserts is unchanged. The driver prints the time since it started
+        with each request and when the helper is loaded, `Store.start` returns and `main` returns.
+        faulthandler dumps every thread's stack at 15 s, and again on the SIGUSR1 the test sends when
+        its 20 s wait expires. The test then fails with the helper's standard output and error, its
+        status and how long it ran: a slow helper ends within the next 5 s with its own status, a
+        hung one is killed (-9). Seen red on a planted 40 s sleep in `Store.start` (killed at 25 s,
+        both dumps at `start`) and on a planted 22 s one (status 130 at 23.2 s), each restored and
+        compared byte for byte.
+  - [ ] The cause, **a guess, not shown**: on the macOS runner the helper is slow to start a server,
+        not hung. For: the macOS leg's pytest took 72 s on `main` at `7fb6648`, 268 s at `14a2b56`
+        (this cycle's tests, with no helper run bounded from its start) and 393 s at `7bb80ea`,
+        while the Linux 3.15 job took 66 s on `main` and 63 s at `7bb80ea`; the six are the only helper runs bounded from
+        their start (20 s), while `stop_with` reads the spec's path with no bound and `run_command`
+        allows 60 s, and both pass on the runner; the `command` case fails too, though no signal
+        reaches the helper before its command runs. Candidate: `http.server.HTTPServer.server_bind`
+        calls `socket.getfqdn` on its address, a reverse lookup of 127.0.0.1, for every moto store
+        (werkzeug's server) and every tap. Not measured on the runner. The next run reads
+        `driver: store start returned +N s` and the 15 s dump to settle it.
+  - [ ] The gate and closing P1, in the next run.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1 && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py && uv run python -I spec/local-bundle-loop/remediation/F2-signal-teardown.py`
 - **Touches:** `tools/bundle_loop.py`, `tests/loop/__init__.py`, `tests/loop/conftest.py`,
   `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`.
