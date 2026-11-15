@@ -273,3 +273,94 @@ remediation did not touch.
 
 - None. A1 sits in `tools/bundle_loop.py`, which is not on § Invariants' high-blast-radius list, and
   violates no § Invariants section tagged *[human gate]*.
+
+## Review cycle 3 — changes-requested (2026-11-15)
+
+- **Reviewed commit:** `22f96b1`  ·  **Base:** `main` (merged in at `3128fdf`, from `7fb6648`)
+- **Verdict:** changes-requested
+- **Cycle:** 3 of ≤3, mirroring `review.cycle` in `TECH.md`. The bound is reached: the cycle stops
+  here for the maintainer's call, not for a fourth build round.
+- **Mode:** **fresh**, a blind pass over the full spec-excluded diff (`git diff origin/main...HEAD --
+  . ':(exclude)spec/'`), not a check of earlier findings. One fresh reviewer, given `GOAL.md` and the
+  rubric **by exact path** (the only file under `spec/` and the only KB file it was allowed to open)
+  rather than inlined, and `AGENTS.md` by path. The subagent route ran; the sequential fallback did
+  not. No `debate`, no completeness sub-pass.
+- **Contract:** `GOAL.md` unchanged since cycle 1 (only the shape and plan-sign-off commits).
+- **Since cycle 2:** the third remediation (`7bb80ea`, the Linux teardown), `main` merged in with the
+  `AGENTS.md` figures re-measured (`3128fdf`), diagnostics for the macOS runner (`94fafe9`), and every
+  loopback server bound without a reverse name lookup (`22f96b1`).
+- One read was refused to the reviewer by the session's permission classifier (the root `PLAN.md`,
+  for § Configuration); it checked the spec form against `tier/spec.py` `LocationSpec`,
+  `core/units.parse_rate` and `issues/archive-spec-plumbing.md` R2 instead.
+
+The reviewer's evidence lives in the worktree's gitignored `.local/review3/` (named `R3/` below).
+
+### Verification run
+
+- `tools/lint.sh`: all checks passed (`R3/lint.log`). `uv run pytest -n auto -m unit`: **813 passed,
+  9 xfailed**, 33.3 s; serial `-m unit`: 813 passed, 9 xfailed, 69.9 s. `-m integration`: 19 skipped.
+- The full signal matrix (`BUNDLE_LOOP_EVERY_SIGNAL=1`): 66 passed (`R3/helper-every-signal.log`).
+- Helper driven through `tools/temp_site.sh` on every R2 exit path (`R3/drive-exits.log`,
+  `R3/drive-status.log`): directory gone and endpoint refusing in every case.
+- R5 negative controls (`R3/negative-controls.log`): changed pinned text → 9 failed; stage 1 made to
+  pass → XPASS(strict) failed; a planted slip → 9 failed.
+- MinIO variant against the helper's moto store as a stand-in: 9 xfailed (`R3/minio-standin.log`).
+  **Not run:** against real MinIO (no container runtime on the host) — a gap, not a pass;
+  `tests/fuse` integration (no `/dev/fuse` on macOS).
+- CI at `22f96b1` (run 43766633907), read by the foreman: all four jobs green (Linux 3.15 and 3.15t
+  813 passed, 9 xfailed; macOS 769 passed, 44 skipped, 9 xfailed).
+
+### Matrix
+
+| R | Verdict | Verified how | Who |
+|---|---|---|---|
+| R1 | ✅ | Driven through `temp_site.sh`: stdout carries the spec path alone; single and sharded forms; the location table parses under `LocationSpec` | reviewer |
+| R2 | ✅ | Every exit path drives to a gone directory and a refusing endpoint; 66-case signal matrix | reviewer |
+| R3 | ✅ | `oracle.py` standard library only; its tests pass | reviewer |
+| R4 | ✅ | Nine ordered stages; shared steps driven against today's engine over a POSIX source with no API slip | reviewer |
+| R5 | ✅ | Every stage blocked at the pinned parser refusal, strict; three negative controls; seven owner seeds on `origin/main` | reviewer |
+| R6 | ✅ | Request windows in stages 3, 5, 7, 8; tap kind counting tested; the assertions cannot execute until the parser accepts the spec | reviewer |
+| R7 | ✅ (prerequisite absent) | Collected and skipped with no endpoint; 9 xfailed against a stand-in; real MinIO not run | reviewer |
+| R8 | ✅ | `tests/loop` adds about 1.1 s to the unit lane on this host | reviewer |
+| R9 | ❌ F2 | Figures equal the tree; the scenario is described under the wrong file | reviewer |
+
+### Findings
+
+- **F1 · MEDIUM · CONFIRMED.** After a test runs the helper's `main()` in process
+  (`tests/loop/test_helper.py` `test_setup_error_in_main_stops_the_store`), that pytest process
+  records and ignores SIGINT, SIGTERM and SIGHUP for the rest of the run: `Requests.close()` restores
+  the wakeup fd but leaves the recording handlers installed. Evidence `R3/drive_ctrl_c.py`,
+  `R3/ctrl-c.log`: control exits 0.3 s after SIGINT with status 2; after the helper test, 23.7 s and
+  status 0 ("2 passed"). *Property to route:* whatever the helper installs to hear a signal, it
+  restores on every exit path of `main()`, so a caller in the same process gets its prior behaviour
+  back; pinned by a test that interrupts after an in-process run.
+- **F2 · MEDIUM · CONFIRMED (R9).** `AGENTS.md` (repository map, `tests/` row; § Verification, "The
+  bundle loop is a progress record") names `tests/loop/test_scenario.py` as what drives the nine
+  stages and as the progress record; that file is 14 lines of imports, and the stages, `owned`,
+  `blocked`, `STAGES` and `REFUSAL` live in `tests/loop/stages.py`, which `AGENTS.md` never names. The
+  helper's flags (`--endpoint`, `--fastest-size`, `--access-key`, `--secret-key`, `--region`), the
+  `BUNDLE_LOOP_ENDPOINT` and `BUNDLE_LOOP_BUCKET` variables it exports, and the
+  `BUNDLE_LOOP_EVERY_SIGNAL` switch are described nowhere. Evidence `R3/agents-drift-grep.log`.
+  *Property to route:* every file and switch `AGENTS.md` names for the loop is the one that does
+  that job, and every user-facing flag and variable of the helper is listed where the commands are.
+- **F3 · LOW · CONFIRMED.** A Ctrl-C at a terminal while the helper runs a command exits 254, not
+  the helper's own 130: the group signal kills the child first, `run()` returns `process.wait()`'s
+  negative status and `sys.exit(-2)` becomes 254. Teardown is correct in every case. Evidence
+  `R3/drive-exits.log` (5 of 5), `R3/drive-status.log`. *Property to route:* the helper's exit
+  status follows one convention for a command ended by a signal, 128+N, whichever process the
+  signal reached first.
+
+### Out of scope, reproduced and not graded
+
+- SIGTERM to the helper alone ends its direct child but not a grandchild (`R3/drive-status.log`); R2
+  covers the store and the directory, both handled.
+- SIGHUP to the process group ends `tools/temp_site.sh` itself (status −1): the wrapper's trap list,
+  which this diff does not touch.
+- `issues/loop-excuse-audit-scope.md` quotes counts dated to review cycle 1 ("41 passed, 9 xfailed");
+  `tests/loop` now reports 50 passed, 9 xfailed. Dated, not wrong.
+
+### Human-gate triggers
+
+None: no finding sits in a high-blast-radius path or a gated invariant class (nothing under `src/`
+changed). The cycle stops instead on the review bound: three cycles without convergence go to the
+maintainer.

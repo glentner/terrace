@@ -3,7 +3,7 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/local-bundle-loop
 base: main
 current_phase: done
@@ -49,10 +49,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3
 review:
-  last_reviewed_commit: ae420d11d20cf817cbd7757909e8352e12000fcc
+  last_reviewed_commit: 22f96b132ef65c67273cb27e8b7ef973c185eb82
   verdict: changes-requested
-  blocked_reason: 'A1: helper signal handler ignores every signal once botocore swallows the first during setup; R2'
-  cycle: 2
+  blocked_reason: 'review cycle 3: F1-F3 CONFIRMED (MEDIUM, MEDIUM, LOW); review bound reached, maintainer''s call'
+  cycle: 3
 ---
 
 # TECH.md — Drive the bundle loop end to end on a local object store
