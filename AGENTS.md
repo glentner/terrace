@@ -59,7 +59,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 820 tests, ~60 s — must pass before every commit
+uv run pytest -m unit                            # 822 tests, ~60 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -102,7 +102,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 52 files, 839 tests (820 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `test_scenario.py` drives the engine over the spec `tools/bundle_loop.py` writes as nine ordered stages, the loop's progress record (§ *Verification*); `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_scenario_minio.py` is the same nine stages under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine. |
+| `tests/` | 52 files, 841 tests (822 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `test_scenario.py` drives the engine over the spec `tools/bundle_loop.py` writes as nine ordered stages, the loop's progress record (§ *Verification*); `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_scenario_minio.py` is the same nine stages under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine. |
 | `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -740,7 +740,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 820 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 822 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -787,7 +787,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **820 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **822 unit tests in ~60 s serial, ~30 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 

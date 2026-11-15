@@ -3,15 +3,15 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/local-bundle-loop
 base: main
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-15'
 phases:
 - id: P1
   name: Stand the loop up with one command
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -298,10 +298,71 @@ behind on any exit path; its own tests prove each of those.
         calls `socket.getfqdn` on its address, a reverse lookup of 127.0.0.1, for every moto store
         (werkzeug's server) and every tap. Not measured on the runner. The next run reads
         `driver: store start returned +N s` and the 15 s dump to settle it.
-  - [ ] The gate and closing P1, in the next run.
+        Settled by CI run 43765053446 at `94fafe9`, and not as guessed: hung, not slow. macOS:
+        6 failed, 761 passed, 44 skipped, 9 xfailed; lint and both Linux legs green. Each of the six
+        was killed at 25 s (status -9) having printed `driver: helper loaded` and never
+        `store start returned`. Both stack dumps, at 15 s and at the bound, show the store's serving
+        thread in `socket.getfqdn` under `http.server.HTTPServer.server_bind`, under werkzeug's
+        `make_server` in moto's `ThreadedMotoServer._server_entry`, and the main thread waiting in
+        `ThreadedMotoServer.start` for the ready event that thread never set. So on that runner the
+        reverse lookup of 127.0.0.1 did not return within 25 s in the helper's process, started
+        with the test's environment (its own `TMPDIR`, `AWS_*`). Why the runner's resolver does
+        that is not established, and the fix does not depend on it.
+  - [x] The fix: no server this cycle starts asks for a name. `tools/bundle_loop.py` gains
+        `NamedByAddress`, a mixin whose `server_bind` binds through
+        `socketserver.TCPServer.server_bind` and sets `server_name` and `server_port` from the
+        bound address, as `HTTPServer.server_bind` does but without `getfqdn`. Nothing reads the
+        name: werkzeug builds `SERVER_NAME` from `server_address`, and the tap's handler never
+        asks. `Store.start` no longer uses `ThreadedMotoServer`: it builds werkzeug's
+        `ThreadedWSGIServer` with the mixin, serving the application `moto.server` exports
+        (`DomainDispatcherApplication(create_backend_app)`, the one `ThreadedMotoServer` serves),
+        in the calling thread, then serves it from a daemon thread; `stop` shuts it down and joins
+        the thread, and werkzeug's `serve_forever` closes the listening socket as it returns. The
+        tap's listener is `tap.Server`, the same mixin over `ThreadingHTTPServer`. This supersedes
+        `ThreadedMotoServer(..., verbose=False)` in the teardown item above, `PLAN.md` § 2.1's
+        `Store` row, and P2's note that moto binds "through `make_server`"; with no
+        `ThreadedMotoServer` there is no banner to keep off standard output.
+        Why this form. A scoped patch of `socket.getfqdn` is process-wide: in the helper the store is
+        built while the main thread waits, and in the tests the tap is built in a pytest worker
+        whose other threads (a session store's handlers) could resolve meanwhile. Overriding
+        `ThreadedMotoServer._server_entry` leans on a private method. The mixin is three lines on
+        the public `socketserver` hook, used by both servers, and builds the store in the calling
+        thread, so a construction error now raises from `start` where `ThreadedMotoServer.start`
+        waited forever. The helper still imports nothing of `terrace` or `tests`; the tap imports
+        the mixin from the helper through `tests.loop`.
+        Sweep: every server under `tools/` and `tests/` that binds through `http.server`. The
+        helper's store and the tap are the cycle's; `tests/tier/conftest.py` starts moto's
+        `ThreadedMotoServer` for the S3 tier tests, outside this cycle's contract, and is seeded as
+        `issues/tier-moto-server-name-lookup.md` with its `ROADMAP.md` entry.
+  - [x] Pin: `test_no_server_looks_up_its_own_name[store]` and `[tap]` in `test_helper.py` run a
+        process with `socket.getfqdn` replaced by one that reports the call and raises, start the
+        store (and the tap in front of it), and require a reply to one request within 15 s and no
+        call reported. Deterministic on every host, where the runner's slow resolver is not. Seen
+        red with this test over the pre-fix `tools/bundle_loop.py` and `tests/loop/tap.py`: both
+        cases time out at 15 s with `getfqdn called: 127.0.0.1`, the store's start waiting on its
+        dead thread, as on the runner. With only the tap reverted: `[tap]` fails on the reported
+        call and the `OSError` from `server_bind`, `[store]` passes. Restored and compared byte for
+        byte; both pass in about 1.6 s.
+  - [x] Run A's diagnostics stay: the driver's timestamps, the faulthandler dumps at 15 s and on
+        SIGUSR1, and the failure's report of output, status and duration. They cost nothing when
+        the test passes.
+  - [x] Counts: 822 unit tests and 841 in all (two new items), moved in `AGENTS.md`; 52 files under
+        `tests/` and 86 `.py` files unchanged. Measured by
+        `spec/racing-write-marked-clean/remediation/F1-agents-figures.py` (its two misreadings on
+        this branch, "nineteen" and the SPDX sentence naming `tools/`, checked by hand against 19
+        and lint's 86) and by `check_outcomes.py figures-p3`.
+  - [x] The gate and closing P1. The whole gate, on this tree before this item was written:
+        lint ok; `p1 ok` (24 helper tests); `p3 ok` (50 passed and 9 xfailed in `tests/loop`; lane
+        32.6 s before, 33.1 s after, 0.5 s added of a 10 s budget; 813 passed and 9 xfailed in the
+        unit lane); F1 585 of 585 repeats; F2 48 of 48 cases and 100 of 100 repeats. The profile's
+        `verify`: lint ok, 813 passed and 9 xfailed, none skipped on this host. `ledger` and
+        `figures-p3` rerun after this item, since both read what it edits. The macOS leg is CI's to
+        show; this host never reproduced the hang.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1 && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py && uv run python -I spec/local-bundle-loop/remediation/F2-signal-teardown.py`
 - **Touches:** `tools/bundle_loop.py`, `tests/loop/__init__.py`, `tests/loop/conftest.py`,
-  `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`.
+  `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`; at the
+  remediation of 2026-11-15 also `tests/loop/tap.py`, `issues/tier-moto-server-name-lookup.md` and
+  `ROADMAP.md`.
 
 ## Phase P2 — Nine stages, the oracle and the tap
 **Satisfies:** R3, R4, R5, R6 · **Depends on:** P1

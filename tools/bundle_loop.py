@@ -31,12 +31,14 @@ import signal
 import tarfile
 import argparse
 import tempfile
+import threading
 import subprocess
+import socketserver
 from uuid import uuid4
 from pathlib import Path
 
 # Public interface
-__all__ = ['Store', 'Loop', 'pack', 'member_bytes', 'main']
+__all__ = ['NamedByAddress', 'Store', 'Loop', 'pack', 'member_bytes', 'main']
 
 PREFIX = 'bundles'
 STAGES = (('scratch', 'shared'), ('tmp', 'node'), ('shm', 'node'))      # stack order below the source, fastest last
@@ -47,29 +49,56 @@ FILES = 10000                                                           # every 
 HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)                # each one tears the loop down
 
 
+class NamedByAddress:
+    """
+    Mixed in ahead of an `http.server` server class: bind without looking the server's own name up.
+    `HTTPServer.server_bind` names the server by `socket.getfqdn` of its address, a reverse lookup
+    that waits as long as the host's resolver takes to answer, which can be longer than any test
+    allows. Nothing here reads the name, so the address stands in for it.
+    """
+
+    server_address: Any
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = str(host), port
+
+
 class Store:
     """A local S3-compatible object store with no container: a moto server on a free loopback port."""
 
     endpoint: str | None
     _server: Any
+    _thread: threading.Thread | None
 
     def __init__(self) -> None:
         self.endpoint = None
         self._server = None
+        self._thread = None
 
     def start(self) -> Store:
-        from moto.server import ThreadedMotoServer
-        # verbose=False keeps the server's banner off standard output, which carries the spec's path.
-        self._server = ThreadedMotoServer(ip_address='127.0.0.1', port=0, verbose=False)
-        self._server.start()
-        host, port = self._server.get_host_and_port()
-        self.endpoint = f'http://{host}:{port}'
+        # moto's application under werkzeug's threaded server, as moto's ThreadedMotoServer serves it,
+        # but bound here: a failure to bind raises from this call instead of leaving it waiting on a
+        # serving thread that has ended, and no banner reaches standard output, which carries the
+        # spec's path.
+        from moto.server import DomainDispatcherApplication, create_backend_app
+        from werkzeug.serving import ThreadedWSGIServer
+
+        class Server(NamedByAddress, ThreadedWSGIServer):
+            pass
+
+        self._server = Server('127.0.0.1', 0, DomainDispatcherApplication(create_backend_app))
+        self._thread = threading.Thread(target=self._server.serve_forever, name='store', daemon=True)
+        self._thread.start()
+        self.endpoint = f'http://127.0.0.1:{self._server.port}'
         return self
 
     def stop(self) -> None:
         if self._server is not None:
-            self._server.stop()
-            self._server = None
+            self._server.shutdown()                  # serve_forever closes the listening socket as it returns
+            self._thread.join()
+            self._server = self._thread = None
 
     def __enter__(self) -> Store:
         return self.start()

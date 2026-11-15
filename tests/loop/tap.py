@@ -18,6 +18,9 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, unquote
 
+# Internal libs
+from tests.loop import bundle_loop
+
 # Public interface
 __all__ = ['Tap', 'Request', 'Window']
 
@@ -25,6 +28,10 @@ HOP_BY_HOP = frozenset({'connection', 'keep-alive', 'transfer-encoding', 'te', '
                         'proxy-authenticate', 'proxy-authorization'})
 LINE = 65537                     # the longest chunk-size or trailer line the tap reads
 BLOCK = 65536                    # how much of a refused body the tap reads at a time
+
+
+class Server(bundle_loop.NamedByAddress, ThreadingHTTPServer):
+    """The tap's listener, bound without a lookup of its own name, as the helper's store is."""
 
 
 class Request(NamedTuple):
@@ -81,7 +88,7 @@ class Tap:
         self.requests: List[Request] = []
         self.refused: List[str] = []
         self._mutex = threading.Lock()
-        self._server = ThreadingHTTPServer(('127.0.0.1', 0), self._handler())
+        self._server = Server(('127.0.0.1', 0), self._handler())
         self.endpoint = f'http://127.0.0.1:{self._server.server_address[1]}'
         # The default half-second poll would make every stop wait that long.
         self._thread = threading.Thread(target=self._server.serve_forever, kwargs={'poll_interval': 0.02},

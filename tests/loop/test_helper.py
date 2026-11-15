@@ -237,6 +237,50 @@ def test_close_fails_loudly_when_the_directory_survives(store: str, tmp_path: Pa
     assert not second.root.exists()
 
 
+# Starts a server with `socket.getfqdn` replaced by one that reports the call and raises, then sends
+# it one request. A server that names itself by a reverse lookup of its address fails here on every
+# host, where a slow resolver would fail it only on the hosts that have one. Run in a process of its
+# own and bounded: a store whose serving thread dies before it is ready can leave its start waiting.
+NO_LOOKUP = '''
+import sys, socket
+from http.client import HTTPConnection
+from urllib.parse import urlsplit
+def refuse(*args):
+    print("getfqdn called:", *args, file=sys.stderr, flush=True)
+    raise OSError("planted: no server may look its own name up")
+socket.getfqdn = refuse
+from tests.loop import bundle_loop
+from tests.loop.tap import Tap
+store = bundle_loop.Store().start()
+try:
+    endpoint = store.endpoint
+    if sys.argv[1] == "tap":
+        tap = Tap(store.endpoint).start()
+        endpoint = tap.endpoint
+    address = urlsplit(endpoint)
+    connection = HTTPConnection(address.hostname, address.port, timeout=5)
+    connection.request("GET", "/")
+    print("answered", connection.getresponse().status, flush=True)
+    connection.close()
+    if sys.argv[1] == "tap":
+        tap.stop()
+finally:
+    store.stop()
+'''
+
+
+@mark.parametrize('server', ['store', 'tap'])
+def test_no_server_looks_up_its_own_name(server: str) -> None:
+    try:
+        done = subprocess.run([sys.executable, '-c', NO_LOOKUP, server], cwd=HELPER.parents[1],
+                              capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired as error:
+        err = error.stderr.decode() if isinstance(error.stderr, bytes) else error.stderr
+        fail(f'the {server} did not start and answer within 15 s\n--- stderr\n{err}')
+    assert 'getfqdn called' not in done.stderr, done.stderr
+    assert done.returncode == 0 and done.stdout.startswith('answered '), done.stderr
+
+
 def test_helper_imports_nothing_of_the_package() -> None:
     names = set()
     for node in ast.walk(ast.parse(HELPER.read_text())):
