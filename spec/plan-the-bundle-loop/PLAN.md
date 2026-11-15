@@ -93,6 +93,9 @@ Each is a proposal until the foreman signs it. Evidence is tagged **measured** (
 step, in the brief named), **documented** (a cited source) or **read** (argued from the code or a
 seed). Runs are on the helper at `ae420d1`; P1 repeats them on the helper as landed (§ 2.7).
 
+**Signed at the PLAN/TECH gate (Geoffrey, 2026-11-15):** all seven, Decision 1 with an addition
+and Decision 6 with a ruling on its check, each recorded under its decision.
+
 **Decision 1 — Where a staged bundle lives (R3 a).** Inside the stage tier directly below the source,
 which must be a shared tier: the durable tier (Decision 7). It sits in the tier's root beside the
 altered files, under a name no entry of the overlay can take, and the tier's limits count it: one
@@ -107,6 +110,12 @@ durable tier, seen by no overlap rule and counted by no limit.
 directory, in 18 runs with equal trees. At 300 members the staged `.tar` was 6,420,480 bytes against
 5,000 bytes of altered files, so an uncounted bundle is nearly all of what the tier holds. Read:
 `issues/archive-spec-plumbing.md`, note of 2026-11-11, asks this question.
+*Ruled at sign-off (2026-11-15).* Because the staged bundle counts against the tier's limits, it is
+evictable: under pressure the tier reclaims staged bundles as it reclaims any copy. By Rulings B and
+C, a staged bundle whose source already holds its recorded state is dropped, and the next access
+pulls it again with one read; one with changes not yet at the source first catches up by
+Decision 2's rebuild and one write, then is dropped with its altered files. The mechanism is built
+with the bundle loop; the pressure rule itself stays with `issues/eviction-one-hop.md`.
 
 **Decision 2 — How a source catches up (R3 b).** By a rebuild from recorded state and one object
 write. Unchanged members are copied from the staged bundle at their recorded offsets, changed and
@@ -196,6 +205,11 @@ reader), which WAL never does; the median write transaction is 0.285 ms against 
 Unverified: everything on a network filesystem, the cost of a commit there most of all. The
 maintainer's check runs both modes, so keeping WAL stays open to him on evidence from his
 filesystem.
+*Ruled at sign-off (2026-11-15).* For this workload the safer mode is the right default: the design
+enforces `journal_mode = DELETE` with `synchronous = FULL`, and `issues/state-store-journal-mode.md`
+builds without waiting on the network-filesystem check. Measuring throughput across SQLite options
+is deferred until the project is more mature; the check stays with `issues/hpc-deployment.md` as
+§ 2.6 states.
 
 **Decision 7 — Which tier of a stack is the durable tier (added by the redraw; R5 a asks for the
 rule).** The lowest tier of the stack whose `scope` is `shared`: the tier a soft unmount commits to.
