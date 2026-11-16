@@ -129,7 +129,7 @@ or a faithful stand-in; none is checkable in CI as it stands.
   8. **The time limit is the ordinary ending.** A killed mount leaves `shutdown_state = mounted`, and the
      next mount raises. Recovery at mount is a prerequisite for a second job on the same overlay
      ([`issues/audit-command.md`](audit-command.md)).
-- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
+- 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)):
   three updates. Question 6 above is now the first to check. Ruled the same day: everything lives in one
   database, in a state directory on the home filesystem. Verify there that SQLite's locks work, and
   choose the journal mode: its documentation says WAL does not work over a network filesystem, an

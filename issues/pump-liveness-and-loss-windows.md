@@ -189,7 +189,7 @@ below names one observable outcome so it is worth negotiating, not because that 
   second configuration-surface change later.
 - Out of scope by construction: `drain_timeout = 0` meaning *rescue nothing* rather than *no limit*
   is the same class of knob defect and belongs to `issues/shutdown-rescue-gaps.md`.
-- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): in
+- 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): in
   the maintainer's tier model every stage tier has a size limit, a count limit and a delay. Here all
   three are optional, and the unbounded windows this seed lists are what the options allow
   ([`issues/eviction-one-hop.md`](eviction-one-hop.md), Notes).

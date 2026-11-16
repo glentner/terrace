@@ -14,7 +14,8 @@ lane: public
 ## Problem
 
 `PLAN.md` and `AGENTS.md` § *Invariants* describe a different product from the one the maintainer
-described on 2026-11-11 ([`issues/local-bundle-loop.md`](local-bundle-loop.md) quotes the story), and
+described on 2026-11-11 (the retired seed of [`spec/local-bundle-loop/`](../spec/local-bundle-loop/GOAL.md)
+quoted the story; `git log --diff-filter=D -- 'issues/local-bundle-loop*'` finds it), and
 every cycle is graded against them. `PLAN.md` outranks the code on intent, and a violation of a
 numbered invariant is graded CRITICAL, so a cycle that builds toward the story today is building
 against its own contract.

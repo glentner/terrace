@@ -51,6 +51,6 @@ what a stage's marker accepts, without failing the run.
 
 ## Notes
 
-- Related: `issues/local-bundle-loop.md`; `tests/loop/conftest.py` already records `stopped`,
+- Related: `spec/local-bundle-loop/`; `tests/loop/conftest.py` already records `stopped`,
   `cause` and `marker` on each stage's report, which R2 could read.
 - Found by: `local-bundle-loop` review cycle 1 (mutants C2, C4 with S6, S10b).

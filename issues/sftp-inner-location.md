@@ -13,7 +13,7 @@ lane: public
 
 ## Problem
 
-The maintainer's user story of 2026-11-11 ([`issues/local-bundle-loop.md`](local-bundle-loop.md))
+The maintainer's user story of 2026-11-11 ([`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md))
 names the source as "S3/SFTP tape or object store". Two inner locations exist, a POSIX path and an S3
 object (`src/terrace/tier/archive.py:77-166`). An archive tape reached over SFTP is storage a research
 computing center already runs, and it is the storage that most wants bundles: few large objects,
@@ -59,7 +59,7 @@ Draft R-IDs, to be firmed up at promotion.
   one and never a partial one, and a failed push SHALL leave the old bundle in place.
 - **R4** — WHILE one bundle's pull is in flight, calls on files of bundles already staged SHALL NOT
   wait for it.
-- **R5** — THE scenario in `issues/local-bundle-loop.md` SHALL pass over an SFTP source started on
+- **R5** — THE bundle loop's scenario (`tests/loop/`) SHALL pass over an SFTP source started on
   the developer machine.
 
 ## Notes

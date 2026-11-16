@@ -26,8 +26,9 @@ every engine cycle worked on one mechanism, deferred namespace replay against a 
 entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
 bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
 delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation. The
-first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
-developer machine against a local object store. The lifecycle around the loop and the mount a researcher
+first section below redraws `PLAN.md` around that story and then turns the loop green, stage by stage,
+on a developer machine against a local object store: the helper that stands the loop up and the
+scenario that records how far the tree gets through it landed as `local-bundle-loop`. The lifecycle around the loop and the mount a researcher
 uses follow. Sharing the staged bundles between read-only mounts may come early; many writers on one
 overlay are for a later day. The maintainer agreed this order on 2026-11-11 and ruled the decisions that
 gated it; what is still open is in the next section.
@@ -67,7 +68,8 @@ re-aggregated into those bundles on a delay. Everything here runs on a developer
 local object store, engine first.
 
 The story it builds toward, from the maintainer's statement and clarification of 2026-11-11 (quoted
-in [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md)): a spec points at an object store, or
+in the seed of [`spec/local-bundle-loop/`](spec/local-bundle-loop/GOAL.md), retired when its cycle landed;
+`git log --diff-filter=D -- 'issues/local-bundle-loop*'` finds it): a spec points at an object store, or
 a tape reached over SFTP, holding one bundle or ten thousand. Bundles are pulled lazily to shared
 scratch and decompressed there without being unpacked. Single files land in the RAM tier as they are
 read. Every stage tier has a size limit, a count limit and a write-back delay, and either pressure or
@@ -76,19 +78,6 @@ the bundles. What is on scratch is durable, so a job that halts can recover. A b
 put back to its source on its own delay or under pressure on scratch. A signal commits what has
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
-
-### Drive the bundle loop end to end on a local object store
-
-**Seed:** [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md) · `test` · appetite small
-
-The loop that sets the project apart has never run: bundles at an object-store source, staged and
-indexed, read and written through the overlay, re-aggregated on a delay, and read back from the
-bucket by a fresh engine. Every piece exists alone and none can be joined, so every decision about
-the loop is made by reading. This cycle adds a helper that stands the loop up on a laptop with no
-container, and one scenario whose stages are strict expected failures, each naming the seed that owns
-it, including a stage where pressure moves copies up with no write to the source, and one where a
-detach is followed by a commit from a second process that has only the durable tier. The rest of this
-section turns those stages green in order.
 
 ### Redraw `PLAN.md` around the user story
 
