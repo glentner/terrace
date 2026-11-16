@@ -452,10 +452,12 @@ def record_of(scenario: str, index: int, window, loop, cfgs: list[dict], results
 
 
 def drive(runs: int) -> int:
-    sys.path.insert(0, str(HELPER / 'tools'))
-    sys.path.insert(0, str(HELPER / 'tests' / 'loop'))
-    from bundle_loop import Store, Loop, pack, member_bytes
-    from tap import Tap
+    # As landed, the tap is a module of the tests.loop package, which loads tools/bundle_loop.py
+    # itself, so both come in through that package with the repository root on the path.
+    sys.path.insert(0, str(HELPER))
+    from tests.loop import bundle_loop
+    from tests.loop.tap import Tap
+    Store, Loop, pack, member_bytes = bundle_loop.Store, bundle_loop.Loop, bundle_loop.pack, bundle_loop.member_bytes
     randomizer = random.Random(3)
     def blob(path: Path) -> str:
         data = path.read_bytes()

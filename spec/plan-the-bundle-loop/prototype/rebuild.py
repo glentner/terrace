@@ -10,12 +10,15 @@ from pathlib import Path
 
 # The helper and its tap, as landed: tools/bundle_loop.py and tests/loop/tap.py of this repository.
 # PROTOTYPE_HELPER names another directory holding tools/ and tests/loop/ (the plan step ran a copy).
+# As landed, the tap is a module of the tests.loop package, which loads tools/bundle_loop.py itself,
+# so both come in through that package with the repository root on the path.
 REPO = Path(__file__).resolve().parents[3]
 HELPER = Path(os.environ.get('PROTOTYPE_HELPER') or REPO)
 SCRATCH = Path(os.environ.get('PROTOTYPE_SCRATCH') or tempfile.mkdtemp(prefix='proto-rebuild.'))   # labs and results.json
-sys.path[:0] = [str(HELPER / 'tools'), str(HELPER / 'tests' / 'loop')]
-from bundle_loop import Store, Loop          # noqa: E402
-from tap import Tap                          # noqa: E402
+sys.path[:0] = [str(HELPER)]
+from tests.loop import bundle_loop               # noqa: E402
+from tests.loop.tap import Tap                    # noqa: E402
+Store, Loop = bundle_loop.Store, bundle_loop.Loop
 import boto3                                 # noqa: E402
 from botocore.config import Config           # noqa: E402
 

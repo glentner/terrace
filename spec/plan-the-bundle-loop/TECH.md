@@ -4,14 +4,14 @@ title: Redraw the root PLAN.md around the user story
 kind: docs
 appetite: big
 status: in_progress
-branch: 'docs/plan-the-bundle-loop'
-base: 'main'
-current_phase: P1
-last_updated: '2026-11-12'
+branch: docs/plan-the-bundle-loop
+base: main
+current_phase: P2
+last_updated: '2026-11-16'
 phases:
 - id: P1
   name: The prototype record, on the helper as landed
-  status: pending
+  status: done
   satisfies:
   - R8
   - R9
@@ -19,7 +19,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: "tools/lint.sh && uv run python spec/plan-the-bundle-loop/prototype/rebuild.py | grep '^RESULT trees_equal=yes' >/dev/null && uv run python spec/plan-the-bundle-loop/prototype/shared.py | grep '^RESULT oracle_bytes=yes' >/dev/null && grep -q '^Trees equal in names and bytes: yes' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q '^Each process read the oracle.s bytes: yes' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q '^Helper commit: [0-9a-f]' spec/plan-the-bundle-loop/prototype/RECORD.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md"
+  verify: 'tools/lint.sh && uv run python spec/plan-the-bundle-loop/prototype/rebuild.py | grep ''^RESULT trees_equal=yes'' >/dev/null && uv run python spec/plan-the-bundle-loop/prototype/shared.py | grep ''^RESULT oracle_bytes=yes'' >/dev/null && grep -q ''^Trees equal in names and bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Each process read the oracle.s bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Helper commit: [0-9a-f]'' spec/plan-the-bundle-loop/prototype/RECORD.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md'
 - id: P2
   name: The story, the settled rulings and the tier model
   status: pending
@@ -32,7 +32,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: "tools/lint.sh && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {print prev; exit} {prev=$0}' PLAN.md | grep -qx 'The story' && grep -q 'The big user-story I want to tell' PLAN.md && grep -q '^### Settled rulings$' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && grep -q '^The tier model$' PLAN.md && awk '/^### [(][a-h][)] / {n++} END {exit !(n==8)}' PLAN.md && grep -q 'spec/plan-the-bundle-loop/prototype/RECORD.md' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md"
+  verify: tools/lint.sh && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {print prev; exit} {prev=$0}' PLAN.md | grep -qx 'The story' && grep -q 'The big user-story I want to tell' PLAN.md && grep -q '^### Settled rulings$' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && grep -q '^The tier model$' PLAN.md && awk '/^### [(][a-h][)] / {n++} END {exit !(n==8)}' PLAN.md && grep -q 'spec/plan-the-bundle-loop/prototype/RECORD.md' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md
 - id: P3
   name: The decisions of this cycle, the state store, the lifecycle and the remaining sections
   status: pending
@@ -44,7 +44,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: "tools/lint.sh && grep -q '^### Decided in this cycle, for the maintainer.s review$' PLAN.md && awk '/^[*][*]Decision [0-9]+ / {d++} /[*]Reason[.][*]/ {r++} /[*]Turned down[.][*]/ {a++} /[*]Evidence[.][*]/ {e++} END {exit !(d>=6 && r>=d && a>=d && e>=d)}' PLAN.md && grep -q '^### The state store on shared storage$' PLAN.md && grep -q 'unverified on a network filesystem' PLAN.md && grep -q '^Holds when the output is:$' PLAN.md && ! grep -q fsck PLAN.md && ! grep -q 'Phase 1[0-2]' PLAN.md && ! grep -q 'wip branch' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md"
+  verify: tools/lint.sh && grep -q '^### Decided in this cycle, for the maintainer.s review$' PLAN.md && awk '/^[*][*]Decision [0-9]+ / {d++} /[*]Reason[.][*]/ {r++} /[*]Turned down[.][*]/ {a++} /[*]Evidence[.][*]/ {e++} END {exit !(d>=6 && r>=d && a>=d && e>=d)}' PLAN.md && grep -q '^### The state store on shared storage$' PLAN.md && grep -q 'unverified on a network filesystem' PLAN.md && grep -q '^Holds when the output is:$' PLAN.md && ! grep -q fsck PLAN.md && ! grep -q 'Phase 1[0-2]' PLAN.md && ! grep -q 'wip branch' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md
 - id: P4
   name: What the tree does not yet do, AGENTS.md notes and rows, the roadmap and the seeds
   status: pending
@@ -56,7 +56,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: "tools/lint.sh && grep -q '^### What the tree does not yet do$' PLAN.md && git diff --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}' && awk '/Scheduled to change [(]2026-11-1[0-9][)]/ {n++} END {exit !(n>=3)}' AGENTS.md && grep -q 'spec/plan-the-bundle-loop' issues/namespace-sync-redesign.md && grep -q 'spec/plan-the-bundle-loop' issues/plan-md-reconciliation.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-spec-plumbing.md && grep -q 'spec/plan-the-bundle-loop' issues/sharded-archive-sources.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-finalization-integration.md && grep -q 'spec/plan-the-bundle-loop' issues/hpc-deployment.md && test -f issues/durable-tier-record.md && grep -q 'issues/durable-tier-record.md' ROADMAP.md && test -f issues/state-store-journal-mode.md && grep -q 'issues/state-store-journal-mode.md' ROADMAP.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock"
+  verify: tools/lint.sh && grep -q '^### What the tree does not yet do$' PLAN.md && git diff --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}' && awk '/Scheduled to change [(]2026-11-1[0-9][)]/ {n++} END {exit !(n>=3)}' AGENTS.md && grep -q 'spec/plan-the-bundle-loop' issues/namespace-sync-redesign.md && grep -q 'spec/plan-the-bundle-loop' issues/plan-md-reconciliation.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-spec-plumbing.md && grep -q 'spec/plan-the-bundle-loop' issues/sharded-archive-sources.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-finalization-integration.md && grep -q 'spec/plan-the-bundle-loop' issues/hpc-deployment.md && test -f issues/durable-tier-record.md && grep -q 'issues/durable-tier-record.md' ROADMAP.md && test -f issues/state-store-journal-mode.md && grep -q 'issues/state-store-journal-mode.md' ROADMAP.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -166,13 +166,13 @@ R8 and R9 are **artifact deliverables**: their evidence is a committed file unde
 blind reviewer cannot see. The **orchestrator grades them**, by reading `RECORD.md` against the two
 criteria and by running the phase's `verify:`.
 
-- [ ] Confirm `tools/bundle_loop.py` and `tests/loop/tap.py` exist on this branch (the helper landed
+- [x] Confirm `tools/bundle_loop.py` and `tests/loop/tap.py` exist on this branch (the helper landed
       and the foreman rebased). If they do not, STOP and report: the phase cannot be met on a copy.
-- [ ] Point `prototype/rebuild.py` and `prototype/shared.py` at the landed helper and tap (each takes
+- [x] Point `prototype/rebuild.py` and `prototype/shared.py` at the landed helper and tap (each takes
       their directories from two constants at its top). Change nothing else in them; if the landed
       helper's interface differs from `ae420d1`'s, say what was changed and why in the record.
-- [ ] Run each from the worktree root with `uv run python …`. Each ends with one `RESULT` line.
-- [ ] Write `prototype/RECORD.md`. It SHALL contain these lines, each at the start of a line, and the
+- [x] Run each from the worktree root with `uv run python …`. Each ends with one `RESULT` line.
+- [x] Write `prototype/RECORD.md`. It SHALL contain these lines, each at the start of a line, and the
       prose GOAL R8 and R9 ask for under them:
       `Helper commit: <hash>` (the commit of `main` that holds the helper the run used);
       `Trees equal in names and bytes: yes|no`;
@@ -182,13 +182,34 @@ criteria and by running the phase's `verify:`.
       the number of times the bundle's object was fetched from the source, per scenario.
       It also states the plan step's run (helper `ae420d1`, from `research/02` and `research/03`) and
       whether the two runs agree.
-- [ ] If a result differs from the plan step's in a way that bears on a decision (the trees unequal;
+- [x] If a result differs from the plan step's in a way that bears on a decision (the trees unequal;
       more than one object write; a process that did not read the oracle's bytes), STOP and report
       before P2: the decisions were signed on the plan step's evidence.
 - **Verify:** the frontmatter command. It runs both prototypes and requires each `RESULT` line to
   say yes, then requires the three record lines. It does not check the request counts: the
   orchestrator reads them.
 - **Touches:** `spec/plan-the-bundle-loop/prototype/` only.
+
+**Amendment (P1 build, 2026-11-16).**
+- *Merged, not rebased.* The branch was pushed before the build, so `main` (`f76bb02`) came in by a
+  merge commit, not the rebase this file and the cycle plan § 2.7 assume. Read "the rebased branch"
+  in this file as "the branch after that merge". The merge brought the helper (`a0c88f1`) and
+  `racing-write-marked-clean` (`7fb6648`); the anchors-on-the-build's-own-commit rule above holds as
+  written.
+- *The import was adapted.* The landed `tests/loop/tap.py` is a module of the `tests.loop` package,
+  and the kept copies' top-level `from tap import Tap` stopped with `ModuleNotFoundError`. Both
+  prototypes now import the helper and the tap through `tests.loop`, with the repository root on the
+  path; nothing else in them changed. `prototype/RECORD.md` says why and what of the landed helper's
+  other changes reaches them (nothing a count reads), and `prototype/README.md` says the same.
+- *The run agrees with the plan step's.* No result bears on a signed decision; the three figures that
+  moved (object and record sizes by a few bytes, one timing-drawn fetch count, one marker race not
+  hit once) are in the record with their cause.
+- *Where P2 quotes the story from.* The merge deleted `issues/local-bundle-loop.md`: `f76bb02` retired
+  the seed when its cycle landed. The maintainer's statement of 2026-11-11 and his clarifications
+  survive in git as `git show a0c88f1:issues/local-bundle-loop.md` (the statement opens at its
+  line 25, "The big user-story I want to tell"). P2 quotes the statement from that object, word for
+  word, and checks it against the copy in `GOAL.md` § *Problem*; the clarifications there are
+  paraphrased, so the object is the source for any that P2 quotes.
 
 ## Phase P2 — The story, the settled rulings and the tier model
 **Satisfies:** R1, R2, R5 · **Depends on:** P1
