@@ -364,3 +364,6 @@ The reviewer's evidence lives in the worktree's gitignored `.local/review3/` (na
 None: no finding sits in a high-blast-radius path or a gated invariant class (nothing under `src/`
 changed). The cycle stops instead on the review bound: three cycles without convergence go to the
 maintainer.
+
+**Escalation, ruled 2026-11-16:** the maintainer allowed a fourth cycle: one remediation of F1–F3,
+then a review scoped to verifying those three.
