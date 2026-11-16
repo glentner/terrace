@@ -262,6 +262,16 @@ of 127.0.0.1 and waits for the answer; a failed construction leaves its start wa
 same lookup hung the bundle loop's helper on the macOS runner, which now binds without it (2026-11-15).
 Small, and independent of the order above.
 
+### A signal in the helper's setup or restore window can leave its handling installed
+
+**Seed:** [`issues/loop-helper-signal-windows.md`](issues/loop-helper-signal-windows.md) · `test` · appetite small
+
+The bundle loop's helper restores the caller's signal handling when `main()` returns, but a signal
+landing in a few-bytecode window of that setup or restore leaves the helper's handlers, or a wakeup fd
+on a closed descriptor, in an in-process caller. Reached only by injecting a signal at that point;
+teardown stays complete (review of `local-bundle-loop`, 2026-11-16). Small, and independent of the
+order above.
+
 ## Queued: the lifecycle around the loop
 
 Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop at

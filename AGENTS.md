@@ -59,8 +59,8 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 833 tests, ~60 s — must pass before every commit
-uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
+uv run pytest -m unit                            # 833 tests, ~80 s — must pass before every commit
+uv run pytest -n auto -m unit                    # pytest-xdist; ~35 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
 uv run pytest -m integration                     # 19 tests: real mounts (Linux) + MinIO
@@ -803,7 +803,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **833 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **833 unit tests in ~80 s serial, ~35 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
