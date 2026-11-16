@@ -13,6 +13,11 @@ path (the command ending, an error, SIGINT, SIGTERM, SIGHUP) removes the bucket 
 stops the store. SIGKILL cannot be caught: it ends the store with the process and leaves the
 directory behind.
 
+Exit status: with a command, the command's own status, or 128+N when signal N ended the run,
+whether the signal reached the command first (a terminal's Ctrl-C goes to the whole process group)
+or the helper; 1 on an error. Without a command a signal is the way to stop the helper, and it exits
+0.
+
 The helper imports nothing of the project, so it works whatever the spec parser accepts.
 """
 
@@ -38,7 +43,7 @@ from uuid import uuid4
 from pathlib import Path
 
 # Public interface
-__all__ = ['NamedByAddress', 'Store', 'Loop', 'pack', 'member_bytes', 'main']
+__all__ = ['NamedByAddress', 'Store', 'Loop', 'pack', 'member_bytes', 'arguments', 'main']
 
 PREFIX = 'bundles'
 STAGES = (('scratch', 'shared'), ('tmp', 'node'), ('shm', 'node'))      # stack order below the source, fastest last
@@ -254,14 +259,22 @@ class Requests:
     def __init__(self) -> None:
         self.signum = None
         self._read, self._write = os.pipe()
-        for end in (self._read, self._write):
-            os.set_blocking(end, False)
-        # A mask inherited from the parent would hold these pending forever; a handler of our own for
-        # SIGINT too, so a helper started with it ignored (a shell's background job) still stops.
-        signal.pthread_sigmask(signal.SIG_UNBLOCK, HANDLED)
-        self._previous = signal.set_wakeup_fd(self._write, warn_on_full_buffer=False)
+        try:
+            for end in (self._read, self._write):
+                os.set_blocking(end, False)
+            self._wakeup = signal.set_wakeup_fd(self._write, warn_on_full_buffer=False)
+        except BaseException:
+            os.close(self._read)
+            os.close(self._write)
+            raise
+        # Everything changed from here on, `close` puts back. A handler of our own for SIGINT too, so a
+        # helper started with it ignored (a shell's background job) still stops; the handlers go in
+        # before the mask opens, so a signal the parent left pending is recorded, not acted on.
+        self._handlers = {signum: signal.getsignal(signum) for signum in HANDLED}
         for signum in HANDLED:
             signal.signal(signum, self._record)
+        # A mask inherited from the parent would hold these pending forever.
+        self._mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, HANDLED)
 
     def _record(self, signum: int, frame: object) -> None:
         if self.signum is None:
@@ -284,19 +297,32 @@ class Requests:
         return bool(self)
 
     def close(self) -> None:
-        """Stop the pipe. The handler stays: a signal once the loop is gone changes nothing."""
-        signal.set_wakeup_fd(self._previous)
+        """
+        Put back the wakeup fd, the signal mask and the handlers the caller had, so a caller in the
+        same process (a test calling `main`) stops on its own signals again. `main` calls this last,
+        once the loop and the store are gone: a signal during teardown is still only recorded, and
+        one after it reaches the caller's own handler, as if the helper had never run.
+        """
+        signal.set_wakeup_fd(self._wakeup)
         os.close(self._read)
         os.close(self._write)
+        signal.pthread_sigmask(signal.SIG_SETMASK, self._mask)
+        for signum, handler in self._handlers.items():
+            # None: a handler installed outside Python, which cannot be put back; the default is closest.
+            signal.signal(signum, signal.SIG_DFL if handler is None else handler)
 
 
 def run(command: List[str], env: Dict[str, str], requests: Requests) -> int:
-    """Run the command to its end and return its status; on a request, end it and raise `Stop`."""
+    """
+    Run the command to its end and return its status as a shell reports it, 128+N for a command
+    ended by signal N; on a request, end it and raise `Stop`.
+    """
     process = subprocess.Popen(command, env=env)
     try:
         while True:
             try:
-                return process.wait(timeout=0.05)
+                status = process.wait(timeout=0.05)
+                return 128 - status if status < 0 else status
             except subprocess.TimeoutExpired:
                 if requests:
                     raise Stop() from None
@@ -309,22 +335,32 @@ def run(command: List[str], env: Dict[str, str], requests: Requests) -> int:
                 process.wait()
 
 
-def main(argv: List[str] | None = None) -> int:
-    """The command line: stand the loop up, print the spec's path, and tear it down on every exit path."""
+def arguments() -> argparse.ArgumentParser:
+    """The command line's options."""
     parser = argparse.ArgumentParser(prog='bundle_loop.py', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-n', '--bundles', type=int, default=1, help='bundles in the bucket (default 1)')
     parser.add_argument('--fastest-size', type=int, help='size limit of the fastest tier, in bytes')
     parser.add_argument('--endpoint', help='use this S3 endpoint instead of starting a store')
-    parser.add_argument('--access-key', default='test')
-    parser.add_argument('--secret-key', default='test')
-    parser.add_argument('--region', default='us-east-1')
+    parser.add_argument('--access-key', default='test', help='the endpoint\'s access key (default test)')
+    parser.add_argument('--secret-key', default='test', help='the endpoint\'s secret key (default test)')
+    parser.add_argument('--region', default='us-east-1', help='the endpoint\'s region (default us-east-1)')
     parser.add_argument('command', nargs=argparse.REMAINDER, help='run this, then tear down')
-    options = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: List[str] | None = None) -> int:
+    """The command line: stand the loop up, print the spec's path, and tear it down on every exit path."""
+    options = arguments().parse_args(argv)
     command = options.command[1:] if options.command[:1] == ['--'] else options.command
-    stopped = 130 if command else 0
 
     requests = Requests()
+
+    def stopped() -> int:
+        # As a shell reports a command ended by a signal, and as `run` reports it when the signal
+        # reached the command first.
+        return 128 + requests.signum if command else 0
+
     store = None
     try:
         endpoint = options.endpoint
@@ -332,13 +368,13 @@ def main(argv: List[str] | None = None) -> int:
             store = Store().start()
             endpoint = store.endpoint
         if requests:
-            return stopped
+            return stopped()
         try:
             loop = Loop(endpoint, bundles=options.bundles, access_key=options.access_key,
                         secret_key=options.secret_key, region=options.region, fastest_size=options.fastest_size,
                         cancelled=requests.__bool__)
         except Stop:
-            return stopped
+            return stopped()
         try:
             print(loop.spec, flush=True)
             if command:
@@ -348,9 +384,9 @@ def main(argv: List[str] | None = None) -> int:
             print('bundle_loop: up; interrupt to tear down', file=sys.stderr, flush=True)
             while not requests.wait():
                 pass
-            return stopped
+            return stopped()
         except Stop:
-            return stopped
+            return stopped()
         finally:
             loop.close()
     finally:

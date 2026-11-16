@@ -10,6 +10,7 @@ from typing import Any, Tuple
 # Standard libs
 import io
 import os
+import re
 import ast
 import sys
 import time
@@ -160,6 +161,118 @@ def test_setup_error_in_main_stops_the_store(monkeypatch: MonkeyPatch) -> None:
     assert len(started) == 1 and refuses(started[0].endpoint)
 
 
+# Each way out of `main` a test can reach in its own process, and what `main` gives back on it: the
+# status, or the type of what it raises. A signal on one of these comes from the test itself.
+IN_PROCESS = {'command': 0, 'error': RuntimeError, 'before-the-loop': 128 + signal.SIGTERM,
+              'in-setup': 128 + signal.SIGHUP, 'in-the-command': 128 + signal.SIGINT, 'waiting': 0}
+HEARD = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def down(path: str, monkeypatch: MonkeyPatch) -> object:
+    """Run the helper's `main` in this process down one exit path; its status, or the type it raised."""
+    argv = ['--', sys.executable, '-c', 'pass']
+    if path == 'error':
+        def broken(self: Any, label: str) -> Path:
+            raise RuntimeError('planted')
+        monkeypatch.setattr(bundle_loop.Loop, 'respec', broken)
+    elif path == 'before-the-loop':
+        start = bundle_loop.Store.start
+        def started(self: Any) -> Any:
+            start(self)
+            signal.raise_signal(signal.SIGTERM)
+            return self
+        monkeypatch.setattr(bundle_loop.Store, 'start', started)
+    elif path == 'in-setup':
+        generate = bundle_loop.Loop._generate
+        def generating(self: Any, *args: Any) -> None:
+            signal.raise_signal(signal.SIGHUP)
+            generate(self, *args)
+        monkeypatch.setattr(bundle_loop.Loop, '_generate', generating)
+    elif path == 'in-the-command':
+        argv = ['--', sys.executable, '-c', SIGNAL_SELF, str(int(signal.SIGINT))]
+    elif path == 'waiting':
+        argv = []
+        class Watch(io.StringIO):
+            def write(self, text: str) -> int:
+                if 'interrupt to tear down' in text:
+                    signal.raise_signal(signal.SIGTERM)
+                return len(text)
+        monkeypatch.setattr(sys, 'stderr', Watch())
+    try:
+        return bundle_loop.main(argv)
+    except Exception as error:
+        return type(error)
+
+
+@mark.parametrize('path', list(IN_PROCESS))
+def test_main_in_process_gives_the_caller_its_signal_handling_back(path: str, monkeypatch: MonkeyPatch) -> None:
+    # The caller has handlers of its own, a wakeup fd and SIGHUP blocked; after `main`, on whichever
+    # path it took, all three are as they were, and a real signal of each kind reaches the caller.
+    heard = []
+    def caller(signum: int, frame: object) -> None:
+        heard.append(signum)
+    read, write = os.pipe()
+    for end in (read, write):
+        os.set_blocking(end, False)
+    handlers = {signum: signal.getsignal(signum) for signum in HEARD}
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGHUP])
+    wakeup = None
+    try:
+        wakeup = signal.set_wakeup_fd(write)
+        for signum in HEARD:
+            signal.signal(signum, caller)
+        blocked = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+        assert signal.SIGHUP in blocked
+        assert down(path, monkeypatch) == IN_PROCESS[path]
+        assert {signum: signal.getsignal(signum) for signum in HEARD} == dict.fromkeys(HEARD, caller)
+        assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == blocked
+        assert signal.set_wakeup_fd(write) == write
+        assert heard == []
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGHUP])
+        for signum in HEARD:
+            signal.raise_signal(signum)
+        assert heard == list(HEARD)
+        assert sorted(os.read(read, 16)) == sorted(HEARD)
+    finally:
+        if wakeup is not None:
+            signal.set_wakeup_fd(wakeup)
+        for signum, handler in handlers.items():
+            signal.signal(signum, signal.SIG_DFL if handler is None else handler)
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        os.close(read)
+        os.close(write)
+
+
+# A process that runs the helper's `main` in process, then waits to be interrupted with Python's own
+# SIGINT handling, as pytest does after a helper test.
+AFTER_MAIN = '''
+import sys, time
+from importlib.util import spec_from_file_location, module_from_spec
+found = spec_from_file_location("bundle_loop", sys.argv[1])
+helper = module_from_spec(found)
+found.loader.exec_module(helper)
+print("main returned", helper.main(["--", sys.executable, "-c", "pass"]), flush=True)
+time.sleep(30)
+'''
+
+
+def test_an_interrupt_after_main_in_process_stops_the_caller() -> None:
+    process = subprocess.Popen([sys.executable, '-c', AFTER_MAIN, str(HELPER)], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        process.stdout.readline()                   # the spec's path
+        assert process.stdout.readline() == 'main returned 0\n'
+        process.send_signal(signal.SIGINT)
+        try:
+            out, err = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            fail('SIGINT did not stop a process after the helper ran in it')
+    finally:
+        process.kill()
+        process.wait()
+    assert process.returncode == -signal.SIGINT and 'KeyboardInterrupt' in err, err
+
+
 PROBE = ('import os, sys, tomllib; d = tomllib.load(open(os.environ["BUNDLE_LOOP_SPEC"], "rb")); '
          'print(d["tier"][0]["location"]["s3"]["endpoint"]); sys.exit(int(sys.argv[1]))')
 
@@ -179,6 +292,35 @@ def test_command_exit_tears_down() -> None:
 def test_command_failure_passes_status_and_tears_down() -> None:
     status, spec, endpoint = run_command(3)
     assert status == 3 and not spec.parent.exists() and refuses(endpoint)
+
+
+# A command that a signal ends as it ends `sleep`: by the signal, with no traceback of its own.
+RUNNING = ('import time, signal; signal.signal(signal.SIGINT, signal.SIG_DFL); '
+           'print("command running", flush=True); time.sleep(60)')
+
+
+@mark.parametrize('name', ['int', 'term', 'hup'])
+def test_a_signal_to_the_process_group_exits_128_plus_its_number(name: str) -> None:
+    # A terminal's Ctrl-C, or its closing, signals every process of the job; the command usually
+    # ends first, and the helper reports it as a shell would, as it does when it is signalled first.
+    signum = SIGNALS[name]
+    process = subprocess.Popen([sys.executable, str(HELPER), '--', sys.executable, '-c', RUNNING],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        spec = Path(process.stdout.readline().strip())
+        endpoint = tomllib.loads(spec.read_text())['tier'][0]['location']['s3']['endpoint']
+        assert process.stdout.readline() == 'command running\n'
+        os.killpg(process.pid, signum)
+        out, err = process.communicate(timeout=30)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+    assert process.returncode == 128 + signum, err
+    assert 'Traceback' not in err, err
+    assert not spec.parent.exists() and refuses(endpoint)
 
 
 def stop_with(signum: int, again: bool = False, **options: Any) -> None:
@@ -281,6 +423,22 @@ def test_no_server_looks_up_its_own_name(server: str) -> None:
     assert done.returncode == 0 and done.stdout.startswith('answered '), done.stderr
 
 
+def test_agents_md_lists_every_file_flag_and_variable_of_the_loop() -> None:
+    # Where AGENTS.md lists the commands, every option `--help` shows and every BUNDLE_LOOP_ variable
+    # the helper or its tests use; anywhere in it, every module of the loop.
+    text = (HELPER.parents[1] / 'AGENTS.md').read_text()
+    commands = text.split('\n## Commands\n', 1)[1].split('\n## ', 1)[0]
+    flags = set(re.findall(r'(?<![\w-])--[a-z][a-z-]*', bundle_loop.arguments().format_help())) - {'--help'}
+    modules = sorted(Path(__file__).parent.glob('*.py'))
+    names = {name for source in [HELPER, *modules] for name in re.findall(r'\bBUNDLE_LOOP_[A-Z_]+', source.read_text())}
+    assert {'--bundles', '--endpoint', '--fastest-size'} <= flags
+    assert {'BUNDLE_LOOP_SPEC', 'BUNDLE_LOOP_ENDPOINT', 'BUNDLE_LOOP_BUCKET', 'BUNDLE_LOOP_EVERY_SIGNAL'} <= names
+    assert sorted(name for name in flags | names if name not in commands) == []
+    files = [HELPER.relative_to(HELPER.parents[1]).as_posix()]
+    files += [f'tests/loop/{module.name}' for module in modules if module.name != '__init__.py']
+    assert [name for name in files if name not in text and Path(name).name not in text] == []
+
+
 def test_helper_imports_nothing_of_the_package() -> None:
     names = set()
     for node in ast.walk(ast.parse(HELPER.read_text())):
@@ -348,11 +506,11 @@ sys.exit(status)
 '''
 
 # With one bundle the helper makes five requests: the bucket and the bundle in setup, then the
-# listing, the bundle and the bucket in teardown.
+# listing, the bundle and the bucket in teardown. The status None is 128 plus the signal's number.
 WINDOWS = {
     'setup-1': ('1:{0}', False, 0), 'setup-2': ('2:{0}', False, 0),
     'teardown-3': ('3:{0}', True, 0), 'teardown-4': ('4:{0}', True, 0), 'teardown-5': ('5:{0}', True, 0),
-    'second': ('1:{0},2:{0}', False, 0), 'thread': ('thread:{0}', False, 0), 'command': ('', True, 130),
+    'second': ('1:{0},2:{0}', False, 0), 'thread': ('thread:{0}', False, 0), 'command': ('', True, None),
 }
 SIGNALS = {'int': signal.SIGINT, 'term': signal.SIGTERM, 'hup': signal.SIGHUP}
 MODES = ('legacy', 'standard')
@@ -368,6 +526,7 @@ SIGNAL_SELF = ('import os, sys, time; os.kill(os.getppid(), int(sys.argv[1])); t
 def test_a_signal_in_any_window_tears_down_on_the_first(window: str, name: str, mode: str, tmp_path: Path) -> None:
     plan, command, status = WINDOWS[window]
     signum = SIGNALS[name]
+    status = 128 + signum if status is None else status
     scratch = tmp_path / 'tmp'
     scratch.mkdir()
     env = dict(os.environ, TMPDIR=str(scratch), AWS_RETRY_MODE=mode, AWS_CONFIG_FILE=str(tmp_path / 'absent'),

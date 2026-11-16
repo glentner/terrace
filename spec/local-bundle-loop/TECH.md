@@ -3,11 +3,11 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/local-bundle-loop
 base: main
 current_phase: done
-last_updated: '2026-11-15'
+last_updated: '2026-11-16'
 phases:
 - id: P1
   name: Stand the loop up with one command
@@ -15,6 +15,7 @@ phases:
   satisfies:
   - R1
   - R2
+  - R9
   depends_on: []
   parallel: false
   hammerable: false
@@ -358,6 +359,93 @@ behind on any exit path; its own tests prove each of those.
         `verify`: lint ok, 813 passed and 9 xfailed, none skipped on this host. `ledger` and
         `figures-p3` rerun after this item, since both read what it edits. The macOS leg is CI's to
         show; this host never reproduced the hang.
+- **Amended at remediation (2026-11-16, review cycle 3).** P1 reopened for cycle 3's F1, F2 and F3,
+  under the maintainer's ruling of 2026-11-16: one remediation, then a review scoped to these three.
+  P1 now also satisfies R9. F2 is `AGENTS.md`'s, which P1 has edited for the helper since its first
+  build, and P1's gate already runs P3's whole gate (`figures-p3` and `ledger` among it), so P3 is
+  not reopened. One commit.
+  - [x] F1 (R2, the caller's side): whatever `Requests` changes to hear a signal, its `close` puts
+        back: the wakeup fd, the calling thread's signal mask (`SIG_SETMASK` with the mask the
+        unblock returned) and the three handlers, read with `getsignal` before the helper's go in (a
+        handler installed outside Python, which `getsignal` reports as `None`, gets the default).
+        `main` still calls `close` last, after `Loop.close()` and `Store.stop()`: a signal during
+        teardown is only recorded and teardown completes, and one after it reaches the caller's own
+        handler. The handlers now go in before the mask opens, so a signal the parent left pending is
+        recorded by the helper rather than acted on by the caller's handler; a failure to set the
+        wakeup fd (off the main thread) closes the pipe before it raises. This supersedes the
+        2026-11-12 remediation's docstring that the handler stays once the loop is gone.
+  - [x] F3: one exit status for a command ended by a signal, 128+N, whichever process the signal
+        reached first. `run` turns `Popen`'s negative status into 128+N (the command took it first,
+        as with a terminal's Ctrl-C to the process group); `main` returns 128+N for the signal it
+        recorded (the helper took it first), where it returned 130 for all three. Without a command a
+        signal is the way to stop the helper, and it exits 0, as before. The suite's `command`
+        window (a command that signals the helper) now expects 128+N for each signal, not 130 for
+        all. Teardown is unchanged on every path.
+  - [x] F2 (R9): the `tests/` row of § Repository map named `test_scenario.py` as what drives the
+        stages; it now names `stages.py` for the stages, their owners (`STAGES`, `owned`) and the one
+        step a stage may stop at (`blocked`, `REFUSAL`), `test_scenario.py` and
+        `test_scenario_minio.py` as the two modules that collect them, and every other module of
+        `tests/loop/`. § Verification's progress-record paragraph names `stages.py` the same way.
+        § Commands gains a line for `BUNDLE_LOOP_EVERY_SIGNAL=1` and a paragraph on the helper: every
+        option `--help` shows (`-n`/`--bundles`, `--fastest-size`, `--endpoint`, `--access-key`,
+        `--secret-key`, `--region`), the variables it exports (`BUNDLE_LOOP_SPEC`,
+        `BUNDLE_LOOP_ENDPOINT`, `BUNDLE_LOOP_BUCKET`), its exit statuses, and
+        `BUNDLE_LOOP_DUMP_AFTER` as the test's own setting rather than a switch. The `tools/` row
+        points there. `--access-key`, `--secret-key` and `--region` gain help text, and `main`'s
+        parser moves into `arguments()` so a test can read the options. Sweep: every line of
+        `AGENTS.md` naming a loop file or a `BUNDLE_LOOP_` name, and the `ROADMAP.md` and `issues/`
+        lines this cycle added (`issues/ci-integration-lane.md`'s note,
+        `issues/loop-excuse-audit-scope.md`, `issues/tier-moto-server-name-lookup.md`): no other loop
+        file or switch is named wrong.
+  - [x] Pins, in `tests/loop/test_helper.py`:
+        `test_main_in_process_gives_the_caller_its_signal_handling_back` runs `main` in the test's
+        own process down six paths (a command exiting 0, a setup error, a signal before the loop, in
+        setup, from the command, while waiting). The caller's own handlers, a wakeup fd and a mask
+        holding SIGHUP are set first; afterwards each is the caller's again, and one real signal of
+        each kind reaches the caller's handler and its wakeup fd. The test raises its signals on its
+        own thread (`raise_signal`), so each lands where it is meant to.
+        `test_an_interrupt_after_main_in_process_stops_the_caller` runs `main` in a process with
+        Python's own SIGINT handling, then interrupts it: it ends by `KeyboardInterrupt` (status -2)
+        within 10 s, the reviewer's `drive_ctrl_c.py` without pytest.
+        `test_a_signal_to_the_process_group_exits_128_plus_its_number` (`int`, `term`, `hup`) starts
+        the helper with a running command in a session of its own and signals the group: 128+N, no
+        traceback, the directory gone and the endpoint refusing.
+        `test_agents_md_lists_every_file_flag_and_variable_of_the_loop`: every option `--help` shows
+        and every `BUNDLE_LOOP_` name in the helper and `tests/loop/` appears under § Commands, and
+        every module of the loop appears in `AGENTS.md`. It reads names; that each named file does the
+        job the text gives it stays a reader's check.
+  - [x] Red before, on a throwaway worktree of `ac603a2` with this `test_helper.py` over the old
+        helper: 12 of the 13 tests selected failed. The in-process test failed on all six paths, four
+        on the handlers (still the helper's recorder) and two on the status (130 for SIGTERM and
+        SIGHUP); the interrupt after `main` never stopped the process; the group signal exited 254,
+        241 and 255 for SIGINT, SIGTERM and SIGHUP; the `command` window exited 130 for SIGTERM; the
+        docs pin could not read the options (no `arguments`). With this helper planted there over
+        the old `AGENTS.md`, the docs pin failed on eleven names missing from § Commands: the six
+        long options and the five `BUNDLE_LOOP_` names. `test_setup_error_in_main_stops_the_store`
+        passed on both trees.
+  - [x] The reviewer's drives, on this tree: `drive_ctrl_c.py` stops both runs 0.3 s after SIGINT
+        with status 2 (it was 23.7 s and status 0 after the helper test); `drive_exits.py` exits 130
+        on five of five group Ctrl-Cs with a command (it was 254) and 143 on SIGTERM to the helper
+        with a command (it was 130), each with the directory gone and the endpoint refusing.
+  - [x] The other side of F1, a mutant on the throwaway worktree: `requests.close()` moved ahead of
+        `loop.close()`, so the handlers go back before teardown. With every signal case, all 18
+        teardown windows failed (a signal during teardown met the default handling and cut teardown
+        short) and the six `second` cases passed; the in-process test failed on the three paths that
+        never build a loop. The suite's own six representatives include `teardown-4-hup-standard`.
+        The worktree was removed.
+  - [x] Counts: 833 unit tests and 852 in all (eleven new items), 52 files under `tests/` and 86
+        `.py` files unchanged, moved in `AGENTS.md`. Measured by
+        `spec/racing-write-marked-clean/remediation/F1-agents-figures.py` (its two misreadings, "nineteen"
+        and the SPDX sentence naming `tools/`, checked by hand against 19 collected and lint's 86) and
+        by `check_outcomes.py figures-p3`.
+  - [x] The gate and closing P1. The whole gate, on this tree before this item was written, load
+        average 2.5 at its start: lint ok (86 `.py` files); `p1 ok` (35 helper tests); `p3 ok` (61
+        passed and 9 xfailed in `tests/loop`; lane 32.3 s before, 33.5 s after, 1.2 s added of a
+        10 s budget; 824 passed and 9 xfailed in the unit lane); cycle 1's F1 checker 585 of 585
+        repeats; cycle 2's F2 checker 48 of 48 cases and 100 of 100 repeats. The profile's `verify`:
+        lint ok, 824 passed and 9 xfailed, none skipped or failed. The whole signal matrix
+        (`BUNDLE_LOOP_EVERY_SIGNAL=1`, the § Commands line): 77 passed in `test_helper.py`, 48 of them
+        the matrix. `ledger` and `figures-p3` rerun after this item, since both read what it edits.
 - **Verify:** `tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p1 && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3 && uv run python -I spec/local-bundle-loop/remediation/F1-socket-timing.py && uv run python -I spec/local-bundle-loop/remediation/F2-signal-teardown.py`
 - **Touches:** `tools/bundle_loop.py`, `tests/loop/__init__.py`, `tests/loop/conftest.py`,
   `tests/loop/test_helper.py`, `tools/lint.sh`, `.github/workflows/ci.yml`, `AGENTS.md`; at the
