@@ -37,8 +37,8 @@ fail() { printf 'lint: FAIL  %s\n' "$*"; failed=1; }
 # warning to stderr; do not gate on empty stderr.
 
 if command -v uvx >/dev/null 2>&1 && [ -z "$no_net" ]; then
-    if uvx ruff check --select E9,F63,F7,F82 src tests; then
-        note "OK    ruff E9,F63,F7,F82 over src tests"
+    if uvx ruff check --select E9,F63,F7,F82 src tests tools; then
+        note "OK    ruff E9,F63,F7,F82 over src tests tools"
     else
         fail "ruff reported errors"
     fi
@@ -88,13 +88,13 @@ $core"
 # is the point.
 
 missing=''
-for f in $(find src tests -name '*.py' ! -path '*/__pycache__/*' | sort); do
+for f in $(find src tests tools -name '*.py' ! -path '*/__pycache__/*' | sort); do
     head -2 "$f" | grep -q '^# SPDX-FileCopyrightText: ' || missing="$missing $f"
     head -2 "$f" | grep -q '^# SPDX-License-Identifier: Apache-2.0$' || missing="$missing $f"
 done
 if [ -z "$missing" ]; then
-    n_py=$(find src tests -name '*.py' ! -path '*/__pycache__/*' | wc -l | tr -d ' ')
-    note "OK    SPDX header pair on all $n_py .py files under src/ and tests/"
+    n_py=$(find src tests tools -name '*.py' ! -path '*/__pycache__/*' | wc -l | tr -d ' ')
+    note "OK    SPDX header pair on all $n_py .py files under src/, tests/ and tools/"
 else
     fail "missing or misplaced SPDX header:$missing"
 fi

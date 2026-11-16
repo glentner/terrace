@@ -168,9 +168,9 @@ Draft R-IDs, to be firmed up at promotion.
      closes the node-scope question at the same time.
 - 2026-11-11 (whole-tree review at `64faf27`): the read side (admit the archive types and keys,
   construct the tier, index, read) is the first step of the bundle loop
-  ([`issues/local-bundle-loop.md`](local-bundle-loop.md)) and all a read-only mount needs
+  ([`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)) and all a read-only mount needs
   ([`issues/read-only-mount.md`](read-only-mount.md)). Shaping may split read from write here.
-- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): in the
+- 2026-11-11 (the maintainer's user story, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): in the
   story the bundles land on the shared scratch tier, beside the altered files. In `PLAN.md`'s examples
   `staging` is a path of its own on the source tier, which no overlap rule sees and no quota counts.
   Shaping should decide whether a bundle's working copy lives inside the first shared stage tier, managed

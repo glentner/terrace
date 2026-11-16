@@ -59,18 +59,35 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 744 tests, ~60 s — must pass before every commit
-uv run pytest -n auto -m unit                    # pytest-xdist; ~30 s, test_model alone takes ~25 s
+uv run pytest -m unit                            # 846 tests, ~75 s — must pass before every commit
+uv run pytest -n auto -m unit                    # pytest-xdist; ~35 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
-uv run pytest -m integration                     # 10 tests: real mounts (Linux) + MinIO
+uv run pytest -m integration                     # 19 tests: real mounts (Linux) + MinIO
 tools/lint.sh                                    # ruff + layering + SPDX + version + CLAUDE.md symlink
 tools/temp_site.sh uv run terrace --version      # CLI drive in a throwaway site
+uv run python tools/bundle_loop.py               # the bundle loop on a local object store; prints the spec (below)
+BUNDLE_LOOP_EVERY_SIGNAL=1 uv run pytest -m unit tests/loop/test_helper.py   # the helper's whole signal matrix
 uv build                                         # sdist + wheel
 uv run sphinx-build docs docs/_build             # docs (docs/ does not exist yet)
 uv run terrace --help                            # CLI surface
 uv run terrace mount spec.toml /mnt/space -f     # foreground mount (debug: -d)
 ```
+
+**The bundle loop helper**, `uv run python tools/bundle_loop.py [options] [-- COMMAND ...]`, starts a
+moto store, fills a bucket with generated `tar.gz` bundles, writes an archive-tier spec over it with
+POSIX stage tiers in one temporary directory, and prints the spec's path as the first line of
+standard output. `-n N`/`--bundles N` sets the bundle count (one gives the single-archive form, more
+the sharded form); `--fastest-size BYTES` sets the fastest tier's size limit; `--endpoint URL` uses
+that S3 endpoint instead of starting a store, with `--access-key`, `--secret-key` and `--region`
+(defaults `test`, `test`, `us-east-1`). Without a command it waits for SIGINT, SIGTERM or SIGHUP and
+exits 0. With one, it runs it with `BUNDLE_LOOP_SPEC` (the spec's path), `BUNDLE_LOOP_ENDPOINT` (the
+store's URL) and `BUNDLE_LOOP_BUCKET` (the bucket) set, and exits with its status, or 128+N when
+signal N ended the run, whether the signal reached the command or the helper first. Every exit path
+removes the bucket and the directory and stops the store. `tests/loop/test_helper.py` runs six
+representative cases of its signal matrix (where the signal lands, which signal, which client retry
+mode); `BUNDLE_LOOP_EVERY_SIGNAL=1` runs every case. `BUNDLE_LOOP_DUMP_AFTER` is not a switch: that
+test sets it for the driver it starts, which dumps every thread's stack after that many seconds.
 
 **Supported Python is 3.15+** (`requires-python = ">=3.15"`), and the **free-threaded build is a
 first-class target** — CI runs `3.15` and `3.15t`. obstore ships no free-threaded wheel, so the
@@ -85,8 +102,9 @@ Each of the four jobs (`Lint & build`, `Unit (Linux, 3.15)`, `Unit (Linux, 3.15t
 red job is a defect to fix, never a known failure to read past.
 
 **CI does not run the integration suite.** There is no integration job and nothing starts MinIO, so
-ten tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, plus the
-only real-S3 round trip — execute on no automated machine. Never infer from a green PR that they
+nineteen tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, the
+only real-S3 round trip, and the bundle loop's nine stages against MinIO — execute on no automated
+machine. Never infer from a green PR that they
 passed. Worse, `uv run pytest -m integration` **exits 0 when every test skipped**, so a gate written
 that way proves nothing; assert a pass count.
 
@@ -100,8 +118,8 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 44 files, 754 tests (744 `unit`, 10 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. |
-| `tools/` | `lint.sh` (the static gate) and `temp_site.sh` (the throwaway environment, § *Factory*). |
+| `tests/` | 54 files, 865 tests (846 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the one step a stage may stop at (`blocked`, `REFUSAL`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
+| `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set; every option and variable under § *Commands*). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
 
@@ -125,7 +143,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 393 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 432 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -211,7 +229,7 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
 | `state/registry.py` — `_attach` | The only thing standing between an evaporated tier and silent re-adoption of its residency rows. |
 | `state/sql.py` — `IDENTIFIER`; `state/catalog.py` — `META_FIELDS` / `RESIDENCY_FIELDS` | The only barrier between a userspace-derived name and SQL text. |
 | `engine/overlay.py` — `_commit_hop`, `commit_upstream`, `commit_to_shared`, `evict_copy` | The sole clean-transition point and the only code that destroys bytes on purpose. A wrong edit is silent data loss, not a crash. |
-| `engine/overlay.py` — `write`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack. Reordering two statements is undetectable in review and unrecoverable in production. |
+| `engine/overlay.py` — `write`, `_change`, `_meet`, `_mark_handle_dirty`, `truncate` | Metadata-before-ack, and the admission a hop's record depends on. Reordering two statements is undetectable in review and unrecoverable in production. |
 | `engine/overlay.py` — `_execute_namespace`, `_execute_namespace_locked`, `_remove`, `_purge`, `_purge_source`, `_vacate`, `rename`, `_replay_through`, `_clear_inner_target`, `_place_parents`, `_target`, `_holder_rows`, `create`, `commit_row`, `_settle_moot`, `flush` | Deferred-op replay, where an entry's bytes are placed on the source, and which queued row a replay may settle; the confirm-before-purge ordering is not expressible in the type system. |
 | `engine/overlay.py` — `open`, `_serve`, `_lookup_again`, `_ensure`, `_named`, `_adopt`, `_watch`, `eligible_tier`, `getattr`, `_record`, `_stat_held`, `_held_path` | Placement policy, `source_path` resolution (opening, promoting off the source, stating the bytes a handle serves, and cutting them without a handle) and the lookup under the source lock that decides it, with the purge watch that tells the entry from a file that took its id, `bypass_size`, quota admission. |
 | `engine/transfer.py` — `copy` | The single place an intent bracket wraps a real byte move, and where tier counters are adjusted. |
@@ -235,7 +253,7 @@ review; where its grain differs from the table above, the table governs.
 | Region | Why |
 |--------|-----|
 | `state/db.py`, `journal.py`, `schema.sql`, `lifecycle.py`, `registry.py` | The durability substrate. One keyword, four pragmas and forty lines of journal carry both sacred invariants; `SCHEMA_VERSION` has **no migration path**, so a bump makes every existing state database unopenable. |
-| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
+| `engine/overlay.py` — `_commit_hop`, `commit_*`, `evict_copy`, `write`/`_change`/`_meet`/`_mark_handle_dirty`/`truncate`, `_execute_namespace`/`_execute_namespace_locked`/`_remove`/`_purge`/`_purge_source`/`_vacate`/`rename`/`_replay_through`/`_clear_inner_target`/`_place_parents`/`_target`/`_holder_rows`/`create`/`_settle_moot`/`flush`, `open`/`_serve`/`_lookup_again`/`_ensure`/`_named`/`_adopt`/`_watch`/`getattr`/`_record`/`_stat_held`/`_held_path` | Where a copy goes clean, where bytes are destroyed on purpose, where deferred ops resolve and settle, and where the source places, serves and reports an entry's bytes. Failures here are silent, not loud. |
 | `state/journal.py` — `current`/`settle_current`/`settle`/`cancel`/`queued_marks`; `state/catalog.py` — `holder`/`held`/`advance_source_path`/`purge` | Queue-row identity (ids are reused) and the committed source path's bookkeeping. A replay that settles by id alone deletes a newer op. |
 | `engine/transfer.py`, `writeback.py`, `evict.py`, `drain.py`, `locks.py`, `core/fsm.py` | The intent bracket around a real byte move; the loss window at every boundary; the ordering every constrained time budget depends on; sixty-seven lines between the mount and a deadlock. |
 | `fuse/mount.py` — `shutdown`, the signal handlers, `_daemonize_and_serve` | The only code deciding drain vs rescue vs neither. The daemonized branch has **zero test coverage**. |
@@ -245,8 +263,8 @@ review; where its grain differs from the table above, the table governs.
 
 - **Metadata before acknowledgment.** A clean→dirty transition commits to SQLite *before* the write
   that caused it is acknowledged. `Journal.mark_dirty` flips the residency row and inserts or
-  refreshes the write-back queue row in one transaction; `OverlayEngine.write` calls
-  `_mark_handle_dirty` and only then `os.pwrite`. Both truncate paths mark first.
+  refreshes the write-back queue row in one transaction; `OverlayEngine.write` runs its `os.pwrite`
+  inside `_change`, which calls `_mark_handle_dirty` first. Both truncate paths mark first.
 - Reversing the order leaves the fast-tier copy newer than the source with no record saying so.
   After a `SIGKILL` the audit sees a clean residency, treats the source as authoritative, and rolls
   the file back to the stale upstream version. **Silent data loss with a clean exit code** — no
@@ -494,11 +512,32 @@ review; where its grain differs from the table above, the table governs.
   by path instead leaves the source tree correct in shape and wrong in permissions (or, at a path since
   reused, carrying another entry's mode), and the divergence is invisible to the catalog. Stage tiers
   keep `materialize_dirs`, whose paths are logical because stage copies move with the catalog.
-- **After a copy, `changed` detection re-arms rather than settles.** A write racing the commit must
-  never mark the holder clean: the residency goes clean only when the stat matches what was copied,
-  and open handles have `marked_dirty` reset *before* the stat so a subsequent write re-queues.
-  Moving the reset after the stat loses a write that lands between them — no journal row, no
-  residency evidence, nothing for the audit to reconcile against.
+- **A copy goes clean on the engine's own record of the hop, never on a stat.** A hop opens a record
+  for its holder when its copy starts reading (`TransferPool.copy` calls the hop's `before_read` before
+  its stat of the holder), and every change to a holder's bytes is written to it under
+  `_handles_mutex`: a `write` or a `truncate` through a handle is admitted before its bytes land
+  (`_change`) and counted in flight until it returns, and a `truncate` with no handle writes the record
+  before its cut (`_meet`). The record opens already met when a change is in flight on the holder.
+  After the copy the hop stats the holder and then, in one hold of the mutex, takes the record and
+  resets `marked_dirty` on the holder's open handles. The holder goes clean only when no change met the
+  hop *and* the stat still equals what was copied; otherwise the row is re-clocked and the holder stays
+  dirty. A hop with no record is read as met, and a copy that raises removes its record. The stat can
+  only veto: it catches bytes changed behind the engine's back, and an equal size and mtime are not
+  evidence that nothing was written.
+- **A handle's flag is read and its change admitted in one hold of the mutex**, so a change either
+  meets the hop or finds its flag reset and re-marks on the path lock the commit holds. Reading the
+  flag outside the mutex, admitting a change after its bytes land, taking the record before the stat,
+  or skipping the reset each lets a write land on a copy recorded clean: no journal row, no residency
+  evidence, nothing for the audit to reconcile against. The reset is unconditional: after a hop a
+  change met, it is what makes the writer's next change wait on the path lock, which is what lets
+  `commit_upstream`'s loop end under a writer that never pauses. So a handle whose write met a hop
+  pays one dirty mark on its next write, although its copy is still dirty.
+- **While one admitted change is in flight, `commit_upstream` copies the file again.** The record
+  opens met, the hop re-arms, and the loop takes the same hop at once, with the path lock held, until
+  that call returns; nothing bounds it but the call (`issues/pump-liveness-and-loss-windows.md`). A
+  change the engine admitted counts as met whether or not its bytes had landed when the copy read, and
+  whether or not its call then fails. The rule rests on a handle's fd naming its tier's current file
+  for the entry, which a commit from a faster tier breaks; see § *Known open violations*.
 - **All policy logic takes an injectable clock.** `poll` takes an explicit `now`; every deadline is
   arithmetic on stored timestamps. A test that sleeps is testing the one-second scan tick, not the
   sixty-second delay: it either takes a minute or asserts nothing.
@@ -631,6 +670,17 @@ review; where its grain differs from the table above, the table governs.
   `rename` takes it around its `_vacate`, and the cut around `_serve`, which takes it again to promote
   off the source; a replay does not nest it, since it runs every row it reaches under the hold its caller
   took, through `_execute_namespace_locked`.
+- **The handle mutex** (`OverlayEngine._handles_mutex`) guards the open-handle table, each handle's
+  `marked_dirty` and `changing`, and the open hop records, `_hops` (§ 6). It is held for a few
+  statements and never across I/O, SQL or a wait; nothing is acquired while it is held, and nothing
+  takes it inside a transaction. Its holders beyond the table's own (`open`, `release`, `getattr`,
+  `evict_copy`): `write` and `truncate` through a handle, twice each and with no other lock
+  (`_change`); `_mark_handle_dirty`, under the path lock, after its `mark_dirty` has committed; a hop,
+  to open its record from inside `TransferPool.copy` (after the intent's insert has committed, and
+  under the source mutex when the hop commits to the source) and to take it after its stat; and
+  `truncate` with no handle, under the path lock and the source mutex. `Handle.written` is not
+  guarded by it. It is engine-wide, so every change through a handle contends on it; that cost is
+  not measured. Its place in the order is unchanged.
 - **The purge-watch mutex** (`OverlayEngine._watches_mutex`) guards the open purge watches and the ids
   recorded in them (§ 5). It is a leaf, last in the order. Its holders: `_purge`, inside its transaction,
   after the SQLite write lock, to record a purged id; `_adopt`, inside its insert's transaction, to clear
@@ -706,7 +756,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (10 skipped, 744 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 846 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -722,10 +772,11 @@ Violations are HIGH, not auto-CRITICAL.
 
 ### Known open violations
 
-Defects the harness port's audit found and reproduced, and three a review of the whole tree reproduced
-on 2026-11-11, each recorded so a reviewer neither re-files it nor mistakes it for an accepted
-standard. **These are violations, not exceptions.** Each names the seed that owns the repair; a cycle
-that touches the region should either fix it or say why not.
+Defects the harness port's audit found and reproduced, two a review of the whole tree reproduced
+on 2026-11-11, and one a design review reproduced on 2026-11-12, each recorded so a reviewer neither
+re-files it nor mistakes it for an accepted standard. **These are violations, not exceptions.** Each
+names the seed that owns the repair; a cycle that touches the region should either fix it or say why
+not.
 
 | § | Violation | Seed |
 |---|---|---|
@@ -741,7 +792,7 @@ that touches the region should either fix it or say why not.
 | Conventions | The **integration suite runs on no automated machine**; CI has no integration job. | `issues/ci-integration-lane.md` |
 | — | Smaller measured gaps: `residency.checksum` is never written though the spec parses the flag; `tier.generation` never advances in production; `intent.temp_name` is dead and the archive's sibling `.tmp` is outside the orphan convention; `statfs` reports 100% full for an unquota'd non-POSIX source; no directory `fsync` anywhere; `S3Tier.rename`'s docstring claims an atomicity S3 does not have. | `issues/invariant-audit-gaps.md` |
 | — | The daemonized (default) mount **fails on a first-ever mount** — the log file is opened before the state directory exists. No test covers the daemonized branch. | `issues/daemonized-mount-first-run.md` |
-| 1, 6, 7 | A **write racing a commit is recorded clean**. `_commit_hop` clears a copy from a flag it resets and a stat it compares; a write that read the flag before the reset and lands after the stat, or one of the same size inside one timestamp tick, leaves the holder clean with bytes its upstream lacks, and the next eviction deletes them. Both routes reproduced by injection. | `issues/racing-write-marked-clean.md` |
+| 6, 7 | A **write through a handle on a stage is lost once a commit from a faster tier replaces that stage's file**. One entry can have handles open on two tiers; the faster tier's commit renames a new file over the slower tier's, a write through the older handle then returns success into a file no path reaches, and the next commit records the copy clean without it. No commit is in flight when the write is lost. Reproduced on a three-tier stack. | `issues/stage-handle-outlives-its-file.md` |
 | 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
 | 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
 
@@ -751,7 +802,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **744 unit tests in ~60 s serial, ~30 s under
+The suite is the gate, and it is fast enough to be one: **846 unit tests in ~75 s serial, ~35 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
@@ -766,7 +817,24 @@ name the post-condition it asserts:
   pytest through it** — pytest loses its rootdir and exits 5, and the scrub strips
   `TERRACE_TEST_MINIO_*`.
 - **Integration** — `uv run pytest -m integration` after `docker compose up -d --wait`. Not reachable
-  on every machine and not run by CI; when a criterion needs it, say so.
+  on every machine and not run by CI; when a criterion needs it, say so. The bundle loop's MinIO
+  variant, `tests/loop/test_scenario_minio.py`, has not run on any machine: it is written and
+  collected, and its fixtures have been exercised only against the helper's moto store standing in
+  for MinIO. Running it is `issues/ci-integration-lane.md`'s.
+
+**The bundle loop is a progress record.** `tests/loop/stages.py` drives the loop end to end as nine
+stages: reach, read, pressure, change, re-aggregate, read back, release, offline commit and several
+bundles. `tests/loop/test_scenario.py` collects them in the unit lane and
+`tests/loop/test_scenario_minio.py` in the integration lane. Today they are 9 expected failures,
+each a strict `xfail` whose reason names the seed that owns the stage, and each stopped at the same
+step: the spec parser's refusal of the archive tier (`issues/archive-spec-plumbing.md`). The marker
+accepts one exception, `Blocked`, raised only by `blocked(...)` in `stages.py` around the one step
+the tree is known to stop at, with the exact error and text; a stage that fails anywhere else fails
+the run, and so does a stage that starts to pass. A cycle that moves the block runs every stage
+behind it to its next stop and must, in the same change, remove the marker of each stage that now
+passes and pin the new stop of each that does not with `blocked(...)`. `tests/loop/conftest.py`
+records on each stage's report what stopped it (`stopped`, `cause`) and the marker it was collected
+with (`marker`), since a reason string can be had by a stage that excuses itself.
 
 **Exit 0 is necessary but not sufficient.** Assert the post-condition: the residency row, the xattr,
 the file present at the source after a flush, the reported pass count, the specific stderr line. A
@@ -797,8 +865,8 @@ symbols, documented invariants, `PLAN.md` sections.
 
 Follows hypershell conventions (the author's house style):
 
-* `src/` layout; 120-character lines; SPDX headers on every module (all 75 `.py` files carry them;
-  `lint.sh` keeps it that way).
+* `src/` layout; 120-character lines; SPDX headers on every module (all 88 `.py` files under `src/`,
+  `tests/` and `tools/` carry them; `lint.sh` keeps it that way).
 * Module template:
 
 ```python

@@ -93,7 +93,7 @@ these can only be observed against a real remote endpoint or MinIO, and CI runs 
 - Open question — **Globus semantics.** A submit-wait transfer takes minutes to hours. Does a promote
   block on it, fail with `EAGAIN` and let the caller retry, or serve a stale copy and reconcile later?
   That is a filesystem-semantics decision, not an adapter detail, and it belongs in `PLAN.md` first.
-- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): the
+- 2026-11-11 (the maintainer's user story, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): the
   story names a tape reached over SFTP beside S3 as a source, so the SFTP inner location is split out to
   [`issues/sftp-inner-location.md`](sftp-inner-location.md) and placed with the bundle loop. What stays
   here is the Globus inner location and synthetic-subtree wrapping. R1 above goes with the split.

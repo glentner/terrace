@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Optional
+from typing import Callable, Optional
 
 # Standard libs
 from pathlib import PurePosixPath
@@ -63,7 +63,8 @@ class TransferPool:
 
     def copy(self, path: str, source: Tier, dest: Tier, *,
              action: str, now: float, state: str = 'clean', src_path: Optional[str] = None,
-             dest_path: Optional[str] = None, source_path: Optional[str] = None) -> Residency:
+             dest_path: Optional[str] = None, source_path: Optional[str] = None,
+             before_read: Optional[Callable[[], None]] = None) -> Residency:
         """
         Copy `path` whole from `source` to `dest` under an intent.
 
@@ -76,7 +77,13 @@ class TransferPool:
         source writes where the source already holds the entry. `source_path`,
         when given, is recorded as the entry's committed source path in the
         transaction that confirms the copy, so the source never holds the bytes
-        without the catalog saying where. The caller holds the lock.
+        without the catalog saying where. `before_read`, when given, is called
+        once, after the intent has committed and immediately before the copy
+        first looks at `source` (the stat whose size and mtime the copy
+        records), with no transaction open: a commit opens its record of the
+        hop there, so a write that returned before that look is carried by the
+        copy and one that comes after is on the record. The caller holds the
+        lock.
         """
         path = normalize(path)
         read_path = normalize(src_path) if src_path is not None else path
@@ -86,6 +93,8 @@ class TransferPool:
         intent = self.journal.begin(action, dest.name, now=now, path=path,
                                     detail=None if dest_path is None else {'dest_path': write_path})
         try:
+            if before_read is not None:
+                before_read()
             stat = source.stat(PurePosixPath(read_path))
             if stat is None or stat.kind != 'file':
                 raise TierError(f'No file at {read_path} in tier {source.name}')

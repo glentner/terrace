@@ -168,7 +168,7 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   whether the flag stays overlay-wide or becomes per-boundary.
 - 2026-11-11 (whole-tree review at `64faf27`): one more dead vocabulary value. `writeback.state` admits
   `'active'` (`src/terrace/state/schema.sql:112`) and nothing sets it.
-  [`issues/racing-write-marked-clean.md`](racing-write-marked-clean.md) notes the state it was reserved
+  [`issues/copy-lifecycle-state-machine.md`](copy-lifecycle-state-machine.md) notes the state it was reserved
   for.
 - Found by: the invariant audit run during the software-factory port (2026-08-22). Findings 1, 2 and 3
   from the state-store topic; 3 (the archive temp), 5 and 6 from the tier-atomicity topic; 4 from the

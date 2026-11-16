@@ -84,7 +84,7 @@ Draft R-IDs, to be firmed up at promotion.
 - 2026-11-11, the maintainer: a read-only mount is a large part of the project and not its flagship.
   What sets the project apart is write-back with delayed re-aggregation into compressed bundles at
   the source. This mode therefore follows a first pass through that loop
-  ([`issues/local-bundle-loop.md`](local-bundle-loop.md)); it does not lead.
+  ([`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)); it does not lead.
 - Open question — **per mount or per overlay.** A spec key makes the overlay read-only for good and
   lets the engine skip constructing the write path. A mount option lets one overlay be staged
   read-write and served read-only.

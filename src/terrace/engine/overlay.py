@@ -50,9 +50,13 @@ class EngineError(TerraceError):
 
 
 class Handle:
-    """An open file: a passthrough OS fd on the serving tier plus dirty-tracking state."""
+    """
+    An open file: a passthrough OS fd on the serving tier plus dirty-tracking state. `marked_dirty` says the
+    handle may skip the dirty mark, and `changing` counts the writes and truncates through it that the engine
+    has admitted and that have not returned; both are read and written only under the engine's handle mutex.
+    """
 
-    __slots__ = ('entry_id', 'tier', 'fd', 'flags', 'written', 'marked_dirty')
+    __slots__ = ('entry_id', 'tier', 'fd', 'flags', 'written', 'marked_dirty', 'changing')
 
     def __init__(self, entry_id: int, tier: str, fd: int, flags: int) -> None:
         self.entry_id = entry_id
@@ -61,6 +65,7 @@ class Handle:
         self.flags = flags
         self.written = False
         self.marked_dirty = False
+        self.changing = 0
 
 
 def _pure(path: str) -> PurePosixPath:
@@ -90,8 +95,14 @@ class OverlayEngine:
         self.locks = LockRegistry()
         self.tiers: Dict[str, Tier] = {}
         self.started = False
+        # `_handles_mutex` guards the open-handle table, each handle's `marked_dirty` and `changing`, and the hop
+        # records in `_hops`. A hop has a record from the moment its copy first looks at the holder until the hop
+        # decides, keyed by (entry id, holder tier); its value says a change to the holder's bytes met the hop.
+        # The mutex is held for a few statements, never across I/O, SQL or a wait. Nothing is acquired while it
+        # is held, and nothing takes it inside `db.transaction()`.
         self._handles: Dict[int, List[Handle]] = {}
         self._handles_mutex = threading.Lock()
+        self._hops: Dict[Tuple[int, str], bool] = {}
         # Serializes every change to the source's namespace (a replayed op, a vacate's replay, a purge, and a data
         # commit or a create whose destination is the source, placement through recording), and these acts too:
         # a user rename from its `_vacate` through its catalog move, the stat behind recording a copy served off the
@@ -800,33 +811,81 @@ class OverlayEngine:
     def write(self, handle: Handle, data: bytes, offset: int) -> int:
         """
         Write through the passthrough handle. The clean->dirty transition commits
-        before the bytes land (metadata before acknowledgment); writes to an
-        already-dirty handle carry no metadata cost. Writes served directly by
-        the source are write-through — nothing upstream to owe.
+        before the bytes land (metadata before acknowledgment); a write to an
+        already-dirty handle runs no SQL and takes no path lock. Every write is
+        admitted before its bytes land and counted in flight until it returns
+        (`_change`), so a commit of the copy it lands on never records that copy
+        clean without it. Writes served directly by the source are write-through
+        — nothing upstream to owe.
         """
-        if not handle.marked_dirty:
-            self._mark_handle_dirty(handle)
-        count = os.pwrite(handle.fd, data, offset)
+        with self._change(handle):
+            count = os.pwrite(handle.fd, data, offset)
         handle.written = True
         return count
 
+    @contextlib.contextmanager
+    def _change(self, handle: Handle) -> Iterator[None]:
+        """
+        Admit one change to the bytes `handle` serves, for the block that makes it. The handle's flag is read and
+        the change admitted in one hold of the handle mutex: the change is counted in flight and written to the
+        hop record of its copy, if a hop is open (`_meet`). A handle whose flag is not set marks first
+        (`_mark_handle_dirty`) and is admitted there, under the path lock. So a hop either has the change on its
+        record or has reset the flag before the change read it, and the change then waits on the path lock the
+        commit holds. No lock is held across the block, and the change leaves flight when the block ends, however
+        it ends.
+        """
+        with self._handles_mutex:
+            admitted = handle.marked_dirty
+            if admitted:
+                handle.changing += 1
+                self._meet(handle.entry_id, handle.tier)
+        if not admitted:
+            self._mark_handle_dirty(handle)
+        try:
+            yield
+        finally:
+            with self._handles_mutex:
+                handle.changing -= 1
+
+    def _meet(self, entry_id: int, tier: str) -> None:
+        """
+        Write a change to the bytes `tier` holds for the entry to the hop record of that copy, if a hop is open on
+        it. The caller holds the handle mutex. Nothing else sets a record.
+        """
+        if (entry_id, tier) in self._hops:
+            self._hops[entry_id, tier] = True
+
     def _mark_handle_dirty(self, handle: Handle) -> None:
-        """Flip the serving copy dirty against its upstream boundary, once per handle."""
+        """
+        Flip the serving copy dirty against its upstream boundary, then set the handle's flag and admit the change
+        that asked for the mark (`_change`). The flag is set and the change admitted in one hold of the handle
+        mutex, taken after the dirty mark has committed and before the path lock is released, so the next commit
+        of the path finds the change in flight. A copy served by the source has no upstream, no mark and no hop:
+        its handle sets the flag and admits with no SQL and no path lock.
+        """
         upstream = self.upstream_of(handle.tier)
-        if upstream is not None:
-            entry = self.catalog.by_id(handle.entry_id)
-            with self.locks.hold(entry.path):
-                self.journal.mark_dirty(entry.path, handle.tier, to_tier=upstream.name, now=self.clock())
-        handle.marked_dirty = True
+        path = self.catalog.by_id(handle.entry_id).path if upstream is not None else None
+        with self.locks.hold(path) if path is not None else contextlib.nullcontext():
+            if upstream is not None:
+                self.journal.mark_dirty(path, handle.tier, to_tier=upstream.name, now=self.clock())
+            with self._handles_mutex:
+                handle.marked_dirty = True
+                handle.changing += 1
+                self._meet(handle.entry_id, handle.tier)
 
     def truncate(self, path: str, length: int, handle: Optional[Handle] = None) -> None:
         """
-        Truncate to `length` — a write: the dirty transition commits first. Without a handle, the call takes the
+        Truncate to `length` — a write: the dirty transition commits first, and a commit the cut meets never
+        records the copy clean without it. Through a handle the cut is admitted as a write is (`_change`): before
+        it lands, and counted in flight until it returns. Without a handle, the call takes the
         path lock, then the source lock, and decides under both, once, everything the cut and its recording use:
         the entry at `path`, its kind, the copy that serves it (promoting first, as `open` does), the place that
         copy holds its bytes (`_held_path`) and the keys the recording writes. The source lock holds off every
         replay and every commit to the source until the recording commits, so the object cannot move between the
-        decision and the cut. While the call waits for that lock, a replay may move the object, which the
+        decision and the cut. Every commit of the path holds the path lock around its hops, so a cut from another
+        thread waits for the commit; the lock is re-entrant, so a cut on a thread that is inside a hop goes on, and
+        it writes itself to that hop's record after its dirty mark and before it cuts (`_meet`). While the call
+        waits for the source lock, a replay may move the object, which the
         decision follows; an ancestor's rename or a removal, which the path lock does not cover, may take the
         entry off `path` or carry another entry onto it, and the call then raises ENOENT as if `path` never held
         it. So does a non-file that has taken the entry's id, and a file that has taken it after a purge: the call
@@ -846,9 +905,8 @@ class OverlayEngine:
         """
         path = normalize(path)
         if handle is not None:
-            if not handle.marked_dirty:
-                self._mark_handle_dirty(handle)
-            os.ftruncate(handle.fd, length)
+            with self._change(handle):
+                os.ftruncate(handle.fd, length)
             handle.written = True
         else:
             with self.locks.hold(path), self._watch() as watch:
@@ -867,6 +925,8 @@ class OverlayEngine:
                     now = self.clock()
                     if upstream is not None:
                         self.journal.mark_dirty(path, serving, to_tier=upstream.name, now=now)
+                    with self._handles_mutex:
+                        self._meet(current.id, serving)     # a hop this thread is inside must not go clean
                     fd = self.tiers[serving].open_direct(_pure(held), os.O_WRONLY | os.O_NOFOLLOW)
                     try:
                         os.ftruncate(fd, length)
@@ -980,10 +1040,23 @@ class OverlayEngine:
     def _commit_hop(self, path: str, holder: str, upstream: str) -> None:
         """
         Copy the dirty copy of `path` at `holder` one hop to `upstream` and
-        record the outcome (the caller holds the file lock). Open handles on the
-        holder re-arm their dirty marking, so a write after the copy re-queues;
-        a write racing the copy itself shows in the holder's stat, which leaves
-        the holder dirty and re-clocks the boundary instead of settling it.
+        record the outcome (the caller holds the file lock). The holder goes
+        clean only when no change met the hop, by the engine's own record, and
+        its stat still equals what was copied; otherwise it stays dirty and the
+        boundary is re-clocked. Open handles on the holder re-arm their dirty
+        marking either way, so a change after the hop re-queues.
+
+        The record opens when the copy first looks at the holder (`before_read`),
+        already met if a change through a handle on the holder is in flight, and
+        every change admitted from then on is written to it (`_change`, `_meet`).
+        After the copy the hop stats the holder and then, in one hold of the
+        handle mutex, takes the record and resets the handles' flags: a change
+        admitted before that hold is on the record, and one that comes after
+        finds its flag reset and waits on the caller's path lock to mark. A hop
+        with no record is read as met. The stat can only veto: it catches bytes
+        changed behind the engine's back, and an equal size and mtime are not
+        evidence that nothing was written. A copy or a stat that raises removes
+        the record and leaves the holder dirty, queued, and its handles marked.
 
         A commit to the source writes where the source already holds the entry,
         else at its target, and records that place in the copy's confirming
@@ -992,23 +1065,41 @@ class OverlayEngine:
         pre-rename place. It runs under the source lock (below the caller's path
         lock) so a replay cannot move the place between resolving and writing.
         """
-        if self.tiers[upstream] is self.source:
-            with self._source_lock:
-                entry = self.catalog.get(path)              # read under the lock: a replay may just have moved it
-                where = entry.source_path or self._place_parents(path, self.clock())
-                copied = self.transfers.copy(path, self.tiers[holder], self.source, action='commit',
-                                             now=self.clock(), dest_path=where, source_path=where)
-        else:
-            entry = self.catalog.get(path)
-            copied = self.transfers.copy(path, self.tiers[holder], self.tiers[upstream],
-                                         action='commit', now=self.clock())
-        now = self.clock()
+        key: Optional[Tuple[int, str]] = None
+
+        def before_read() -> None:
+            nonlocal key
+            key = (entry.id, holder)                        # `entry` as the branch below read it
+            with self._handles_mutex:
+                in_flight = any(open_handle.tier == holder and open_handle.changing
+                                for open_handle in self._handles.get(entry.id, []))
+                self._hops[key] = self._hops.get(key, False) or in_flight   # never clears a record already there
+
+        try:
+            if self.tiers[upstream] is self.source:
+                with self._source_lock:
+                    entry = self.catalog.get(path)          # read under the lock: a replay may just have moved it
+                    where = entry.source_path or self._place_parents(path, self.clock())
+                    copied = self.transfers.copy(path, self.tiers[holder], self.source, action='commit',
+                                                 now=self.clock(), dest_path=where, source_path=where,
+                                                 before_read=before_read)
+            else:
+                entry = self.catalog.get(path)
+                copied = self.transfers.copy(path, self.tiers[holder], self.tiers[upstream],
+                                             action='commit', now=self.clock(), before_read=before_read)
+            now = self.clock()
+            stat = self.tiers[holder].stat(_pure(path))     # the hop's last look at the holder
+        except BaseException:
+            if key is not None:
+                with self._handles_mutex:
+                    self._hops.pop(key, None)
+            raise
         with self._handles_mutex:
+            met = key is None or self._hops.pop(key, True)  # no record is read as met
             for open_handle in self._handles.get(entry.id, []):
                 if open_handle.tier == holder:
                     open_handle.marked_dirty = False        # re-marking queues on the path lock we hold
-        stat = self.tiers[holder].stat(_pure(path))
-        changed = stat is None or (stat.size, stat.mtime) != (copied.size, copied.mtime)
+        changed = met or stat is None or (stat.size, stat.mtime) != (copied.size, copied.mtime)
         with self.db.transaction():
             if changed:
                 for row in self.journal.queued_for(path, to_tier=upstream):

@@ -97,6 +97,9 @@ Draft R-IDs, to be firmed up at promotion.
   cache follows from the single-mount rule and is worth one criterion at shaping.
 - `PLAN.md` § *Future work* lists a kernel-passthrough adapter. With read-only handles on resident
   copies it would take the daemon out of `read` entirely; the binding in use does not expose it.
+- 2026-11-12 (`racing-write-marked-clean`): every `write` and `truncate` through a handle now takes the
+  engine-wide `_handles_mutex` twice, where a handle already marked dirty took no lock. No SQL was added
+  and the cost is not measured; measure it on the write path when this seed's numbers are taken.
 - Related: `issues/benchmark-harness.md`, `issues/read-only-mount.md`,
   `issues/pump-liveness-and-loss-windows.md` (the scheduler), `issues/transfer-priority-lane.md`.
 - Found by: an out-of-cycle review of the whole tree at `64faf27` (2026-11-11).

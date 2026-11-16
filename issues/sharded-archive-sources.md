@@ -153,7 +153,7 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   - **Many mounts read one dataset.** A multi-node job mounts on every node and a sweep runs many jobs at
     once. One mount per overlay means one staged copy per mount
     ([`issues/read-only-mount.md`](read-only-mount.md) R6).
-- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): two
+- 2026-11-11 (the maintainer's user story, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): two
   things the story says that nothing here does.
   - **A staged bundle is a unit the shared tier's quota counts.** The story's bundles are pulled to
     scratch and decompressed there, and "ten thousand files on the shared filesystem" is a claim about
@@ -165,7 +165,7 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
     the ordinary promotion off the source, which `ArchiveTier` serves by offset from the working
     `.tar`. It answers the question in the note above: members cascade one at a time to the fast
     tiers, and scratch holds the bundle whole, with no file made there for a member nobody changed.
-- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): a
+- 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): a
   staged bundle is the unit the durable tier's limits count and its eviction moves
   ([`issues/eviction-one-hop.md`](eviction-one-hop.md)): a clean one is dropped, since the source holds
   it; one with altered files beside it is rebuilt and pushed first. Pulling and decompressing a bundle is
