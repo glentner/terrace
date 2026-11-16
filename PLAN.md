@@ -280,18 +280,18 @@ and one mount at a time writes an overlay.
 
 | Ruled or decided | What the tree does | Owning seed | `AGENTS.md` |
 |---|---|---|---|
-| Ruling A | The limits and the delay are optional: a stage tier with neither `quota.size` nor `quota.files` is never reclaimed and fills its device, and `max_interval` defaults to none (`tier/spec.py`). | `issues/eviction-one-hop.md` (its Notes); `issues/pump-liveness-and-loss-windows.md` for `max_interval` | — (§ 6 lists these windows as the tree's) |
-| Rulings B and C | Eviction commits a dirty copy all the way to the source (`commit_upstream`, called at `engine/evict.py:151`) and drops a clean copy (`evict_copy`, `engine/overlay.py:1521`). | `issues/eviction-one-hop.md` | § 7 |
-| Ruling E | After a complete rescue the database still records a copy on every node-scope tier the file passed through, so a mount where those tiers are empty is refused; a second SIGINT, a rescue cut short by its budget and `--force` settle `detached` without a finished rescue (`fuse/mount.py:254-259`). | `issues/shutdown-rescue-gaps.md` | § 8 |
-| Ruling F | `terrace commit` is a stub, and nothing under `engine/` calls `resync` (`tier/archive.py:427`), so nothing rebuilds a bundle. | `issues/offline-commit-command.md`; `issues/archive-finalization-integration.md` for the rebuild | — |
-| Ruling G | Row ids are reused: `entry`, `writeback` and `intent` take `INTEGER PRIMARY KEY` with no `AUTOINCREMENT` (`state/schema.sql:59`, `:106`, `:124`). | `issues/namespace-sync-redesign.md` | § 5, § 10 |
-| Ruling I | A tier's marker names one overlay, so a second overlay reads it as foreign; the member index is in each overlay's database (`archive_index`). | `issues/shared-staged-tier.md`, after `issues/read-only-mount.md` | — |
+| Ruling A | The limits and the delay are optional: a stage tier with neither `quota.size` nor `quota.files` is never reclaimed and fills its device, and `max_interval` defaults to none (`tier/spec.py`); `tests/tier/test_spec.py:101` asserts those defaults and `tests/engine/test_evict.py:169` that an unbounded tier is never reclaimed. | `issues/eviction-one-hop.md` (its Notes); `issues/pump-liveness-and-loss-windows.md` for `max_interval` | — (§ 6 lists these windows as the tree's) |
+| Rulings B and C | Eviction commits a dirty copy all the way to the source (`commit_upstream`, called at `engine/evict.py:151`) and drops a clean copy (`evict_copy`, `engine/overlay.py:1521`); the engine model's `evict` rule does the same (`tests/engine/test_model.py:331`). | `issues/eviction-one-hop.md` | § 7 |
+| Ruling E | After a complete rescue the database still records a copy on every node-scope tier the file passed through, so a mount where those tiers are empty is refused; a second SIGINT, a rescue cut short by its budget and `--force` settle `detached` without a finished rescue (`fuse/mount.py:254-259`; `tests/fuse/test_mount.py:182` and `tests/engine/test_rescue.py:160` pin the second SIGINT and the zero budget). | `issues/shutdown-rescue-gaps.md` | § 8 |
+| Ruling F | `terrace commit` is a stub, and nothing under `engine/` calls `resync` (`tier/archive.py:427`), so nothing rebuilds a bundle; `tests/test_cli.py:43` asserts `commit` is a stub. | `issues/offline-commit-command.md`; `issues/archive-finalization-integration.md` for the rebuild | — |
+| Ruling G | Row ids are reused: `entry`, `writeback` and `intent` take `INTEGER PRIMARY KEY` with no `AUTOINCREMENT` (`state/schema.sql:59`, `:106`, `:124`); tests assert the reuse (`tests/engine/test_replay.py:1085`, `:1100`). | `issues/namespace-sync-redesign.md` | § 5, § 10 |
+| Ruling I | A tier's marker names one overlay, so a second overlay reads it as foreign; the member index is in each overlay's database (`archive_index`); `tests/state/test_registry.py:136` and `tests/state/test_lifecycle.py:133` assert the `FOREIGN` reading. | `issues/shared-staged-tier.md`, after `issues/read-only-mount.md` | — |
 | Ruling J | The names agree. An empty or relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is used as written (`core/platform.py:35-36`). | `issues/xdg-empty-and-relative-values.md` | — |
-| Decision 1 | The staged `.tar` is pulled to a `staging` path of its own (`tier/archive.py:236-241`), outside every tier and every quota; no spec reaches the adapter (`tier/spec.py:25`, `:28`). | `issues/archive-spec-plumbing.md`; the pressure rule that reclaims a staged bundle, `issues/eviction-one-hop.md` | — |
-| Decisions 2 and 3 | Each queued operation is replayed into the adapter, which re-packs the whole working archive on every call (`_repack`, `tier/archive.py:529`); a rename is an operation like any other. | `issues/namespace-sync-redesign.md` (the model); `issues/archive-finalization-integration.md` (the rebuild and its triggers) | § 5 |
+| Decision 1 | The staged `.tar` is pulled to a `staging` path of its own (`tier/archive.py:236-241`), outside every tier and every quota; no spec reaches the adapter (`tier/spec.py:25`, `:28`). The loop helper writes that `staging` line (`tools/bundle_loop.py:201-204`, with its comment citing the example the redraw removed) and the spec it prints carries it; `tests/loop/test_helper.py:76` reads it back and `:92` asserts the staged path lies in no tier root; stage 8 asserts the bundle at that path (`tests/loop/stages.py:402`); the stages' pinned refusal names the `staging` key (`tests/loop/stages.py:82`); and the adapter's own tests build the staged form on a working path of its own (`tests/tier/test_archive.py:365`, `:371`, `:384`). | `issues/archive-spec-plumbing.md`; the pressure rule that reclaims a staged bundle, `issues/eviction-one-hop.md` | — |
+| Decisions 2 and 3 | Each queued operation is replayed into the adapter, which re-packs the whole working archive on every call (`_repack`, `tier/archive.py:529`); a rename is an operation like any other; the adapter's tests pin both (`tests/tier/test_archive.py:260`, `:312`). | `issues/namespace-sync-redesign.md` (the model); `issues/archive-finalization-integration.md` (the rebuild and its triggers) | § 5 |
 | Decision 4 | Nothing on the durable tier records a bundle's index, a removal or a rename; the member index is in each overlay's database. | `issues/durable-tier-record.md` | — |
-| Decision 5 | `begin_mount` raises `CrashDetected` on `mounted` (`state/lifecycle.py:101`) and nothing catches it; `terrace audit` is a stub. | `issues/audit-command.md`; its read-only slice `issues/read-only-mount.md` | § 8 |
-| Decision 6 | `journal_mode = WAL` and `synchronous = NORMAL` on every connection (`state/db.py:94-95`). | `issues/state-store-journal-mode.md`; the check on the real filesystem, `issues/hpc-deployment.md` | § 2, § 10 |
+| Decision 5 | `begin_mount` raises `CrashDetected` on `mounted` (`state/lifecycle.py:101`) and nothing catches it (`tests/state/test_lifecycle.py:67`, `tests/state/test_survival.py:101` and `tests/engine/test_namespace.py:46` assert the raise); `terrace audit` is a stub (`tests/test_cli.py:43`). | `issues/audit-command.md`; its read-only slice `issues/read-only-mount.md` | § 8 |
+| Decision 6 | `journal_mode = WAL` and `synchronous = NORMAL` on every connection (`state/db.py:94-95`), and `tests/state/test_db.py:35-39` reads those two pragmas back. | `issues/state-store-journal-mode.md`; the check on the real filesystem, `issues/hpc-deployment.md` | § 2, § 10 |
 | Decision 7 | No rule names the durable tier: the rescue moves a copy to the nearest shared tier (`engine/rescue.py`), and no spec rule limits a bundle source's stack to one shared stage tier. | `issues/shutdown-rescue-gaps.md` (the tier a soft unmount commits to); `issues/archive-spec-plumbing.md` (refusing the stack) | — |
 
 The evidence behind the decisions has limits, and each is carried by the seed that builds what it
@@ -878,7 +878,8 @@ Ruling D is the maintainer's to revisit on that evidence; this document does not
 **The check.** Run on the filesystem that will hold the state directory: host A is a compute node,
 host B a login node. Python 3.6 or later, standard library only; each line prints the SQLite
 version, so prefer the interpreter the product runs on. `wal` as a last argument to every step runs
-the tree's mode instead; its step B1 opens a WAL database from a second host while the first is
+the tree's mode instead, WAL with `synchronous = NORMAL` (the default mode runs a rollback journal with
+`FULL`); its step B1 opens a WAL database from a second host while the first is
 live, which SQLite documents as unsupported, so only ever in this throwaway directory. The issue
 `issues/hpc-deployment.md` carries the check with its question on the state store.
 
@@ -889,7 +890,8 @@ import fcntl, os, sqlite3, sys, time
 d, role, mode, N = os.path.dirname(os.path.abspath(__file__)), sys.argv[1], (sys.argv[2:] or ['delete'])[0], 200
 def db():
     c = sqlite3.connect(os.path.join(d, 'state.db'), timeout=1, isolation_level=None)
-    c.execute('PRAGMA journal_mode=' + mode); c.execute('PRAGMA synchronous=FULL')
+    c.execute('PRAGMA journal_mode=' + mode)
+    c.execute('PRAGMA synchronous=' + ('NORMAL' if mode == 'wal' else 'FULL'))
     return c
 def flock():
     f = open(os.path.join(d, 'lock'), 'a+')

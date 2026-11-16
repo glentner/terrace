@@ -145,7 +145,7 @@ or a faithful stand-in; none is checkable in CI as it stands.
   of output that mean the assumption holds, a table of what each differing line means, and a
   single-host variant with what it does not show. It needs only Python's standard library. Decision 6
   chose the journal mode the check runs by default, `journal_mode = DELETE` with `synchronous = FULL`;
-  `wal` as a last argument runs the tree's mode instead. By the maintainer's ruling at sign-off,
+  `wal` as a last argument runs the tree's mode instead, WAL with `synchronous = NORMAL`. By the maintainer's ruling at sign-off,
   `issues/state-store-journal-mode.md` builds the safer mode without waiting on this check, so the
   check no longer gates that change: it says whether the one database can stay on that filesystem
   while mounted, and if a line fails, the root `PLAN.md` says what changes. Running it is this seed's,

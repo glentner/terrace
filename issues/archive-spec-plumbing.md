@@ -194,5 +194,13 @@ Draft R-IDs, to be firmed up at promotion.
     for a staged one the staged bundle sits inside the durable tier, which carries its own marker.
   The pressure rule that reclaims a staged bundle, which Decision 1 makes evictable, is
   `issues/eviction-one-hop.md`'s; the bundle record beside it is `issues/durable-tier-record.md`'s.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): the cycle that builds Decision 1 changes three more places that encode
+  the staging path of its own, all named in the root `PLAN.md`'s Decision 1 row: the helper's `staging` line
+  and the spec it writes (`tools/bundle_loop.py:201-204`, whose comment cites the example the redraw
+  removed), the unit test that asserts the staged path lies in no tier root
+  (`tests/loop/test_helper.py:92`, with `:76` reading the key back), and stage 8's assertion of the bundle at
+  that path (`tests/loop/stages.py:402`, owned by `issues/offline-commit-command.md`). The stages' pinned
+  refusal names the `staging` key (`tests/loop/stages.py:82`) and the adapter's tests build the staged form on
+  a working path of its own (`tests/tier/test_archive.py:365`, `:371`, `:384`); both move with the parser.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   tier-invariants and remaining-work briefs.

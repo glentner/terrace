@@ -121,4 +121,8 @@ Draft R-IDs, to be firmed up at promotion.
   (`issues/archive-finalization-integration.md`); the pressure rule itself, which copies the durable
   tier reclaims and in what order, is this seed's. The two questions above stay here: whether a spec
   must state the limits or gets defaults, and what a clean copy does at a full neighbour.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): three places assert the rules Rulings A to C overturn, and the cycle
+  that builds this seed changes them: `tests/tier/test_spec.py:101` (a quota and `max_interval` default to
+  none), `tests/engine/test_evict.py:169` (an unbounded tier is never reclaimed) and the engine model's
+  `evict` rule, which commits a dirty copy upstream and drops it (`tests/engine/test_model.py:331`).
 - Found by: comparing the maintainer's user story of 2026-11-11 with the tree at `64faf27`.

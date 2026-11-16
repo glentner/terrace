@@ -3,7 +3,7 @@ slug: plan-the-bundle-loop
 title: Redraw the root PLAN.md around the user story
 kind: docs
 appetite: big
-status: blocked
+status: in_review
 branch: docs/plan-the-bundle-loop
 base: main
 current_phase: done
@@ -19,7 +19,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: 'tools/lint.sh && uv run python spec/plan-the-bundle-loop/prototype/rebuild.py | grep ''^RESULT trees_equal=yes'' >/dev/null && uv run python spec/plan-the-bundle-loop/prototype/shared.py | grep ''^RESULT oracle_bytes=yes'' >/dev/null && grep -q ''^Trees equal in names and bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Each process read the oracle.s bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Helper commit: [0-9a-f]'' spec/plan-the-bundle-loop/prototype/RECORD.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md'
+  verify: 'tools/lint.sh && uv run python spec/plan-the-bundle-loop/prototype/rebuild.py | grep ''^RESULT trees_equal=yes'' >/dev/null && uv run python spec/plan-the-bundle-loop/prototype/shared.py | grep ''^RESULT oracle_bytes=yes'' >/dev/null && grep -q ''^Trees equal in names and bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Each process read the oracle.s bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Helper commit: [0-9a-f]'' spec/plan-the-bundle-loop/prototype/RECORD.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock && git diff --cached --numstat --merge-base main -- AGENTS.md | awk ''$2 != 0 {bad=1} END {exit bad}'''
 - id: P2
   name: The story, the settled rulings and the tier model
   status: done
@@ -437,6 +437,50 @@ changes each, and the roadmap and seeds agree with the root `PLAN.md`.
   | the bundle record's format; the two kills argued and not injected (tier model (c)) | `issues/durable-tier-record.md` (its R4) |
   | multipart upload, a source changed between pull and write-back, writes during a rebuild, links, empty directories, ownership | `issues/archive-finalization-integration.md` |
   | the integration lane (§ *Testing strategy*) | `issues/ci-integration-lane.md` |
+
+**Amendment (P4 remediation of review cycle 1, 2026-11-16).** Three LOW findings; P1, P3 and P4 were
+reopened (`in_progress`) and are built as one run, since the finding on P3's check and the one on P4's
+row share the root `PLAN.md` and the seeds. `review.*` is untouched.
+- *F1 (R4), the `wal` mode.* The check's `db()` set `synchronous=FULL` in every mode, so `wal` ran WAL
+  with `FULL`, not the tree's WAL with `NORMAL` (`src/terrace/state/db.py:94-95`). Fixed in the check:
+  `wal` now sets `synchronous=NORMAL`, the default mode keeps `FULL`. **The block now differs from
+  `research/01`'s**, whose script sets `FULL` in both modes; R4's content is intact (assumption, local
+  run, what was not run, what changes on failure, the commands, the holding output, the failing-line
+  table, the single-host variant), and the default run, which R4 requires, is byte-for-byte what it was.
+  The sentence offering `wal` now says what it runs (WAL with `synchronous = NORMAL`; the default is a
+  rollback journal with `FULL`), as does `issues/hpc-deployment.md`'s. Re-run on one laptop in scratch
+  directories under `.local/f1/`, the block extracted from the root `PLAN.md`: the five lines hold in
+  default mode and in `wal` mode (`B1 HOLDS`, `B2 HOLDS, nothing left behind`, nothing left behind), and a
+  read-back of `db()` gave `wal 1` (NORMAL) in `wal` mode and `delete 2` (FULL) in the default. Grepped
+  the tree outside `spec/` for any other site claiming the mode: the root `PLAN.md` lines 223 and 856
+  ("301 of 301 in the tree's journal mode") are measured results of the research run, not statements of
+  what the check runs, and stand.
+- *F2 (R6), the sites a decision overturns.* Decision 1's row now names the helper's `staging` line
+  (`tools/bundle_loop.py:201-204`, the spec it writes and its comment citing the removed example),
+  `tests/loop/test_helper.py:76` and `:92`, stage 8's assertion (`tests/loop/stages.py:402`), the
+  stages' pinned refusal naming the key (`:82`) and the adapter's staged tests
+  (`tests/tier/test_archive.py:365`, `:371`, `:384`); `issues/archive-spec-plumbing.md` gains a dated
+  line saying the Decision 1 cycle changes them. Sweep of Decisions 2 to 7 and Rulings A to J over
+  `tools/` and `tests/`, each cited line opened at this tree: Ruling A: `tests/tier/test_spec.py:101`,
+  `tests/engine/test_evict.py:169`. Rulings B and C: `tests/engine/test_model.py:331`. Ruling E:
+  `tests/fuse/test_mount.py:182`, `tests/engine/test_rescue.py:160` (already in the seed's body). Ruling F:
+  `tests/test_cli.py:43` (already in the seed). Ruling G: `tests/engine/test_replay.py:1085`, `:1100`.
+  Ruling I: `tests/state/test_registry.py:136`, `tests/state/test_lifecycle.py:133`. Ruling J: none (the
+  tests set absolute values; none asserts an empty or relative one). Decisions 2 and 3:
+  `tests/tier/test_archive.py:260`, `:312`. Decision 4: none (the `archive_index` tests assert the
+  overlay's own cache, which the record does not replace). Decision 5: `tests/state/test_lifecycle.py:67`,
+  `tests/state/test_survival.py:101`, `tests/engine/test_namespace.py:46`, `tests/test_cli.py:43` (the
+  seed already names them). Decision 6: `tests/state/test_db.py:35-39`, `tests/state/test_survival.py:86`.
+  Decision 7: none (the helper writes one shared stage tier; no test asserts several). Each found site is
+  in its row and in the owning seed, with a dated line where the seed did not already name it. Nothing
+  under `src/`, `tests/` or `tools/` changed.
+- *F3, P1's gate retuned (code-build Step 1.3, the cumulative-gate case).* Only its last clause changed:
+  `git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md`
+  became `git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock && git diff
+  --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}'`, as P2's and
+  P3's were. Set with `--verify-file`, read back and byte-compared (701 bytes, equal). Run once, on the
+  final staged tree; P2, P3 and P4's gates each ran once on it as well, and each distinct step ran once
+  per gate that carries it.
 
 ---
 

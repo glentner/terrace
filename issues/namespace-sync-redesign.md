@@ -227,5 +227,9 @@ before any code, under the plan-drift rule.
   on Scratch" as the durable set a halted job recovers from. Stage copies addressed by entry id would
   make that set unreadable without the state database. That weighs for a namespace lock and stage trees
   that mirror the overlay's paths.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): the cycle that builds this seed's model changes the tests that assert
+  Ruling G's id reuse (`tests/engine/test_replay.py:1085`, `:1100`, and the `.id == old` assertions through
+  that file), and, with `issues/archive-finalization-integration.md`, the adapter tests that pin a re-pack
+  on every call and a rename as an operation (`tests/tier/test_archive.py:260`, `:312`).
 - Found by: an out-of-cycle review of the whole tree at `64faf27` (2026-11-11). The reproduction was
   run with Python 3.15.2 on macOS against tmpdir tiers through the engine API.

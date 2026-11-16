@@ -105,4 +105,7 @@ Draft R-IDs, to be firmed up at promotion.
   several waiters timing out at once, and a source with no ETag, such as SFTP, where the signature must
   come from something else (`issues/sftp-inner-location.md`).
 - Sources: `uv-manager`, `README.md` § *Design notes* (the lock rules).
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): the tests that assert a marker names one overlay and a second overlay
+  reads it as foreign are `tests/state/test_registry.py:136` and `tests/state/test_lifecycle.py:133`; they
+  change with the marker.
 - Found by: the maintainer's ruling of 2026-11-11.

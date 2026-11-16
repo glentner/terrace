@@ -84,5 +84,8 @@ Draft R-IDs, to be firmed up at promotion.
   his to make, and not this seed's.
 - `issues/namespace-sync-redesign.md` retires the purge watch (Ruling G), which removes one of the two
   § 10 sentences R4 touches.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): `tests/state/test_db.py:35-39` reads back WAL and `synchronous = NORMAL`
+  and changes with the pragmas; `tests/state/test_survival.py` (its WAL-file assertion at `:86`) is the
+  other test written for WAL.
 - Found by: `spec/plan-the-bundle-loop/` (2026-11-16), root `PLAN.md` § *Decisions* → *What the tree
   does not yet do*.
