@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: docs/plan-the-bundle-loop
 base: main
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -35,7 +35,7 @@ phases:
   verify: tools/lint.sh && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {print prev; exit} {prev=$0}' PLAN.md | grep -qx 'The story' && grep -q 'The big user-story I want to tell' PLAN.md && grep -q '^### Settled rulings$' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && grep -q '^The tier model$' PLAN.md && awk '/^### [(][a-h][)] / {n++} END {exit !(n==8)}' PLAN.md && grep -q 'spec/plan-the-bundle-loop/prototype/RECORD.md' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md
 - id: P3
   name: The decisions of this cycle, the state store, the lifecycle and the remaining sections
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -264,25 +264,25 @@ rulings are recorded as settled, and a builder reads the tier model in one secti
 **Goal:** the root `PLAN.md` lists what this cycle decided in one place, states the one assumption
 it could not check with the check to run, and every remaining section is at its disposition.
 
-- [ ] § *Decisions* → `### Decided in this cycle, for the maintainer's review`: Decisions 1 to 7 as
+- [x] § *Decisions* → `### Decided in this cycle, for the maintainer's review`: Decisions 1 to 7 as
       signed at the PLAN/TECH gate (cycle plan § 2.3). Each is one paragraph opening
       `**Decision N — <question>.**` and carrying `*Reason.*`, `*Turned down.*` and `*Evidence.*`.
       Decisions 2, 3 and 4 each cite the run in `prototype/RECORD.md` in which the trees were equal.
       Any decision the build finds it must add goes in the same list in the same form, and is named
       in the build report.
-- [ ] § *Architecture* → *State store* → `### The state store on shared storage` (cycle plan § 2.5):
+- [x] § *Architecture* → *State store* → `### The state store on shared storage` (cycle plan § 2.5):
       the journal mode and the locks assumed; what was run on a local filesystem in this cycle and
       what it showed; the sentence that nothing was run on a network filesystem and the assumption is
       "unverified on a network filesystem"; what changes in the design if it fails there; the check,
       as a fenced block of the commands to type, followed by a line `Holds when the output is:` and a
       fenced block of that output. Copy both blocks from `research/01`, and run the commands once on
       this host before committing them.
-- [ ] § *Architecture* (the rest), § *Lifecycle and recovery*, § *Configuration*, § *CLI surface*,
+- [x] § *Architecture* (the rest), § *Lifecycle and recovery*, § *Configuration*, § *CLI surface*,
       § *Technology decisions*, § *Testing strategy*, § *Risks and mitigations*, § *Phase outline*,
       § *Future work*: each to its disposition (cycle plan § 2.1). A sentence a decision overturns is
       marked with the decision's label and the owning seed, not deleted, where the tree still does
       what the sentence says.
-- [ ] Reconciliation items 1 to 5 (cycle plan § 2.1, last paragraph): no `fsck`; `umount` takes a
+- [x] Reconciliation items 1 to 5 (cycle plan § 2.1, last paragraph): no `fsck`; `umount` takes a
       spec and the row says the pidfile in the state directory is what makes the cross-host guard
       possible; named features with no code behind them marked as intent; no forward `Phase N`
       pointer, dated records kept; each of the four overstated testing bullets names its test path or
@@ -291,6 +291,45 @@ it could not check with the check to run, and every remaining section is at its 
   parts; the state-store section with its "unverified" sentence and its "Holds when" line; the three
   reconciliation greps; the P2 checks again.
 - **Touches:** `PLAN.md`.
+
+**Amendment (P3 build, 2026-11-16).**
+- *The heading stays; the body says signed.* P3's gate greps the heading "Decided in this cycle, for
+  the maintainer's review" exactly, so the heading is kept, and the list's opening paragraph says
+  the maintainer reviewed and signed all seven on 2026-11-15. P2's paragraph under § *Decisions*,
+  which said the decisions "are recorded for his review", now says he signed them, and states the
+  marker form below. The two sign-off rulings sit under Decisions 1 and 6 as
+  `*Ruled at sign-off (2026-11-15).*`; Decision 1's addition is also in the decision's own text.
+- *One marker form for an overturned sentence.* Every sentence a ruling or decision overturns, where
+  the tree still does what it says, is kept and followed by `*Overturned by <label>, which <seed>
+  builds; the tree still does this.*` (`grep -n 'Overturned by' PLAN.md` lists them). Seeds cited
+  that P4 writes: `issues/state-store-journal-mode.md` and `issues/durable-tier-record.md`.
+- *The decisions cite the landed run.* Decisions 2, 3 and 4 cite `prototype/RECORD.md`'s runs with
+  equal trees; Decision 4 quotes the record file at 913 and 33,616 bytes (this branch's run), not
+  the plan step's 914 and 33,604. The record says why they differ.
+- *The check was run.* The block of `research/01` § *The check for the maintainer* was extracted
+  byte for byte into the root `PLAN.md` and run once on 2026-11-16 on the build host, all four
+  commands on one host (the single-host variant), with the project's interpreter first on the path
+  and `D` pointed at a scratch directory instead of `$HOME`; it printed the five lines of the output
+  block with the host's name in place of `<host>`, and removed its directory.
+- *Added beyond the cycle plan's § 2.1 wording*, inside sections it assigns to P3: a subsection
+  `### After a kill` in § *Lifecycle and recovery* (Decision 5), with its trace line; and in the
+  Python-baseline row, "beta now" became "beta when decided", since the tree runs a final 3.15.
+- *Left as carried:* the Risks bullet "3.15 is beta until October" and the spec comment
+  `drain_timeout … 0 disables` (owned by `issues/shutdown-rescue-gaps.md`) are not P3's by § 2.1.
+- *Notes for P4.* (1) No table row of the root `PLAN.md` may open `| A |` … `| J |` or `| B, C |`:
+  P2's and P3's ruling checks count exactly ten such rows. Lead § *What the tree does not yet do*'s
+  rows with `Ruling A`, `Decision 1` or the like. (2) The cycle plan § 2.6 says
+  `issues/state-store-journal-mode.md` is declined if the maintainer keeps WAL; Decision 6's
+  sign-off ruling supersedes that: the seed builds without waiting on the check. (3) The root
+  `PLAN.md` now says `issues/hpc-deployment.md` carries the check (§ *The state store on shared
+  storage*); P4's item 4 makes that true. (4) For the deferral ledger, P3's text defers: the
+  pressure rule for staged bundles (`issues/eviction-one-hop.md`); the recovery walk
+  (`issues/audit-command.md`); the check on a network filesystem (`issues/hpc-deployment.md`);
+  shortening the replay account (`issues/namespace-sync-redesign.md`); measuring throughput
+  across SQLite's options until the project is more mature (Decision 6's ruling, which names no
+  seed: P4 gives it one, likely `issues/state-store-journal-mode.md`); how a cut-short rescue is
+  recorded (`issues/shutdown-rescue-gaps.md`); a clean copy at a full neighbour and default limits
+  (`issues/eviction-one-hop.md`).
 
 ## Phase P4 — What the tree does not yet do, `AGENTS.md` notes and rows, the roadmap and the seeds
 **Satisfies:** R6, R7 · **Depends on:** P3
