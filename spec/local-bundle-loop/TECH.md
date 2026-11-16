@@ -50,10 +50,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && uv run python -I spec/local-bundle-loop/verify/check_outcomes.py p3
 review:
-  last_reviewed_commit: 818acfe10697bf68ee1dcc986e8a07eaa07a9843
-  verdict: changes-requested
-  blocked_reason: 'review cycle 4: F4 CONFIRMED LOW (R9 serial lane figure); N1 PLAUSIBLE LOW awaits triage'
-  cycle: 4
+  last_reviewed_commit: e4bb92fa911c2c083edf6784ff56bb3fef3af76d
+  verdict: approved
+  blocked_reason: ''
+  cycle: 5
 ---
 
 # TECH.md — Drive the bundle loop end to end on a local object store

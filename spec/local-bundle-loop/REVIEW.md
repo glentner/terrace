@@ -423,3 +423,20 @@ The reviewer's evidence lives in `.local/review4/` (`R4/` below); the foreman's 
 ### Human-gate triggers
 
 None: nothing under `src/` changed.
+
+## Review cycle 5 — approved (2026-11-16)
+
+- **Reviewed commit:** `e4bb92f` (F4's figures and N1's seed, one commit)  ·  **Base:** `main`
+- **Verdict:** approved
+- **Mode:** **records-only**, by the maintainer's ruling of 2026-11-16 on cycle 4: F4 is fixed in
+  `AGENTS.md` and verified by the foreman's measurement, without a blind reviewer, since the commit
+  changes no code or test; N1 is deferred to a seed.
+- **F4 · ✅ remediated.** `AGENTS.md` § Commands and § Verification now read ~80 s serial and ~35 s
+  under `-n auto`, against 78.48 s serial (`orch4/serial-head.log`) and 34.05 s parallel
+  (`R4/verify.log`) at `818acfe`; `e4bb92f` changes neither code nor tests, so those measurements
+  stand for it. `tools/lint.sh` passes; `check_outcomes.py figures-p3` and `ledger` pass; 45 seeds,
+  each paired with a `ROADMAP.md` entry.
+- **N1 · deferred (maintainer, 2026-11-16).** Home: `issues/loop-helper-signal-windows.md`, `status:
+  unshaped`, with its `ROADMAP.md` entry under the loop's small independent seeds; committed in
+  `e4bb92f`, before this verdict's `--reviewed-commit`.
+- **Human-gate triggers:** none across cycles 1–5 (nothing under `src/` changed).
