@@ -112,3 +112,57 @@ None: nothing under `src/` changed, and no finding sits in a high-blast-radius p
   `tests/fuse` unit tests pass).
 - Decision 7 says `issues/shared-staged-tier.md` "reopens this rule if it wants one", while the list's
   introduction says revisiting a decision is the maintainer's call.
+
+## Review cycle 2 — changes-requested (2026-11-16)
+
+- **Reviewed commit:** `47e029f` (one remediation commit for F1–F3)  ·  **Base:** `main`
+- **Verdict:** changes-requested; escalated to the maintainer (second cycle without convergence on F2).
+- **Mode:** **scoped**: one fresh blind reviewer verified F1 and F2 as their whole properties and
+  every other hunk of `git diff 16da8b7..47e029f -- . ':(exclude)spec/'` for regressions; the foreman
+  verified F3. CI at `47e029f` (run 43914304968): all four jobs green.
+- One reviewer grep's `spec/` filter missed and printed lines from `spec/` files; the reviewer did not
+  open them or grade from them, and says so.
+
+Evidence: the reviewer's in `.local/review2/` (`R2/`), the foreman's in `.local/orch2/`.
+
+### Verification run
+
+- `verify`: lint ok; **824 passed, 9 xfailed** (`R2/verify.out`).
+- Foreman: P1's stored `verify:` is byte-identical to the expected retune (`orch1/p1-gate-retuned.sh`);
+  all four phase gates run as stored on `47e029f`: exit 0 (P1 150 s, P2–P4 ~1 s) (`orch2/P*-gate.log`).
+
+### Scoped matrix
+
+| Item | Verdict | Verified how | Who |
+|---|---|---|---|
+| F1 (R4) | ✅ remediated | The check's block, extracted as written, run in both modes: five holding lines each; its `db()` reads back DELETE/FULL by default and WAL/NORMAL with `wal`, equal to the tree's `Database`; at `16da8b7` the same read-back gives WAL/FULL; every sentence about the modes matches (`R2/f1-*`) | reviewer |
+| F2 (R6) | ◐ partly | Decision 1's own sites (helper, `test_helper.py`, `stages.py`, `test_archive.py`) are named in its row and seed; the claimed sweep of every decision and ruling is incomplete and adds one wrong citation (N1–N5) | reviewer |
+| F3 | ✅ remediated | As above | foreman |
+| Other hunks | ✅ | Table cells consistent; ten bare ruling rows; every added path and link resolves; nothing under `src/`, `tests/`, `tools/`, `AGENTS.md` changed | reviewer |
+
+### Findings (all LOW, R6, introduced or left by the F2 sweep)
+
+- **N1 · CONFIRMED.** Ruling G's row cites `tests/engine/test_replay.py:1085`, `:1100` as asserting id
+  reuse; with `AUTOINCREMENT` on `entry`, `writeback` and `intent` both pass, while 26 other tests in
+  that file fail, none named (`R2/mut-g-1085-1100.out`, `R2/mut-g-failed.txt`).
+- **N2 · CONFIRMED.** Ruling E: `tests/engine/test_rescue.py:85-86`, `:106`, `:134` assert node-tier
+  copies stay clean after a complete rescue, the row's first clause; a mutant dropping them fails
+  exactly these three, and neither the row nor the seed names them (the named `:160` and
+  `test_mount.py:182` pass under it).
+- **N3 · CONFIRMED (grep).** Decision 1: `tests/tier/test_archive.py:505-514` and `:402-410` build the
+  staged form the same way as the cited sites and are not named.
+- **N4 · CONFIRMED.** Row and seed disagree: Decision 6's row omits `test_survival.py:86` (named in its
+  seed; the DELETE/FULL mutant fails it); Decision 5's row names `test_lifecycle.py:67`, its seeds do
+  not.
+- **N5 · PLAUSIBLE.** Decisions 2 and 3 cite `test_archive.py:260`, `:312`, which build the direct-update
+  `zip` mode, not a bundle; the decisions are overturned "for a bundle source", and § Tier protocol
+  keeps re-pack for direct-update archives.
+
+### Foreman's note on the routing
+
+The routed F2 property ("every place in the tree that encodes the rule a decision overturns … is named
+in that decision's row and in the owning seed's note") was wider than R6 asks: R6 asks the root
+`PLAN.md` to list each decision the tree does not yet follow, with its owner. Enumerating every test
+that pins an old rule, by line, is open-ended (mutants keep finding more) and goes stale as lines move;
+the cycle that builds a decision finds those tests by running the suite. The maintainer's call is
+asked on how to close it.
