@@ -367,3 +367,59 @@ maintainer.
 
 **Escalation, ruled 2026-11-16:** the maintainer allowed a fourth cycle: one remediation of F1–F3,
 then a review scoped to verifying those three.
+
+## Review cycle 4 — changes-requested (2026-11-16)
+
+- **Reviewed commit:** `818acfe` (the one remediation commit for cycle 3's F1–F3)  ·  **Base:** `main`
+- **Verdict:** changes-requested (one CONFIRMED records finding, F4; one PLAUSIBLE for triage, N1)
+- **Cycle:** 4, past the ≤3 bound by the maintainer's ruling of 2026-11-16 (above).
+- **Mode:** **scoped**, as ruled: verifying the remediation of F1–F3 as their whole properties, plus
+  every other hunk of `git diff 22f96b1..818acfe -- . ':(exclude)spec/'` for regressions. One fresh
+  blind reviewer, given `GOAL.md` and the rubric by exact path, `AGENTS.md` by path, and the three
+  findings with their routed properties inline. The subagent route ran.
+- **CI at `818acfe`** (run 43884809643), read by the foreman: all four jobs green.
+
+The reviewer's evidence lives in `.local/review4/` (`R4/` below); the foreman's own in `.local/orch4/`.
+
+### Verification run
+
+- `verify` (`tools/lint.sh && uv run pytest -n auto -m unit`): lint ok; **824 passed, 9 xfailed**
+  of 833, 34.05 s (`R4/verify.log`). Full signal matrix (`BUNDLE_LOOP_EVERY_SIGNAL=1`): 77 passed,
+  48 of them the matrix (`R4/every-signal.log`). `test_helper.py` 35 of 35 in 10 of 10 repeats.
+
+### Scoped matrix
+
+| Item | Verdict | Verified how | Who |
+|---|---|---|---|
+| F1 (cycle 3, MEDIUM) | ✅ remediated | Original drive: SIGINT, SIGTERM, SIGHUP each end pytest at once after an in-process run (`R4/ctrl-c.log`, `R4/term-hup.log`; the old helper in a throwaway copy reproduces the 23 s ignore). 19 exit paths × 2 caller states, 38 of 38: handlers, mask, wakeup fd and open fds identical after `main`; a signal during teardown never runs the caller's handler and teardown completes (`R4/probe-f1.log`). Pin negative controls M0–M4 each fail, M4 (restore before teardown) in the default lane (`R4/negative-controls.log`) | reviewer |
+| F2 (cycle 3, MEDIUM, R9) | ✅ remediated | Every loop mention in `AGENTS.md` read against the code; every flag and `BUNDLE_LOOP_` name listed under § Commands; documented claims driven (`R4/drive-doc-claims.log`); counts 852/833/19 and 52 files equal the tree; pin fails on the old text, on a dropped flag and on a dropped module (`R4/negative-controls-f2.log`) | reviewer |
+| F3 (cycle 3, LOW) | ✅ remediated | Group SIGINT through `temp_site.sh` 130 × 5 (was 254); every signal in both orders gives 128+N, teardown complete, no survivor in the group (`R4/drive-f3.log`); pins fail under M5 and M6 | reviewer |
+| Other hunks | ✅ no regression | `command` window for 6 signal × mode cases; parser move keeps flags and help; spec-id grep clean | reviewer |
+
+### Findings
+
+- **F4 · LOW · CONFIRMED (R9), found by the foreman.** `AGENTS.md` § Commands and § Verification give
+  the serial unit lane as "~60 s". Measured back to back on the build host
+  (`uv run pytest -q -p no:cacheprovider -m unit`): `origin/main` 763 passed in **55.02 s**
+  (`orch4/serial-main.log`), the branch head 824 passed, 9 xfailed in **78.48 s**
+  (`orch4/serial-head.log`); the reviewer measured 75.8 s at the head and 70.5 s at `22f96b1`. The
+  cycle moved a lane-time figure R9 names and the figure did not move. R8 is unaffected: it bounds the
+  `-n auto` lane, which rose about 1 s. *Property:* every lane time `AGENTS.md` states equals the
+  lane on the build host as the cycle leaves it.
+- **N1 · LOW · PLAUSIBLE, triage pending.** A SIGINT injected in a few-bytecode window of the helper's
+  signal setup (`tools/bundle_loop.py` `Requests.__init__`, around `set_wakeup_fd`) or restore
+  (`Requests.close`, between the SIGINT and SIGHUP restores) leaves signal handling installed for an
+  in-process caller; in the setup window the interpreter's wakeup fd stays registered on a closed fd
+  number, which a later `open()` can reuse (`R4/probe-f1-race-init-consequence.log`: a file gained
+  `\x02`). Reached only by injecting a signal at the exact point; never by a natural signal. Teardown
+  is complete in both windows; R2 holds.
+
+### Out of scope, ungraded
+
+- A command that handles the signal and exits 0 is reported 0 or 130 by the 50 ms poll; unchanged
+  since `22f96b1`, and such a command does not end by a signal.
+- The orphaned grandchild when the helper alone is signalled, as in cycle 3.
+
+### Human-gate triggers
+
+None: nothing under `src/` changed.
