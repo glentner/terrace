@@ -26,8 +26,9 @@ every engine cycle worked on one mechanism, deferred namespace replay against a 
 entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
 bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
 delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation. The
-first section below redraws `PLAN.md` around that story and then drives the loop end to end on a
-developer machine against a local object store. The lifecycle around the loop and the mount a researcher
+first section below redraws `PLAN.md` around that story and then turns the loop green, stage by stage,
+on a developer machine against a local object store: the helper that stands the loop up and the
+scenario that records how far the tree gets through it landed as `local-bundle-loop`. The lifecycle around the loop and the mount a researcher
 uses follow. Sharing the staged bundles between read-only mounts may come early; many writers on one
 overlay are for a later day. The maintainer agreed this order on 2026-11-11 and ruled the decisions that
 gated it; what is still open is in the next section.
@@ -67,7 +68,8 @@ re-aggregated into those bundles on a delay. Everything here runs on a developer
 local object store, engine first.
 
 The story it builds toward, from the maintainer's statement and clarification of 2026-11-11 (quoted
-in [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md)): a spec points at an object store, or
+in the seed of [`spec/local-bundle-loop/`](spec/local-bundle-loop/GOAL.md), retired when its cycle landed;
+`git log --diff-filter=D -- 'issues/local-bundle-loop*'` finds it): a spec points at an object store, or
 a tape reached over SFTP, holding one bundle or ten thousand. Bundles are pulled lazily to shared
 scratch and decompressed there without being unpacked. Single files land in the RAM tier as they are
 read. Every stage tier has a size limit, a count limit and a write-back delay, and either pressure or
@@ -76,19 +78,6 @@ the bundles. What is on scratch is durable, so a job that halts can recover. A b
 put back to its source on its own delay or under pressure on scratch. A signal commits what has
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
-
-### Drive the bundle loop end to end on a local object store
-
-**Seed:** [`issues/local-bundle-loop.md`](issues/local-bundle-loop.md) · `test` · appetite small
-
-The loop that sets the project apart has never run: bundles at an object-store source, staged and
-indexed, read and written through the overlay, re-aggregated on a delay, and read back from the
-bucket by a fresh engine. Every piece exists alone and none can be joined, so every decision about
-the loop is made by reading. This cycle adds a helper that stands the loop up on a laptop with no
-container, and one scenario whose stages are strict expected failures, each naming the seed that owns
-it, including a stage where pressure moves copies up with no write to the source, and one where a
-detach is followed by a commit from a second process that has only the durable tier. The rest of this
-section turns those stages green in order.
 
 ### Redraw `PLAN.md` around the user story
 
@@ -131,17 +120,30 @@ because it reads as done. The loop's first stage: the read side alone — admit 
 construct the tier, index, read — turns the scenario's read stage green, and shaping may split the
 cycle there.
 
-### A write racing a commit can be recorded clean
+### A write through a handle on a stage is lost once a faster tier commits over its file
 
-**Seed:** [`issues/racing-write-marked-clean.md`](issues/racing-write-marked-clean.md) · `fix` · appetite small
+**Seed:** [`issues/stage-handle-outlives-its-file.md`](issues/stage-handle-outlives-its-file.md) · `fix` · appetite small
 
-A commit decides a copy is clean from a flag it resets and a stat it compares, and a write can pass
-both: one that read the flag before the reset and lands after the stat, or one of the same size inside
-one timestamp tick. Both reproduced by injection: the stage holds the new bytes, the source the old,
-the residency reads clean and the queue is empty, so the next eviction deletes the write. Placed
-ahead of the bundle write-back because a re-aggregation reads staged copies it believes are clean, so
-a copy wrongly recorded clean becomes a bundle with stale bytes in it. Small, independent of the
-namespace work, and how wide the second route is on a production kernel is one measurement away.
+One entry can have handles open on two tiers: one opened on a slower stage, and a later one promoted to
+a faster tier. A commit from the faster tier renames a new file over the slower tier's, and a write
+through the first handle then returns success into a file no path reaches; the next commit records the
+copy clean without it. Reproduced on a three-tier stack by the design review of
+`racing-write-marked-clean`, with the same result before and after that cycle's change. That cycle has
+since landed (`spec/racing-write-marked-clean/`). Placed beside the clean-transition work because it
+breaks the same promise, a clean copy whose upstream holds its bytes; the placement has not been
+negotiated.
+
+### The copy's lifecycle is declared, not spread over five fields
+
+**Seed:** [`issues/copy-lifecycle-state-machine.md`](issues/copy-lifecycle-state-machine.md) · `refactor` · appetite small
+
+Whether a copy is absent, clean, dirty, committing or evicting is not stored anywhere as one thing. It is
+read off `residency.state`, the queued `data` row, an intent row, and a handle's `marked_dirty` and
+`written`, and nine functions move it. The fix for a write racing a commit
+added one more transition, a hop's own record of the changes that met it, and still no table says who may
+move a copy or when. `writeback.state` also admits an `'active'` value that nothing sets, the state a commit
+in flight was reserved for. Deferred out of `racing-write-marked-clean` by its non-goals, and the seed it
+was sent to does not carry it. Placed beside the clean-transition entries it describes.
 
 ### Pressure or delay moves a copy one tier up, and no further
 
@@ -230,6 +232,35 @@ whole, which is how tape wants to be used, so the adapter is three methods; the 
 around it: the client library, atomic replacement over a rename, a recall that takes minutes while
 other calls must not wait, and a local server for tests. Split out of the extended archive sources on
 2026-11-11. Last in this section because it reuses the streaming read the sharding cycle builds.
+
+### The bundle loop's self-excuse audit reads one file
+
+**Seed:** [`issues/loop-excuse-audit-scope.md`](issues/loop-excuse-audit-scope.md) · `test` · appetite small
+
+The audit that keeps a loop stage from excusing its own failure parses `tests/loop/stages.py` alone.
+An `xfail` raised in `tests/loop/conftest.py`, a collection hook that widens a stage's marker, or an
+indirect `getattr(pytest, 'xfail')` call passes it, the second with unchanged counts. Nothing of the
+kind is in the tree; found as surviving mutants in the loop's own review (2026-11-12). Small, and
+independent of the order above.
+
+### The S3 tier tests' moto server looks its own name up as it starts
+
+**Seed:** [`issues/tier-moto-server-name-lookup.md`](issues/tier-moto-server-name-lookup.md) · `test` · appetite small
+
+`tests/tier/conftest.py` starts moto's `ThreadedMotoServer`, whose bind asks the resolver for the name
+of 127.0.0.1 and waits for the answer; a failed construction leaves its start waiting forever. The
+same lookup hung the bundle loop's helper on the macOS runner, which now binds without it (2026-11-15).
+Small, and independent of the order above.
+
+### A signal in the helper's setup or restore window can leave its handling installed
+
+**Seed:** [`issues/loop-helper-signal-windows.md`](issues/loop-helper-signal-windows.md) · `test` · appetite small
+
+The bundle loop's helper restores the caller's signal handling when `main()` returns, but a signal
+landing in a few-bytecode window of that setup or restore leaves the helper's handlers, or a wakeup fd
+on a closed descriptor, in an in-process caller. Reached only by injecting a signal at that point;
+teardown stays complete (review of `local-bundle-loop`, 2026-11-16). Small, and independent of the
+order above.
 
 ## Queued: the lifecycle around the loop
 
@@ -342,7 +373,7 @@ operations surface closes, so a defect it finds still has a natural home.
 The 3.15t job runs the same suite as every other job; there are no targeted stress tests despite
 free-threading being a first-class target. Parallel FUSE callbacks against transfers against eviction,
 and race hunting with the sampling profiler. Until 2026-11-11 this seed also held the engine's known
-races, several reproduced by injection; those are defects and now belong to `racing-write-marked-clean`
+races, several reproduced by injection; those are defects and now belong to `racing-write-marked-clean` (landed, `spec/racing-write-marked-clean/`)
 and `namespace-sync-redesign`. What stays here is the workload, which needs a surface that has stopped
 moving.
 

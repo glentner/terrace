@@ -135,12 +135,12 @@ commit boundary, not a wall-clock time.
 - 2026-11-11 (whole-tree review at `64faf27`): the maintainer names this the project's flagship:
   write-back with delayed re-aggregation into compressed bundles at the source. Two consequences. It
   leads the roadmap's first section, driven on a developer machine against a local object store before
-  any cluster work ([`issues/local-bundle-loop.md`](local-bundle-loop.md)). And batching follows from
+  any cluster work ([`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)). And batching follows from
   the synchronization model; it is not an addition to the adapter. If a change marks its bundle dirty
   and a re-aggregation rebuilds the bundle from the catalog and the staged bytes
   ([`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md), decision 3), nothing re-packs
   per file and the engine has one call to make, on a clock.
-- 2026-11-11 (the maintainer's user story, [`issues/local-bundle-loop.md`](local-bundle-loop.md)): the
+- 2026-11-11 (the maintainer's user story, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)): the
   story gives a bundle three triggers for its repack and push: its own write-back delay, quota pressure
   on the tier that holds it, and a commit. The first is `max_frequency`, the third is the waiver at
   drain; the second has no counterpart in the design, since a staged bundle is outside every quota

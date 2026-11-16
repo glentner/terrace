@@ -172,7 +172,7 @@ Draft R-IDs, to be firmed up at promotion.
     The `deferred-rename-source-orphan` cycle fixed that defect ahead of this one (landed 2026-11-06,
     `spec/deferred-rename-source-orphan/`), so commit no longer inherits it. An orphan an older engine
     already left on a source is the audit's (`issues/audit-command.md`).
-- 2026-11-11 (the maintainer's clarification, [`issues/local-bundle-loop.md`](local-bundle-loop.md)):
+- 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)):
   three things the story fixes for this command. It is run from a login node after the job's node is
   released. It rebuilds the bundles that changed and no others. And it leaves the staged bundles on the
   durable tier, so the next mount pulls nothing. The command reads the one database (ruled 2026-11-11),

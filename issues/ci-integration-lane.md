@@ -191,5 +191,15 @@ Draft R-IDs, to be firmed up at promotion.
   - **A first payload.** A POSIX conformance suite run against a real mount.
     [`issues/posix-surface-gaps.md`](posix-surface-gaps.md) found root-owned entries and missing symlink
     creation by reading; a suite finds the rest of that class by measurement.
+- 2026-11-12 (local-bundle-loop): **the bundle loop's MinIO variant has never run.**
+  `tests/loop/test_scenario_minio.py` holds the nine stages of the bundle loop under the integration
+  marker, against the endpoint the `TERRACE_TEST_MINIO_*` variables name. It is written and
+  collected, and has not run against MinIO on any machine: the host that built it has no container
+  runtime. Its fixtures were exercised only with the moto store `tools/bundle_loop.py` starts
+  standing in for MinIO. The lane that first runs it also learns whether the counting tap
+  (`tests/loop/tap.py`) works in front of a store that checks request signatures: it forwards the
+  `Host` header and the body as sent, and moto checks neither. Until the archive tier is reachable
+  from a spec, all nine are expected failures there too, so its pass count is zero and its gate
+  counts nine expected failures.
 - Found by: the invariant audit run during the software-factory port (2026-08-22), verification-substrate
   brief.

@@ -1,0 +1,25 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: racing-write-marked-clean
+escaped_from: pre-factory
+planned: {date: '2026-11-12', phases: 1}
+landed: {date: '2026-11-12', phases: 1, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-11T23:46:57-05:00', stop: '2026-11-11T23:56:10-05:00', seconds: 553, end: gate, agent: claude-fable-5-2}
+- {step: plan, start: '2026-11-11T23:56:10-05:00', stop: '2026-11-12T01:04:55-05:00', seconds: 4125, end: gate, agent: claude-fable-5-2}
+- {step: 'build:P1', start: '2026-11-12T01:12:14-05:00', stop: '2026-11-12T01:25:46-05:00', seconds: 812, end: done, agent: claude-fable-5-2}
+- {step: review, start: '2026-11-12T01:25:48-05:00', stop: '2026-11-12T05:18:45-05:00', seconds: 13977, end: gate, agent: claude-fable-5-2}
+- {step: 'build:P1', start: '2026-11-12T05:18:45-05:00', stop: '2026-11-12T05:28:55-05:00', seconds: 610, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-12T05:28:57-05:00', stop: '2026-11-12T05:36:04-05:00', seconds: 427, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-12T05:36:04-05:00', stop: '2026-11-12T05:36:36-05:00', seconds: 32, end: done, agent: claude-fable-5-2}
+reviews:
+- cycle: 1
+  date: '2026-11-12'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 0, low: 1}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-12'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0
