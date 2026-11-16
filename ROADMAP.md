@@ -244,6 +244,35 @@ around it: the client library, atomic replacement over a rename, a recall that t
 other calls must not wait, and a local server for tests. Split out of the extended archive sources on
 2026-11-11. Last in this section because it reuses the streaming read the sharding cycle builds.
 
+### The bundle loop's self-excuse audit reads one file
+
+**Seed:** [`issues/loop-excuse-audit-scope.md`](issues/loop-excuse-audit-scope.md) · `test` · appetite small
+
+The audit that keeps a loop stage from excusing its own failure parses `tests/loop/stages.py` alone.
+An `xfail` raised in `tests/loop/conftest.py`, a collection hook that widens a stage's marker, or an
+indirect `getattr(pytest, 'xfail')` call passes it, the second with unchanged counts. Nothing of the
+kind is in the tree; found as surviving mutants in the loop's own review (2026-11-12). Small, and
+independent of the order above.
+
+### The S3 tier tests' moto server looks its own name up as it starts
+
+**Seed:** [`issues/tier-moto-server-name-lookup.md`](issues/tier-moto-server-name-lookup.md) · `test` · appetite small
+
+`tests/tier/conftest.py` starts moto's `ThreadedMotoServer`, whose bind asks the resolver for the name
+of 127.0.0.1 and waits for the answer; a failed construction leaves its start waiting forever. The
+same lookup hung the bundle loop's helper on the macOS runner, which now binds without it (2026-11-15).
+Small, and independent of the order above.
+
+### A signal in the helper's setup or restore window can leave its handling installed
+
+**Seed:** [`issues/loop-helper-signal-windows.md`](issues/loop-helper-signal-windows.md) · `test` · appetite small
+
+The bundle loop's helper restores the caller's signal handling when `main()` returns, but a signal
+landing in a few-bytecode window of that setup or restore leaves the helper's handlers, or a wakeup fd
+on a closed descriptor, in an in-process caller. Reached only by injecting a signal at that point;
+teardown stays complete (review of `local-bundle-loop`, 2026-11-16). Small, and independent of the
+order above.
+
 ## Queued: the lifecycle around the loop
 
 Drain, detach with rescue, recovery after a kill, and a commit from another host: what lets a job stop at
