@@ -3,10 +3,10 @@ slug: plan-the-bundle-loop
 title: Redraw the root PLAN.md around the user story
 kind: docs
 appetite: big
-status: in_progress
+status: in_review
 branch: docs/plan-the-bundle-loop
 base: main
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: tools/lint.sh && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {print prev; exit} {prev=$0}' PLAN.md | grep -qx 'The story' && grep -q 'The big user-story I want to tell' PLAN.md && grep -q '^### Settled rulings$' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && grep -q '^The tier model$' PLAN.md && awk '/^### [(][a-h][)] / {n++} END {exit !(n==8)}' PLAN.md && grep -q 'spec/plan-the-bundle-loop/prototype/RECORD.md' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md
+  verify: tools/lint.sh && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {print prev; exit} {prev=$0}' PLAN.md | grep -qx 'The story' && grep -q 'The big user-story I want to tell' PLAN.md && grep -q '^### Settled rulings$' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && grep -q '^The tier model$' PLAN.md && awk '/^### [(][a-h][)] / {n++} END {exit !(n==8)}' PLAN.md && grep -q 'spec/plan-the-bundle-loop/prototype/RECORD.md' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock && git diff --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}'
 - id: P3
   name: The decisions of this cycle, the state store, the lifecycle and the remaining sections
   status: done
@@ -44,10 +44,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: tools/lint.sh && grep -q '^### Decided in this cycle, for the maintainer.s review$' PLAN.md && awk '/^[*][*]Decision [0-9]+ / {d++} /[*]Reason[.][*]/ {r++} /[*]Turned down[.][*]/ {a++} /[*]Evidence[.][*]/ {e++} END {exit !(d>=6 && r>=d && a>=d && e>=d)}' PLAN.md && grep -q '^### The state store on shared storage$' PLAN.md && grep -q 'unverified on a network filesystem' PLAN.md && grep -q '^Holds when the output is:$' PLAN.md && ! grep -q fsck PLAN.md && ! grep -q 'Phase 1[0-2]' PLAN.md && ! grep -q 'wip branch' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md
+  verify: tools/lint.sh && grep -q '^### Decided in this cycle, for the maintainer.s review$' PLAN.md && awk '/^[*][*]Decision [0-9]+ / {d++} /[*]Reason[.][*]/ {r++} /[*]Turned down[.][*]/ {a++} /[*]Evidence[.][*]/ {e++} END {exit !(d>=6 && r>=d && a>=d && e>=d)}' PLAN.md && grep -q '^### The state store on shared storage$' PLAN.md && grep -q 'unverified on a network filesystem' PLAN.md && grep -q '^Holds when the output is:$' PLAN.md && ! grep -q fsck PLAN.md && ! grep -q 'Phase 1[0-2]' PLAN.md && ! grep -q 'wip branch' PLAN.md && awk -F'|' '/^[|] [A-J] [|]/ {if (NF<7) bad=1; for (i=2;i<=6;i++) if ($i ~ /^ *$/) bad=1; if ($0 !~ /2026-11-11/) bad=1; n++} END {exit !(n==10 && !bad)}' PLAN.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock && git diff --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}'
 - id: P4
   name: What the tree does not yet do, AGENTS.md notes and rows, the roadmap and the seeds
-  status: pending
+  status: done
   satisfies:
   - R6
   - R7
@@ -336,26 +336,26 @@ it could not check with the check to run, and every remaining section is at its 
 **Goal:** a reviewer of a later cycle reads which invariants are scheduled to change and which seed
 changes each, and the roadmap and seeds agree with the root `PLAN.md`.
 
-- [ ] Root `PLAN.md` § *Decisions* → `### What the tree does not yet do`: one row per ruling or
+- [x] Root `PLAN.md` § *Decisions* → `### What the tree does not yet do`: one row per ruling or
       decision the code on this commit contradicts, with the owning seed (cycle plan § 2.6). Re-read
       every anchor on this commit: `racing-write-marked-clean` has landed and line numbers moved.
-- [ ] Write `issues/durable-tier-record.md` from the KB's ISSUE template, `status: unshaped`, and its
+- [x] Write `issues/durable-tier-record.md` from the KB's ISSUE template, `status: unshaped`, and its
       `ROADMAP.md` entry in § *Queued: the bundle loop, driven locally*, before the finalization
       entry. Write any other seed the walk above shows is needed, the same way, and name it in the
       build report (cycle plan § 2.6, "Seeds the cycle writes").
-- [ ] `AGENTS.md`, additions only: one `**Scheduled to change (2026-11-12).**` note at the end of
+- [x] `AGENTS.md`, additions only: one `**Scheduled to change (2026-11-12).**` note at the end of
       each numbered section the cycle plan § 2.6 lists, and one row per section in § *Known open
       violations*. No existing line of the file changes. The existing § 8 row for
       `issues/shutdown-rescue-gaps.md` is left as it is; the new row carries the ruling.
-- [ ] Seed and roadmap edits (cycle plan § 2.6, items 1 to 4): `issues/archive-spec-plumbing.md`,
+- [x] Seed and roadmap edits (cycle plan § 2.6, items 1 to 4): `issues/archive-spec-plumbing.md`,
       `issues/sharded-archive-sources.md`, `issues/archive-finalization-integration.md`,
       `issues/namespace-sync-redesign.md` (its draft R1, which of the five), 
       `issues/plan-md-reconciliation.md` (item by item), `issues/hpc-deployment.md` (the check), and
       the `ROADMAP.md` entries of each, with § *Decisions that gate the queue*. Each note is dated
       and cites `spec/plan-the-bundle-loop/` and the root `PLAN.md` section.
-- [ ] Do not edit `issues/plan-the-bundle-loop.md` or its roadmap entry: `code terrace roadmap`
+- [x] Do not edit `issues/plan-the-bundle-loop.md` or its roadmap entry: `code terrace roadmap`
       retires both when the cycle lands.
-- [ ] **Deferral ledger.** Walk P1 to P4 and the build's own commits for "left to", "stays with",
+- [x] **Deferral ledger.** Walk P1 to P4 and the build's own commits for "left to", "stays with",
       "not here", "follow-up", "unverified" and "known limitation", in prose and list items, not
       headings. Each names an `issues/` file that exists and a `ROADMAP.md` entry. The known ones:
       whether `rich` leaves `pyproject.toml` → `issues/plan-md-reconciliation.md`; the check on a
@@ -366,6 +366,77 @@ changes each, and the roadmap and seeds agree with the root `PLAN.md`.
   exist; the trace check; nothing under `src`, `tests`, `tools`, `pyproject.toml` or `uv.lock`
   changed.
 - **Touches:** `PLAN.md`, `AGENTS.md`, `ROADMAP.md`, `issues/`.
+
+**Amendment (P4 build, 2026-11-16).**
+- *The date in the notes.* Every note, row and seed note this phase adds is dated 2026-11-16, the
+  day it was written, not the cycle plan's 2026-11-12: the decisions were signed on 2026-11-15, so a
+  note dated before the sign-off would misstate when the change was scheduled. The `AGENTS.md` form
+  is otherwise the plan's: `**Scheduled to change (2026-11-16).**`, the label, the rule quoted, the
+  seed. P4's gate reads any date of 2026-11-1x.
+- *Five sections, five notes, five rows*, as § 2.6 of the cycle plan lists (§§ 2, 5, 7, 8, 10). Two
+  additions beyond the notes and rows, both additions only: a paragraph *Scheduled to change* at the
+  end of § *Read before editing*, since that summary restates the overturned rules of §§ 7 and 8; and
+  a paragraph before the § *Known open violations* table saying the new rows are not defects. No
+  measured figure in `AGENTS.md` counts what this phase added, and none changed.
+- *Append-only, not cut.* The cycle plan asks that `issues/namespace-sync-redesign.md`'s draft R1 be
+  edited and that `issues/plan-md-reconciliation.md`'s roadmap entry be cut to its residue. Both are
+  landed text, which `code-build` corrects only by dated addition: R1 gains a dated sub-note saying
+  which of the five decisions the root `PLAN.md` records and which remain the seed's, and every
+  roadmap entry touched gains a dated paragraph beneath it. Nothing in `issues/` or `ROADMAP.md` was
+  deleted.
+- *Seeds and entries beyond § 2.6 items 1 to 4.* The walk found work that moves to five more seeds,
+  which GOAL R7.1 requires both sides of to say: `issues/eviction-one-hop.md` (the pressure rule for a
+  staged bundle, Decision 1's sign-off ruling), `issues/shutdown-rescue-gaps.md` (Decision 7, the
+  tier a soft unmount commits to), `issues/audit-command.md` (Decision 5's check of the durable tier
+  against the bundle records), `issues/shared-staged-tier.md` (the signature-cost choice the tier
+  model (g) leaves open, and what the sharing prototype did not test) and
+  `issues/sftp-inner-location.md` (a source with no ETag). Each gains a dated note and its roadmap
+  entry a dated paragraph. Decision 7 has two owners: the rescue's target is
+  `issues/shutdown-rescue-gaps.md`'s, and refusing a bundle source's stack with more than one shared
+  stage tier is `issues/archive-spec-plumbing.md`'s, whose parser holds the stack rules.
+- *Placement of `issues/state-store-journal-mode.md`.* Beside the deployment entry, as § 2.6 places
+  it, with the entry saying that by the sign-off ruling it does not wait for the check and can be
+  taken earlier. § 2.6's "declined if the maintainer keeps WAL" is superseded by that ruling (P3's
+  note 2); the throughput measurement the ruling defers is in that seed's Notes as a later, separate
+  concern, not in its draft R-IDs.
+- *The prototypes' limits have homes.* The cycle plan § 5 lists what the prototypes did not test and
+  says each is named in the root `PLAN.md` where its decision is recorded; P3 did not write them. P4
+  names them once, in a paragraph under § *What the tree does not yet do*, each with the seed that
+  carries it, and each of those seeds says so.
+- *P2's and P3's gates retuned (code-build Step 1.3, the cumulative-gate case; the foreman's ruling).*
+  Both ended `git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock
+  AGENTS.md`, an exact-state clause that requires `AGENTS.md` unchanged and cannot pass once this
+  phase adds its notes and rows. Run on P4's staged tree, both were red on that clause alone (every
+  other check of each exited 0). Each now ends `git diff --cached --quiet --merge-base main -- src
+  tests tools pyproject.toml uv.lock && git diff --cached --numstat --merge-base main -- AGENTS.md |
+  awk '$2 != 0 {bad=1} END {exit bad}'`: nothing else changed, and `AGENTS.md` additions only, P4's
+  own check. Set with `set_phase.py --verify-file`, read back and byte-compared. All three gates were
+  then run once on the final staged tree.
+- *Rows lead with their label.* No row of the new table opens `| A |` … `| J |` (P3's note 1); each
+  opens `| Ruling A |`, `| Rulings B and C |`, `| Decision 1 |` and so on, so P2's and P3's ruling
+  checks still count ten.
+- *Deferral ledger.* Walked the build's added lines (P1 to P4) and the four build commits for "left
+  to", "stays with", "not here", "follow-up", "unverified", "known limitation", "deferred", "not run",
+  "not measured" and "not injected". Every deferral names an `issues/` file that exists and has a
+  `ROADMAP.md` entry:
+
+  | Deferral | Home |
+  |---|---|
+  | whether `rich` leaves `pyproject.toml`; the seed's R7 | `issues/plan-md-reconciliation.md` |
+  | the check on a network filesystem (Decisions 5 and 6, § *The state store on shared storage*, § *Risks*) | `issues/hpc-deployment.md` |
+  | a like check for the durable tier's filesystem (cycle plan § 5) | `issues/hpc-deployment.md` |
+  | measuring throughput across SQLite's options, the cost of a commit there (Decision 6's ruling) | `issues/state-store-journal-mode.md` (Notes) |
+  | shortening the replay account in § *Risks* (R8) | `issues/namespace-sync-redesign.md` |
+  | by name or by id under a renamed directory (Decision 3, tier model (c)) | `issues/namespace-sync-redesign.md` (decision 4) |
+  | the pressure rule for a staged bundle (Decision 1's ruling) | `issues/eviction-one-hop.md` |
+  | defaults for the limits; a clean copy at a full neighbour (§ *Eviction*, tier model (d)) | `issues/eviction-one-hop.md` |
+  | the recovery walk (Decision 5) | `issues/audit-command.md` |
+  | how a cut-short rescue is recorded; `--detach` against a scheduler's SIGTERM | `issues/shutdown-rescue-gaps.md` |
+  | the signature's cost to a mount (tier model (g)); more than two mounts | `issues/shared-staged-tier.md` |
+  | a source with no ETag | `issues/sftp-inner-location.md`, `issues/shared-staged-tier.md` |
+  | the bundle record's format; the two kills argued and not injected (tier model (c)) | `issues/durable-tier-record.md` (its R4) |
+  | multipart upload, a source changed between pull and write-back, writes during a rebuild, links, empty directories, ownership | `issues/archive-finalization-integration.md` |
+  | the integration lane (§ *Testing strategy*) | `issues/ci-integration-lane.md` |
 
 ---
 

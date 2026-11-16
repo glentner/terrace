@@ -271,8 +271,42 @@ tier". Not measured: both prototypes used the story's stack.
 
 *Follows from:* the two lists above.
 
-The fourth build phase of `spec/plan-the-bundle-loop/` writes this list: one row per ruling or
-decision the code contradicts, with the seed that owns the change.
+One row per ruling or decision the code contradicts, read from the tree on 2026-11-16, with the seed
+that owns the change and the numbered section of `AGENTS.md` § *Invariants* it overturns. Each such
+section keeps its text until the owning cycle lands, and ends with a dated note *Scheduled to
+change*, matched by a row in § *Known open violations*; until then a review grades code against the
+section as written. Rulings D and H agree with the tree: the state directory is outside every tier,
+and one mount at a time writes an overlay.
+
+| Ruled or decided | What the tree does | Owning seed | `AGENTS.md` |
+|---|---|---|---|
+| Ruling A | The limits and the delay are optional: a stage tier with neither `quota.size` nor `quota.files` is never reclaimed and fills its device, and `max_interval` defaults to none (`tier/spec.py`). | `issues/eviction-one-hop.md` (its Notes); `issues/pump-liveness-and-loss-windows.md` for `max_interval` | — (§ 6 lists these windows as the tree's) |
+| Rulings B and C | Eviction commits a dirty copy all the way to the source (`commit_upstream`, called at `engine/evict.py:151`) and drops a clean copy (`evict_copy`, `engine/overlay.py:1521`). | `issues/eviction-one-hop.md` | § 7 |
+| Ruling E | After a complete rescue the database still records a copy on every node-scope tier the file passed through, so a mount where those tiers are empty is refused; a second SIGINT, a rescue cut short by its budget and `--force` settle `detached` without a finished rescue (`fuse/mount.py:254-259`). | `issues/shutdown-rescue-gaps.md` | § 8 |
+| Ruling F | `terrace commit` is a stub, and nothing under `engine/` calls `resync` (`tier/archive.py:427`), so nothing rebuilds a bundle. | `issues/offline-commit-command.md`; `issues/archive-finalization-integration.md` for the rebuild | — |
+| Ruling G | Row ids are reused: `entry`, `writeback` and `intent` take `INTEGER PRIMARY KEY` with no `AUTOINCREMENT` (`state/schema.sql:59`, `:106`, `:124`). | `issues/namespace-sync-redesign.md` | § 5, § 10 |
+| Ruling I | A tier's marker names one overlay, so a second overlay reads it as foreign; the member index is in each overlay's database (`archive_index`). | `issues/shared-staged-tier.md`, after `issues/read-only-mount.md` | — |
+| Ruling J | The names agree. An empty or relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is used as written (`core/platform.py:35-36`). | `issues/xdg-empty-and-relative-values.md` | — |
+| Decision 1 | The staged `.tar` is pulled to a `staging` path of its own (`tier/archive.py:236-241`), outside every tier and every quota; no spec reaches the adapter (`tier/spec.py:25`, `:28`). | `issues/archive-spec-plumbing.md`; the pressure rule that reclaims a staged bundle, `issues/eviction-one-hop.md` | — |
+| Decisions 2 and 3 | Each queued operation is replayed into the adapter, which re-packs the whole working archive on every call (`_repack`, `tier/archive.py:529`); a rename is an operation like any other. | `issues/namespace-sync-redesign.md` (the model); `issues/archive-finalization-integration.md` (the rebuild and its triggers) | § 5 |
+| Decision 4 | Nothing on the durable tier records a bundle's index, a removal or a rename; the member index is in each overlay's database. | `issues/durable-tier-record.md` | — |
+| Decision 5 | `begin_mount` raises `CrashDetected` on `mounted` (`state/lifecycle.py:101`) and nothing catches it; `terrace audit` is a stub. | `issues/audit-command.md`; its read-only slice `issues/read-only-mount.md` | § 8 |
+| Decision 6 | `journal_mode = WAL` and `synchronous = NORMAL` on every connection (`state/db.py:94-95`). | `issues/state-store-journal-mode.md`; the check on the real filesystem, `issues/hpc-deployment.md` | § 2, § 10 |
+| Decision 7 | No rule names the durable tier: the rescue moves a copy to the nearest shared tier (`engine/rescue.py`), and no spec rule limits a bundle source's stack to one shared stage tier. | `issues/shutdown-rescue-gaps.md` (the tier a soft unmount commits to); `issues/archive-spec-plumbing.md` (refusing the stack) | — |
+
+The evidence behind the decisions has limits, and each is carried by the seed that builds what it
+bears on. Not run on a network filesystem or through FUSE: the state store's locks, `fsync` and the
+cost of a commit there (`issues/hpc-deployment.md` runs the check; measuring throughput across
+SQLite's options is a later concern recorded in `issues/state-store-journal-mode.md`), and atomic
+rename, exclusive create and reading a replaced open file on shared scratch, which the prototypes
+assumed and for which no check is written yet (`issues/hpc-deployment.md`). Argued and not injected:
+a kill between the rename of a staged bundle or a bundle record and its database commit
+(`issues/durable-tier-record.md`). Not tested by the rebuild prototype: a streamed or multipart
+upload, a source object changed by another writer between the pull and the write-back, writes during
+a rebuild, and symbolic links, hard links, empty directories and ownership inside a bundle
+(`issues/archive-finalization-integration.md`). Not tested by the sharing prototype: more than two
+mounts, and a source with no ETag such as SFTP (`issues/shared-staged-tier.md`,
+`issues/sftp-inner-location.md`).
 
 
 Vision and scope

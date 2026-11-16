@@ -145,6 +145,27 @@ before any code, under the plan-drift rule.
      authority for every tier, and a soft unmount records in it that every modified file is on the first
      durable tier and nothing is below. A rebuild of a bundle therefore reads the database for what the
      bundle should hold, and the durable tier for the bytes.
+
+  - 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): that cycle has
+    written the root `PLAN.md`'s record of three of the five, and this criterion is met for them by
+    citing it (§ *Decisions*, with the prototype evidence in
+    `spec/plan-the-bundle-loop/prototype/RECORD.md`):
+    - **1** is Ruling G. The schema version bump that makes it true stays this seed's to build.
+    - **3, for a bundle source**, is Decisions 2 and 3: a rebuild from recorded state and one object
+      write, nothing replayed; a rename inside a bundle is a change of recorded state. Their triggers
+      are `issues/archive-finalization-integration.md`'s.
+    - **5** is Ruling D and Decision 4: one database, and a bundle record per staged bundle on the
+      durable tier (`issues/durable-tier-record.md`).
+
+    Two remain this seed's, and a third in part: **2** (where tombstones live); **3, for a POSIX or
+    object-prefix source** (the planner, and whether deferral is wanted there at all); **4** (what
+    excludes a directory rename). For 4 the cycle adds a measured input and no ruling (root `PLAN.md`
+    § *The tier model* (c)): an altered file kept by name under a renamed directory adds one POSIX
+    rename beside the database commit, and a kill between them left a row naming a missing file;
+    kept by entry id there is no such step. The 2026-11-11 note below weighs the other way. R8's
+    shortening of § *Risks and mitigations* also stays here: the root `PLAN.md` keeps the replay
+    account as the record of a mechanism Decisions 2 and 3 retire for a bundle source, and
+    `AGENTS.md` § 5 and § 10 carry a note *Scheduled to change* naming this seed.
 - **R2** — WHEN an entry is purged, its id SHALL never name another entry in the same state database.
 - **R3** — WHEN a removed or moved-away entry's former name is taken by a create, a mkdir or a rename
   at any depth, the call SHALL succeed as it does on a plain directory. The reproduction above SHALL

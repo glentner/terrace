@@ -54,6 +54,11 @@ that are never reused; and the namespace rebuild, with the two parked cycles fol
   home filesystem, where the one database is ruled to live. It does not gate the first section. It is
   minutes of checking, and it decides what the third section is
   ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
+  - 2026-11-16 (`spec/plan-the-bundle-loop/`): the check for question 6 is written. `PLAN.md`
+    § *Architecture* → *The state store on shared storage* prints the commands to type on a compute
+    node and a login node and the output that means the assumption holds, and the seed carries it.
+    The journal mode is chosen (Decision 6, a rollback journal with `synchronous = FULL`), and by the
+    maintainer's ruling of 2026-11-15 the change to it does not wait for the check.
 - **What follows the loop.** The lifecycle around it or the mount a researcher uses. Decided when the
   first section closes.
 - **Retiring two held seeds.** `replay-cost-at-scale` and `replay-defensive-branch-coverage` describe a
@@ -107,6 +112,10 @@ that does not exist. This cycle holds only the residue — the inaccuracies no o
 touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
 diff, which is what the same-commit rule requires.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): the redraw resolved items 1 to 5 in `PLAN.md`. What is left
+is whether `rich` leaves `pyproject.toml`, the seed's R7, and the residue of its 2026-11-11 note if the
+namespace rebuild is declined; the seed's note of this date says which item went where.
+
 ### Make archive tiers reachable from a spec file
 
 **Seed:** [`issues/archive-spec-plumbing.md`](issues/archive-spec-plumbing.md) · `feature` · appetite big
@@ -119,6 +128,11 @@ construction has no archive branch. A shipped-but-unreachable adapter is worse t
 because it reads as done. The loop's first stage: the read side alone — admit the types and keys,
 construct the tier, index, read — turns the scenario's read stage green, and shaping may split the
 cycle there.
+
+2026-11-16 (`spec/plan-the-bundle-loop/`): Decision 1 retires `staging`. A staged bundle lives in the
+durable tier below the source, counted by its limits, and a spec that carries the key is refused;
+Decision 7's rule, one shared stage tier over a bundle source, is refused here too. The seed's note of
+this date says which draft criteria change.
 
 ### A write through a handle on a stage is lost once a faster tier commits over its file
 
@@ -157,6 +171,10 @@ file. And eviction drops a clean copy, where the maintainer's ruling of 2026-11-
 so node-local disk catches what falls out of RAM. Small, and built before the re-aggregation that depends
 on it.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): `PLAN.md` records the three rulings as settled and
+`AGENTS.md` § 7 carries a note naming this seed. Moved here by Decision 1 and its sign-off ruling: the
+pressure rule that reclaims a staged bundle from the durable tier, where the limits now count it.
+
 ### Rebuild how the namespace reaches the source
 
 **Seed:** [`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md) · `refactor` · appetite big
@@ -173,6 +191,11 @@ and object-prefix sources move to it afterwards, when the replay is deleted. Sha
 that is one cycle or two. Its decisions are the plan cycle's; this is the build.
 High-blast-radius as a whole: it changes the schema and the gated regions of `engine/overlay.py`.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): `PLAN.md` now records three of the five decisions (stable ids;
+how a bundle source catches up; the database and the durable tier), and the seed's draft R1 says which
+two remain its own (where tombstones live; what excludes a directory rename) and that how a POSIX or
+object-prefix source catches up is still its decision.
+
 ### Bring archive mutations under the journal and a lock
 
 **Seed:** [`issues/archive-journaling-and-locking.md`](issues/archive-journaling-and-locking.md) · `fix` · appetite big
@@ -186,6 +209,17 @@ returning success. Two more in the same region: a stale staging copy silently wi
 source, and the archive index cache is trusted unconditionally. Sequenced before the
 finalization work, which adds callers to exactly these paths.
 
+### The durable tier records what each staged bundle now holds
+
+**Seed:** [`issues/durable-tier-record.md`](issues/durable-tier-record.md) · `feature` · appetite big
+
+Decision 4 of the redrawn `PLAN.md`: beside each staged bundle on the durable tier, a member index
+written once and a bundle record naming what its members are now called, which are removed, and which
+altered file holds a member's bytes. With them the durable tier is the set a halted job recovers from,
+even without the database: the plan cycle's prototype rebuilt the oracle from the tier's files and the
+record, and not from the files alone. Written by `spec/plan-the-bundle-loop/` because no seed owned
+it. Placed before the finalization entry, whose rebuild writes the record first and reads it.
+
 ### Batch archive finalization at drain and commit
 
 **Seed:** [`issues/archive-finalization-integration.md`](issues/archive-finalization-integration.md) · `feature` · appetite big
@@ -197,6 +231,11 @@ and nothing batches. Staged re-sync's rate limit is waived at drain in the desig
 the code, because no engine module calls `resync` at all. With the synchronization model above in
 place this is its first use: a change marks its bundle dirty, and the bundle's clock or a drain
 rebuilds it from state and replaces it with one atomic write. It is not a small addition.
+
+2026-11-16 (`spec/plan-the-bundle-loop/`): the rebuild's inputs and its three triggers (the bundle's
+own delay, pressure on the durable tier, a commit) are now `PLAN.md`'s, in § *The tier model* (e) and
+Decision 2, and this seed builds them. It reads the record of `issues/durable-tier-record.md`, and it
+carries what the plan cycle's rebuild prototype did not test.
 
 ### Archive coverage at the engine and mount level
 
@@ -223,6 +262,11 @@ of that size cannot pass through RAM. Two questions were added on 2026-11-11: wh
 served by offset from the staged shard instead of being unpacked to a file of its own, and how many
 mounts may read one staged dataset.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): the reconciliation this entry assigns to the cycle is done.
+`PLAN.md` now queues sharded sources after one bundle works end to end, as this file does, and
+answers the first of the two questions: a member is read by offset from the staged bundle, which is
+never unpacked.
+
 ### A bundle source over SFTP
 
 **Seed:** [`issues/sftp-inner-location.md`](issues/sftp-inner-location.md) · `feature` · appetite small
@@ -232,6 +276,10 @@ whole, which is how tape wants to be used, so the adapter is three methods; the 
 around it: the client library, atomic replacement over a rename, a recall that takes minutes while
 other calls must not wait, and a local server for tests. Split out of the extended archive sources on
 2026-11-11. Last in this section because it reuses the streaming read the sharding cycle builds.
+
+2026-11-16 (`spec/plan-the-bundle-loop/`): `PLAN.md` now places SFTP here as well. A staged bundle
+shared between mounts is named by its source object's signature, which an SFTP source must take from
+something other than an ETag; the seed's note of this date records it.
 
 ### The bundle loop's self-excuse audit reads one file
 
@@ -305,6 +353,11 @@ the main path: after a complete rescue the database still records copies on the 
 the next mount on another node is refused with "audit required". Reaching the documented semantics is
 a design change and belongs in `PLAN.md` first.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): the design change is in `PLAN.md` now, as Ruling E, and
+`AGENTS.md` § 8 carries a note and a row naming this seed. Moved here by Decision 7: the tier a soft
+unmount commits to is the durable tier, the first tier whose `scope` is `shared`, counting up from the
+fastest.
+
 ### Small gaps behind inaccurate invariants
 
 **Seed:** [`issues/invariant-audit-gaps.md`](issues/invariant-audit-gaps.md) · `fix` · appetite small
@@ -331,6 +384,11 @@ with exit codes 0/1/2. `issues/read-only-mount.md` describes its smallest slice 
 counters); whichever of the two is taken first builds it. It also defines what "converged" means for the
 fault-injection suite and unblocks the commit cycle. High-blast-radius as a whole, being the only
 component licensed to delete residency rows and quarantine files on its own reading of the world.
+
+2026-11-16 (`spec/plan-the-bundle-loop/`): Decision 5 of `PLAN.md` settles that a mount after a kill
+recovers and serves, and `AGENTS.md` § 8 carries a note and a row naming this seed. Moved here: the
+walk checks the durable tier's staged bundles and their records (`issues/durable-tier-record.md`)
+against the database.
 
 ### `terrace commit` — finalize the source offline
 
@@ -487,6 +545,10 @@ one left by a killed mount can lapse. What forbids it today is the marker that t
 overlay, a member index kept in each overlay's own database, and limits and eviction that assume one
 owner. Requires a read-only mount, which is why it follows one.
 
+2026-11-16 (`spec/plan-the-bundle-loop/`): `PLAN.md` § *The tier model* (g) states what sharing needs,
+from the plan cycle's two-process prototype. Moved here: what it costs a mount to learn a bundle's
+signature, which that prototype left open, and what it did not test, more than two mounts among it.
+
 ### Opening a resident file costs three database writes
 
 **Seed:** [`issues/read-path-metadata-writes.md`](issues/read-path-metadata-writes.md) · `perf` · appetite small
@@ -497,6 +559,20 @@ a laptop: about 3,100 to 4,300 opens a second against 35,900 on the stage direct
 threads up. For a dataset opened once per file per epoch this is the hot path, and the LRU clock is
 the one figure in the catalog that is safe to batch. Taking the baseline is cheap at any time; the fix
 belongs beside the read-only mount, whose workload it bounds.
+
+### The state store opens a rollback journal with `synchronous = FULL`
+
+**Seed:** [`issues/state-store-journal-mode.md`](issues/state-store-journal-mode.md) · `fix` · appetite small
+
+Decision 6 of the redrawn `PLAN.md`: the one database sits on storage every host sees, a network
+filesystem on the maintainer's clusters, where SQLite's documentation says WAL does not work. The
+design assumes `journal_mode = DELETE` with `synchronous = FULL`; the tree opens WAL with `NORMAL`, and
+`AGENTS.md` § 2 and § 10 carry a note naming this seed. Small: two pragmas, two sections, and an audit
+of which engine reads hold a cursor long enough to make a commit wait, which only this mode does. High
+blast radius, since the pragmas are gated. Placed beside the deployment entry, whose check reads the
+same filesystem; by the maintainer's ruling of 2026-11-15 it does not wait for that check, and can be
+taken whenever an engine cycle is not holding `state/db.py`. Measuring throughput across SQLite's
+options waits until the project is more mature.
 
 ### Deploy on an HPC cluster
 
@@ -509,6 +585,11 @@ or a policy conversation. What remains here is the modulefile, the job-script pa
 node, and the batch scheduler's time-limit sequence. For a read-only mount that sequence needs no
 rescue: the criterion is that a killed mount leaves an overlay the next job can mount. The
 detach-then-commit pattern depends on the lifecycle section and joins when that closes.
+
+2026-11-16 (`spec/plan-the-bundle-loop/`): question 6 has its check, printed in `PLAN.md` § *The state
+store on shared storage* and carried by the seed. A like check for the durable tier's filesystem
+(atomic rename, exclusive create, reading a replaced open file on shared scratch) is not written yet,
+and belongs here.
 
 ## Queued: release
 

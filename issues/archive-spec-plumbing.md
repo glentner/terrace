@@ -175,5 +175,24 @@ Draft R-IDs, to be firmed up at promotion.
   `staging` is a path of its own on the source tier, which no overlap rule sees and no quota counts.
   Shaping should decide whether a bundle's working copy lives inside the first shared stage tier, managed
   and counted like anything else there, and whether `staging` is then a key at all.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): the question in the
+  note above is answered by Decision 1 of the root `PLAN.md` (§ *Decisions*; § *The tier model* (b) and
+  (d); § *Configuration*). A staged bundle lives in the durable tier directly below the source, in the
+  tier's root under a name no entry of the overlay can take, and the tier's limits count it as one file
+  at its uncompressed size. The `staging` key is retired: a spec that carries it is refused with a
+  message naming the tier that now holds the bundle. Decision 7 adds a stack rule: over a bundle source
+  a stack has exactly one shared stage tier, directly below the source, and a spec that breaks it is
+  refused; this seed's parser is where that refusal lives. What changes in the draft above:
+  - **R2** loads a `tar.gz` source with an S3 `location` and `sync`, and no `staging`; a spec that
+    carries `staging` is refused with the message Decision 1 names. The examples it must load are the
+    root `PLAN.md`'s as redrawn (§ *Configuration*), which carry no `staging`.
+  - **R6** becomes: a staged archive type over a stack with no shared stage tier directly below the
+    source, or with more than one shared stage tier, is refused at load, naming the tier at fault.
+  - **R7** loses its `staging` clause, since no working path outside a tier remains; the symlink-blind
+    overlap check between tier roots stands.
+  - Open question 1 (where an archive tier's marker lives) is unchanged for a direct-update archive;
+    for a staged one the staged bundle sits inside the durable tier, which carries its own marker.
+  The pressure rule that reclaims a staged bundle, which Decision 1 makes evictable, is
+  `issues/eviction-one-hop.md`'s; the bundle record beside it is `issues/durable-tier-record.md`'s.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   tier-invariants and remaining-work briefs.

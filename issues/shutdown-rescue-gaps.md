@@ -214,5 +214,16 @@ the KB's EARS notes).
   leaves nothing a node-scope tier is needed for, so it should end with no residency recorded on one, and
   a mount should treat an empty node-scope tier with no residency against it as a fresh tier and not as a
   loss. This is the detach lifecycle's main path, and today it ends in an audit that does not exist.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): the root `PLAN.md`
+  records the definition above as Ruling E (§ *Decisions*; § *Lifecycle and recovery* → *Shutdown*),
+  and `AGENTS.md` § 8 carries a note *Scheduled to change* and a row naming this seed beside the
+  existing row. **Work that moves here:** Decision 7 names the tier a soft unmount commits to, the
+  durable tier: the first tier whose `scope` is `shared`, counting up from the fastest. Over a bundle
+  source a stack has exactly one shared stage tier, directly below the source, so the rescue's target
+  and the tier that holds the staged bundles are one tier; refusing a spec that breaks that is
+  `issues/archive-spec-plumbing.md`'s. A soft unmount also writes each changed staged bundle's bundle
+  record (Decision 4, `issues/durable-tier-record.md`). Two questions stay here, as the root `PLAN.md`
+  says: how a rescue that its budget cuts short is recorded, and how the daemon tells `--detach` from a
+  scheduler's SIGTERM.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — FUSE/CLI
   layering brief, divergences 1 and 2, and the engine-policy brief, divergences 1, 2 and 3.

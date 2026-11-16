@@ -138,5 +138,24 @@ or a faithful stand-in; none is checkable in CI as it stands.
   script should ask the scheduler for a signal ahead of the limit and forward it to the mount, instead of
   relying on the grace after the terminating signal
   ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)).
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): **the check for
+  question 6.** The root `PLAN.md` § *Architecture* → *The state store on shared storage* prints it:
+  the commands to type on two hosts that see one directory (host A a compute node, host B a login
+  node, in a throwaway directory on the filesystem that will hold the state directory), the five lines
+  of output that mean the assumption holds, a table of what each differing line means, and a
+  single-host variant with what it does not show. It needs only Python's standard library. Decision 6
+  chose the journal mode the check runs by default, `journal_mode = DELETE` with `synchronous = FULL`;
+  `wal` as a last argument runs the tree's mode instead. By the maintainer's ruling at sign-off,
+  `issues/state-store-journal-mode.md` builds the safer mode without waiting on this check, so the
+  check no longer gates that change: it says whether the one database can stay on that filesystem
+  while mounted, and if a line fails, the root `PLAN.md` says what changes. Running it is this seed's,
+  and the maintainer's. Two more belong beside it:
+  - the check covers the state directory's filesystem only. The plan cycle's prototypes assumed of
+    shared scratch, the durable tier, an atomic rename, an exclusive create, and that a reader keeps
+    the bytes of an open file renamed over (`spec/plan-the-bundle-loop/research/03-shared-read-only-tier-prototype.md`).
+    A like check for the durable tier's filesystem is not written; it belongs with this seed;
+  - the cost of a commit on that filesystem in the safer mode is unmeasured. Measuring throughput
+    across SQLite's options is deferred until the project is more mature, by the same ruling, and
+    recorded in `issues/state-store-journal-mode.md`.
 - Found by: the owner's statement of the deployment goal (2026-11-04). Nothing here has been checked
   on a cluster.
