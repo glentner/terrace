@@ -3,7 +3,7 @@ slug: local-bundle-loop
 title: Drive the bundle loop end to end on a local object store
 kind: test
 appetite: small
-status: in_review
+status: done
 branch: test/local-bundle-loop
 base: main
 current_phase: done
