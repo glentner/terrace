@@ -1,59 +1,196 @@
 ---
 status: draft
-last_updated: 2026-07-01
+last_updated: 2026-11-16
 supersedes: GOAL.md (which remains as the original statement of intent)
 ---
 
 Plan — Terrace (`terrace`)
 ==========================
 
-A clean, reference implementation of a managed data-tiering service for research computing,
-delivered as a stand-alone Python program. A FUSE mount presents a single logical namespace;
-behind it, an ordered stack of storage tiers (POSIX, S3, TAR/ZIP archives) is managed
-automatically: files are promoted toward fast tiers on access, written back toward the
-authoritative source on configurable policies, and evicted least-recently-used when per-tier
-quotas are reached.
+A reference implementation of managed data tiering for research computing, delivered as a
+stand-alone Python program. A TOML spec names a source, an object store or a tape reached over SFTP
+holding one compressed bundle or ten thousand, and a stack of storage tiers beneath it: shared
+scratch, then node-local disk and RAM. A FUSE mount presents the bundles' contents as one namespace.
+A bundle is pulled to scratch when it is first read and decompressed there without being unpacked;
+single files land on the fast tiers as they are read; a changed file moves up the stack one tier at
+a time, on a tier's write-back delay or under its limits, to scratch beside the bundles, which is
+durable; and a bundle is rebuilt and put back to its source on clocks of its own. A signal stops a
+job's mount with every change on scratch, so the node is released, and a commit from another host
+later rebuilds the bundles that changed. A POSIX directory or an S3 prefix serves as a source under
+the same stack.
 
 The design goal is *legibility as a reference implementation*: the correct abstractions,
 modern Python (3.15+, free-threaded), and no framework semantics leaking into the core model.
 
 
+The story
+---------
+
+*Follows from:* nothing; it is the root that every other section traces to.
+
+The maintainer told the story on 2026-11-11, the first time it was told in one place. This document
+was first drawn on 2026-07-01, before it, and is redrawn around it: a section that predates the story
+and still holds is kept, and every section opens with the sentence of the story, or the ruling or
+decision, that it follows from.
+
+**The statement, in the maintainer's words (2026-11-11):**
+
+> The big user-story I want to tell is that we define a TOML config that points to S3/SFTP tape or
+> object store which contains either a single bundle or a multi-bundle (think 10k tar.gz from full
+> imagenet), and the config defines a cascade down to Lustre Scratch where the bundles would be
+> lazily pulled and decompressed (but not unpacked in full yet), the node-local /dev/shm lands single
+> files from that .tar bundles as necessary, and writes them back up to node-local /tmp, and then
+> back up to Lustre Scratch along-side the .tar sources. As changes landed to working copies in
+> /dev/shm, those altered files either due to eviction or write-back delay get committed back up the
+> stack. The source bundles and altered versions of files alongside them on Scratch represent durable
+> storage (if a job halts we're okay and can recover). The source bundles are repacked either due to
+> quota (eviction) or write-back delay themselves and put back to the source over S3/SFTP. A 'commit'
+> flushes everything back up the stack.
+
+Its five sentences carry the labels a section cites:
+
+- **S1**, "The big user-story I want to tell is that we define a TOML config…": the spec; a source of
+  one bundle or many; the cascade down to scratch, where bundles are pulled lazily and decompressed
+  but not unpacked; single files landed in the RAM tier and written back up through node-local disk
+  to scratch, beside the bundles.
+- **S2**, "As changes landed to working copies in /dev/shm…": an altered file moves up the stack by
+  eviction or by write-back delay.
+- **S3**, "The source bundles and altered versions of files alongside them on Scratch…": the bundles
+  and the altered files on scratch are the durable set a halted job recovers from.
+- **S4**, "The source bundles are repacked…": a bundle is rebuilt under pressure or on its own delay
+  and put back to the source.
+- **S5**, "A 'commit' flushes everything back up the stack."
+
+**His clarifications of the same date**, as the seed that recorded them paraphrased them; the labels
+are this document's:
+
+- **C1.** every stage tier has a size limit, a count limit and a write-back delay. Lack of room in a
+  tier pushes a copy up the stack, which may cause the same in the tier above; on a read-only
+  workload that is the only force. A changed copy left alone for its delay is pushed up as well,
+  whatever the tier's room, and that may cascade for the upper tier's own reasons;
+- **C2.** a push goes one tier up. A write-back in the lowest tier never goes "all the way up" to
+  repack the bundle;
+- **C3.** a signal, from the user or the batch scheduler, commits what has changed up to the lowest
+  durable tier, so the mount can stop and the node be released. Later, from a login node, a full
+  commit rebuilds the bundles that changed, and does not delete the staged bundles, so the next mount
+  does not pull them again;
+- **C4.** a clean copy pushed out of a tier is kept one tier up when that tier has room, so a second
+  read comes from node-local disk and not from the bundle. The database tracks every copy and knows
+  where the fastest one is;
+- **C5.** a soft unmount, asked for directly or by a signal, ends with the database recording every
+  modified file on the first durable tier and nothing on any tier below it;
+- **C6.** everything lives in the one database, in a state directory on durable storage every host
+  sees; on his clusters, the home filesystem. Many writers on one overlay do not work with that and
+  are for another day ([`issues/multi-node-mounts.md`](issues/multi-node-mounts.md)). A top durable
+  tier shared read-only between mounts may come first
+  ([`issues/shared-staged-tier.md`](issues/shared-staged-tier.md)).
+
+The settled rulings below take Ruling A from C1, B from C2, C from C4, D, H and I from C6, E from C5,
+and F from C3.
+
+
+Decisions
+---------
+
+*Follows from:* the story, S1–S5 and C1–C6, and what was ruled and decided on it.
+
+It holds three lists. The rulings are the maintainer's and are settled; none is reopened in this document.
+The decisions of the redraw were made without him and are recorded for his review. The last list
+says where the code still does something else, and which seed changes it. Every other section cites
+a ruling as Ruling A to J and a decision as Decision 1 to 7.
+
+### Settled rulings
+
+*Follows from:* C1–C6, and two rulings of the same day made outside the story (G and J).
+
+| Ruling | What is ruled | Date | Reason | Turned down |
+|---|---|---|---|---|
+| A | Every stage tier has a size limit, a count limit and a write-back delay. | 2026-11-11 | One rule a user can hold in their head: two limits and a delay per tier, and either moves a copy one tier up. On a read-only workload pressure is the only force, and a tier with no limit has none. | Limits and a delay that a spec may leave out, as the tree has them: a stage tier with no limit is never reclaimed and fills its device. Whether a spec must state them or gets defaults is `issues/eviction-one-hop.md`'s. |
+| B | Pressure or an expired delay moves a copy one tier up and no further. | 2026-11-11 | The maintainer's cases are codes that edit the middle of files: "There is no benefit of using the product if we trigger a repack on every write-back." A bundle is rebuilt on triggers of its own. | Committing a dirty copy to the source when it is evicted (`AGENTS.md` § 7, "to the *source*, not one hop"), which turns pressure in the RAM tier into a rebuild and a push per evicted file. |
+| C | A clean copy pushed out of a tier is kept one tier up when that tier has room. | 2026-11-11 | "there's no reason not to use faster tiers (node-local /tmp) if we have the quota available": a second read comes from node-local disk and not from the bundle. | Dropping the copy, so the next read goes back to the staged bundle. |
+| D | One database holds everything. It sits in the overlay's state directory, on durable storage every host of the workflow sees, and outside every tier. | 2026-11-11 | One authority for every tier, which knows where the fastest copy is and which a commit from another host reads. The maintainer accepted that many writers do not work with it (Ruling H). | A database on node-local storage while mounted, written to the durable tier at a soft unmount. It was proposed because SQLite's WAL mode does not work over a network filesystem and every change would be paid at local latency. |
+| E | A soft unmount, asked for directly or by a signal, commits every modified file to the first durable tier and halts. The database then records every modified file there and nothing on any tier below it. | 2026-11-11 | A batch job's end releases the node, and the next job mounts on another node whose node-local tiers are empty; nothing recorded on them may be needed. | Residency left recorded on node-local tiers, as the tree leaves it after a rescue, which makes the next mount on another node refuse (reproduced in `issues/shutdown-rescue-gaps.md`). |
+| F | A commit run from another host rebuilds the bundles that changed and leaves the staged bundles in place. | 2026-11-11 | C3: the next mount does not pull them again, and a pull from tape is the expensive part. | Deleting the staged bundles after a commit, which makes the next mount pull every bundle again. |
+| G | Row ids are never reused, by a schema version bump taken before any state database is deployed. `issues/namespace-sync-redesign.md` owns the bump. | 2026-11-11 | A reused id is what two cycles built machinery to tell apart from the entry that held it before. The bump strands no state database while none is deployed, and stops being free at the first deployment. | Machinery that tells a reused id apart: queue rows recognized by six fields, a four-field mark, and the purge watch. |
+| H | Many writers on one overlay are not designed for here, and are scoped when reached. | 2026-11-11 | One database has one writer (Ruling D). In the maintainer's words, "full multi-node writers is a challenge for another day." | The same spec mounted on many nodes now, each with a database of its own, negotiating at the durable tier with directory locks (`issues/multi-node-mounts.md`). |
+| I | A top durable tier shared read-only between mounts, each with tiers of its own below, is wanted sooner than many writers. | 2026-11-11 | A multi-node job or a sweep reads one dataset, and without sharing every mount stages its own copy of each bundle and pulls it again. A staged bundle is a function of its source object, so sharing it for reading needs no writer to coordinate. | One staged copy of the dataset per mount (`issues/shared-staged-tier.md`). |
+| J | The names: Terrace, `terrace`, `TERRACE_`, `.terrace/`. Configuration and per-user paths follow the XDG convention. | 2026-11-11 | A name was chosen before any release and before any overlay was deployed, so the rename is a hard break with no migration code; XDG is the convention users and sites already configure. | The placeholder name, and paths of the project's own invention (`spec/rename-to-terrace/GOAL.md`, Clarifications). |
+
+### Decided in this cycle, for the maintainer's review
+
+*Follows from:* S1–S5 and the settled rulings.
+
+Decisions 1 to 7, as signed on 2026-11-15 with each one's reason, the alternative turned down and its
+evidence, are written here by the third build phase of `spec/plan-the-bundle-loop/`; the sections
+below already cite them by number.
+
+### What the tree does not yet do
+
+*Follows from:* the two lists above.
+
+The fourth build phase of `spec/plan-the-bundle-loop/` writes this list: one row per ruling or
+decision the code contradicts, with the seed that owns the change.
+
+
 Vision and scope
 ----------------
 
+*Follows from:* S1, which says what the product is for; Rulings H and I, which bound it.
+
 In HPC environments researchers hand-tier data across `/project` (large, slow, authoritative),
-`/scratch` (fast, purged), `/tmp` (node-local), and `/dev/shm` (RAM), plus S3 and archive
-formats at the cold end. Terrace replaces that manual choreography: the user mounts a
-configured tier stack and points their application at the mountpoint; all staging, write-back,
-and eviction is policy-driven.
+`/scratch` (fast, purged), `/tmp` (node-local) and `/dev/shm` (RAM), and a large dataset often lives
+colder still, as compressed bundles on an object store or on tape, because a center will not grant
+the inode quota its files would take unpacked. Terrace replaces that choreography: the user writes
+one spec, mounts it, and points their application at the mountpoint. Pulling, staging, write-back,
+rebuilding the bundles and putting them back follow from the spec's limits and delays. What sets it
+apart from a read-only archive mount is the write path: changes move up the stack one tier at a time
+and are folded back into the compressed bundles at the source on a delay, and the batch lifecycle
+lets a job release its node without waiting on the source.
 
 **In scope (v1)**
 
-* FUSE mount presenting one logical namespace over an ordered tier stack.
-* Tier types: POSIX directory, S3 prefix/object, TAR and ZIP archives (archives layered over
-  either a POSIX path or an S3 object).
-* Per-tier quotas (bytes and file count) with LRU eviction between high/low watermarks.
-* Write-back policies per tier boundary: quiescence delay, maximum interval, pass-through
-  (write-through) mode, and rate-limited archive re-sync (at most N refreshes per period).
-* Whole-file staging granularity with a size-bypass rule; the tier protocol carries
-  offset/length range operations from day one so chunk-level staging can be added later
-  without breaking the contract.
-* Persistent overlay state (catalog, residency, LRU clocks, dirty/write-back queue) in SQLite,
-  maintained so metadata is always at least as current as the data it describes.
-* Graceful shutdown (SIGINT / `terrace umount`) that drains all changes to the source; orderly
-  detach (SIGTERM / `umount --detach`) that stops immediately with metadata intact, rescuing
-  node-local dirty data to the nearest shared tier; audit-based recovery from crashes
-  (SIGKILL, OOM, node loss) — automatic at mount, standalone via `terrace audit`.
-* Deferred finalization: a standalone `terrace commit` drains queued dirty state to the
-  authoritative source offline, from any host that sees the shared tiers — so expensive
-  compute allocations never wait on upstream data movement.
-* CLI: `terrace mount|umount|status|flush|fsck|config` (cmdkit `ApplicationGroup`).
+* A FUSE mount presenting one logical namespace over an ordered tier stack.
+* Sources: an object holding one compressed bundle, or a prefix of many, on an object store or
+  reached over SFTP (S1); ZIP and uncompressed TAR archives updated in place; a POSIX directory; an
+  S3 prefix. Many bundles and SFTP are queued after one bundle works end to end (§ *The tier model*
+  (f)). Stage tiers are POSIX directories.
+* Every stage tier with a size limit, a count limit and a write-back delay (Ruling A); pressure or an
+  expired delay moves a copy one tier up and no further (Ruling B), and a clean copy is kept one tier
+  up when that tier has room (Ruling C). Reclaim is least-recently-used between high and low
+  watermarks.
+* Write-back policies per tier boundary: quiescence delay, maximum interval, pass-through. A bundle
+  is rebuilt and put back on its own delay, under pressure on the durable tier, or at a commit,
+  bounded by `sync.max_frequency` (S4).
+* Staged bundles on the durable tier, decompressed and not unpacked, with the altered files beside
+  them, and a bundle rebuilt from recorded state and put back in one object write (§ *The tier
+  model*).
+* Whole-file staging with a size-bypass rule; the tier protocol carries offset/length range
+  operations so chunk-level staging can be added later without breaking the contract.
+* One state database in SQLite, in a state directory on storage every host sees (Ruling D), kept so
+  metadata is always at least as current as the data it describes.
+* A soft unmount, on a signal or asked for directly, that commits every modified file to the durable
+  tier and halts with nothing recorded below it, so the node is released (Ruling E); a drain
+  (`terrace umount`, SIGINT) that pushes everything to the source.
+* A commit from any host that sees the state directory and the durable tier, which rebuilds the
+  bundles that changed and leaves the staged bundles in place (Ruling F), so a compute allocation
+  never waits on the source.
+* Recovery after a kill (SIGKILL, OOM, a job's time limit, node loss): the next mount checks the
+  tiers against the database, reports what was lost, and serves (Decision 5); `terrace audit` runs
+  the same walk with no mount.
+* A top durable tier shared read-only between mounts, each with tiers of its own below (Ruling I;
+  § *The tier model* (g)).
+* CLI: `terrace mount|umount|status|flush|commit|audit|config` (cmdkit `ApplicationGroup`).
 
 **Explicit non-goals (v1)**
 
-* Multi-client coherence. Named tiers are **managed locations** owned exclusively by their
-  overlay and marked as such on disk; concurrent external modification is an audit-repairable
-  violation, not a supported mode of use.
+* Many writers on one overlay (Ruling H). One database has one writer, so the same spec mounted for
+  writing on many nodes at once is not designed for here; it is scoped when reached
+  (`issues/multi-node-mounts.md`). Named tiers are **managed locations** owned by their overlay and
+  marked as such on disk, and concurrent external modification is an audit-repairable violation,
+  not a supported mode of use.
+* Sharing beyond reading. What comes sooner is the reading half (Ruling I): a top durable tier that
+  mounts share read-only, which no mount writes to, evicts from or counts its limits against. A
+  shared tier that mounts write to is part of many writers.
 * Chunk/block-level partial staging (protocol-ready, not implemented).
 * Special files (devices, sockets), hard links across tiers, byte-range lock pass-through
   (advisory locks are honored locally within the mount only).
@@ -63,29 +200,216 @@ and eviction is policy-driven.
 Terminology
 -----------
 
+*Follows from:* S1–S5 for the story's terms; Rulings B to F for what moves a copy and what a commit
+and an unmount are.
+
 * **Tier stack** — ordered list of tiers. `tiers[0]` is the **source** (upstream terminus,
   authoritative, typically unquoted). The last tier is the fastest (e.g., `/dev/shm/<space>`).
 * **Upstream / downstream** — toward the source / toward the fast end.
-* **Promotion** — copying a file downstream so reads/writes hit faster media.
-* **Commit (write-back)** — pushing new data or namespace changes one hop upstream.
-* **Eviction** — dropping a staged copy from a quota'd tier. Only clean copies (or copies
-  whose dirty state has first been committed upstream) are evictable.
-* **Residency** — the set of tiers currently holding a copy of a file.
-* **Catalog** — the SQLite-backed namespace and state database, authoritative while mounted.
-* **Managed location** — a named tier root owned exclusively by the overlay and marked as such
-  on disk; the state database is authoritative for its contents.
-* **Drain** — committing all dirty state hop-by-hop to the source with policy clocks collapsed;
-  the graceful-shutdown path.
-* **Audit** — reconciling the state database against the managed locations after an unclean
-  shutdown; automatic at mount, or standalone via `terrace audit` with no mount running.
-* **Detach** — orderly immediate stop without a full drain: in-flight work resolved or rolled
-  back, metadata consistent, dirty state left queued for a later `terrace commit`.
-* **Rescue** — the minimal move at detach: dirty data on node-local (`scope = "node"`) tiers
-  hops to the nearest shared durable tier so it survives losing the node.
+* **Bundle** — a compressed archive at the source (`tar.gz` in the story) whose members are files of
+  the namespace. A source holds one, whose contents are the mount's root, or a prefix of many.
+* **Stage tier** — every tier below the source. Each has a size limit, a count limit and a write-back
+  delay (Ruling A), and a `scope` of `shared` or `node`.
+* **Durable tier** — the maintainer's "lowest durable tier", shared scratch in the story: the first
+  tier whose `scope` is `shared`, counting up from the fastest, and the tier a soft unmount commits
+  to (Decision 7). What is on it outlives the node.
+* **Staged bundle** — a bundle pulled from the source and decompressed on the durable tier but not
+  unpacked: one uncompressed `.tar`, whose members are read at their offsets.
+* **Member index** — a staged bundle's member names, data offsets, sizes, modes and mtimes, written
+  once beside it.
+* **Altered file** — a member changed or created through the mount, kept whole as a file of its own
+  on the durable tier beside its staged bundle.
+* **Bundle record** — one small file per staged bundle on the durable tier, naming what its members
+  are now called, which are removed, and which altered file holds a member's bytes (Decision 4).
+* **Promotion** — copying a file downstream so reads and writes hit faster media.
+* **Push** — moving a copy one tier up, under pressure or on an expired delay, and never further
+  (Ruling B). A changed copy is committed to the tier above; a clean one is kept there when the tier
+  has room (Ruling C).
+* **Write-back** — the push of a changed copy on its tier's policy: after its delay, by its maximum
+  interval, or at once for a pass-through tier.
+* **Eviction** — reclaiming room in a stage tier under pressure, least-recently-used between
+  watermarks. An evicted copy is pushed one tier up (Rulings B, C), not dropped while the tier above
+  has room for it. At the durable tier the tier above is the source: a clean staged bundle is
+  dropped, and one with changes is rebuilt first (Decision 1).
+* **Rebuild** — writing a bundle anew from recorded state: unchanged members copied from the staged
+  bundle at their offsets, changed and created ones from the altered files, removed ones left out,
+  renamed ones under their new names; compressed and put back to the source in one object write
+  (Decision 2).
+* **Commit** — what flushes everything back up the stack (S5). `terrace commit`, run with no mount
+  from any host that sees the state directory and the durable tier, rebuilds the bundles that changed
+  and leaves the staged bundles in place (Ruling F); over a POSIX or S3 source it drains queued
+  write-back to the source. It is not one hop of write-back.
+* **Soft unmount** — a stop, asked for directly or by a signal, that commits every modified file to
+  the durable tier and halts, with nothing recorded on any tier below it (Ruling E). The tree's
+  detach (`terrace umount --detach`, SIGTERM) is its first half.
+* **Rescue** — the soft unmount's move: changed data on node-scope (`scope = "node"`) tiers pushed
+  one tier at a time to the durable tier, so it survives losing the node.
+* **Drain** — committing all dirty state hop by hop to the source with policy clocks collapsed;
+  `terrace umount` and SIGINT.
+* **Residency** — the set of tiers currently holding a copy of a file. The database knows which copy
+  is the fastest.
+* **Catalog** — the namespace and state in the one database (Ruling D), authoritative while it
+  exists.
+* **Managed location** — a named tier root owned exclusively by its overlay and marked as such on
+  disk; the database is authoritative for its contents. A tier shared read-only between mounts
+  (Ruling I) carries a marker of another kind and is owned by none of them.
+* **Audit** — reconciling the database against the managed locations after a kill; at the next mount
+  (Decision 5), or standalone via `terrace audit` with no mount running.
+
+
+The tier model
+--------------
+
+*Follows from:* S1–S5 and C1–C6; Decisions 1 to 4 and 7.
+
+What each tier of the story's stack holds, what changes the durable tier and how, what its limits
+count, what a rebuild reads, and what a second mount needs to share it. The stack is the story's:
+a source of bundles; shared scratch beneath it, the durable tier; node-local `/tmp`; the RAM tier
+`/dev/shm`. Two prototypes on the local loop's helper checked the model against a plain-directory
+oracle: `spec/plan-the-bundle-loop/prototype/RECORD.md` holds their runs, and
+`spec/plan-the-bundle-loop/research/` the measurements behind them.
+
+### (a) What each tier holds, and which is the durable tier
+
+*Follows from:* S1, S3; Decision 7.
+
+The source holds the bundles, one object or a prefix of many, compressed; only a rebuild writes a
+bundle source. The durable tier is the first tier whose `scope` is `shared`, counting up from the
+fastest (Decision 7). Over a bundle source a stack has exactly one shared stage tier, directly below
+the source, so the tier that holds the staged bundles and the tier a soft unmount commits to are one
+tier, and a spec that breaks this is refused. Over a POSIX or S3 source with no shared stage tier,
+the durable tier is the source. It holds what (b) lists. The node-local tiers hold single files:
+members landed as they are read, and working copies. Nothing on them is the only copy of a change
+for longer than the tier's delay.
+
+### (b) What the durable tier holds
+
+*Follows from:* S1, S3; Decisions 1 and 4.
+
+Staged bundles, decompressed and not unpacked, under a name no entry of the overlay can take.
+Altered files: each changed or created member, whole. Per staged bundle, a member index, which is a
+function of the bundle and is written once beside it, and a bundle record (Decision 4). The tier's
+marker. In passing, the temporary names of renames in flight and the spool of a rebuild.
+
+### (c) Which steps change the durable tier, and why each is atomic
+
+*Follows from:* S3; Decisions 2 and 4.
+
+Each step is bracketed intent, act, confirm, and each act is a rename into place or a single object
+write, so a kill between an act and its record leaves an unnamed file to discard, never a name that
+resolves to the wrong bytes.
+
+* **Staging a pulled bundle.** The index is renamed into place first, then the bundle, so a bundle
+  under its staged name always has its index. A kill before the database commit leaves a staged
+  file no row names (argued; the prototype did not inject it).
+* **Landing an altered file.** A temporary name, a sync, a rename. A kill before the database
+  commit left the view equal to the tree before the change, and a file no row names.
+* **Writing a bundle record.** The same. A kill between the rename and the database commit leaves
+  the record one change ahead of the database and no further (argued; not injected).
+* **A rebuild.** A spool, one object write (atomic per key), one transaction that records the bundle
+  clean. A kill after the write and before the transaction leaves the bundle recorded as changed,
+  and a second rebuild sent one write and gave the same tree. When a new staged bundle is written, it
+  takes a new name and one transaction switches to it before the old one is removed; kills before
+  and after that switch all left a view equal to the oracle.
+* **Dropping** a clean staged bundle or a retired altered file, under the same bracket.
+
+The one step that left wrong bytes behind a name was a rename of the new staged bundle over the old
+one's name: a kill before the commit left the recorded offsets pointing into the new file. Decision 2
+forbids it. A directory rename moves no bytes of an unchanged member (Decision 3); an altered file
+kept by name under that directory adds one POSIX rename beside the database commit, and a kill
+between them left a row naming a missing file. Kept by entry id there is no such step. Which of the
+two the durable tier uses is `issues/namespace-sync-redesign.md`'s to decide.
+
+### (d) What the durable tier's limits count
+
+*Follows from:* C1; Rulings A and C; Decision 1.
+
+By size: every staged bundle at its staged, uncompressed size, every altered file, the records and
+indexes, and a spool while it exists. By count: one per staged bundle and one per altered file.
+What cannot leave under pressure: an altered file not yet in a bundle written back, which is the only
+copy of its bytes. A staged bundle with changes leaves only after its rebuild. After a rebuild that
+wrote no new staged bundle, the old one and its altered files are correct only together and leave as
+one unit. A clean staged bundle is dropped, since the source, one tier up, holds it, so Ruling C needs
+no special case at this tier. Whether a spec must state the limits or gets defaults stays with
+`issues/eviction-one-hop.md`.
+
+### (e) What a rebuild reads, and what triggers one
+
+*Follows from:* S4, S5, C2, C3; Rulings B and F; Decision 2.
+
+A rebuild reads the database for what the bundle should hold and the durable tier for the bytes
+(Decision 2), and nothing else: in the prototype it read the state database and the durable tier's
+directory, with one read from the source to pull and one write to put the bundle back. Three things
+trigger one:
+
+* the bundle's own delay, which is the durable tier's write-back delay counted from the last change
+  that reached the tier for that bundle, bounded by `sync.max_frequency`;
+* pressure on the durable tier, when a bundle with changes is chosen for reclaim;
+* a commit, which rebuilds every changed bundle with the clocks collapsed.
+
+A push into the durable tier is never itself a trigger (Ruling B).
+
+### (f) One bundle or many, and SFTP
+
+*Follows from:* S1.
+
+A source is one object, whose contents are the mount's root, or a prefix of many, each one top-level
+directory named for its stem. The bundle is the unit that is pulled, staged, counted, dropped and
+rebuilt, so ten thousand bundles change nothing in the model but the count. A source reached over
+SFTP is an inner location: where a bundle's object is fetched whole and replaced whole. Nothing below
+the source differs. When each is built is `ROADMAP.md`'s to say: both are queued in its section
+*Queued: the bundle loop, driven locally*, after one bundle works end to end, and neither waits for
+the first release.
+
+### (g) What a top durable tier shared read-only between mounts needs
+
+*Follows from:* C6; Ruling I.
+
+The prototype ran two processes, each standing for a read-only mount with a state of its own, over
+one shared durable tier and one bundle (`spec/plan-the-bundle-loop/prototype/RECORD.md`, on the
+helper at `a0c88f1`): 504 of 504 processes read the oracle's bytes. What sharing needs:
+
+* **The marker.** A kind that says staged bundles shared for reading, a format number, and the
+  identity of the source as the spec gives it. No overlay id, tier name, generation, writer or time,
+  so its text is a function of the source and two mounts that arrive together write the same bytes;
+  with a writer id and a time in it, one mount read a marker that was then replaced. A mount refuses
+  a marker of another kind or naming another source.
+* **The member index.** One flat file beside each staged bundle, written by whoever pulled it and
+  renamed into place before the bundle. Each mount's database keeps a row for the bundle it reads and
+  for the copies it made below, and no member rows.
+* **The pull.** A staged name that carries the source object's signature, so a bundle changed at the
+  source is staged beside the old one and a mount reading the old one is not disturbed. A fetch to a
+  name unique to the process and a rename into place. A lock file that only saves a second fetch,
+  lapses at a stated timeout, and is removed only by its maker. The record's fetch counts: one after
+  the other, 1; two mounts started together with a rename only, 2 in every run; with a lock file, 1
+  in every run; with a lock timeout shorter than a pull, 2. A mount killed during the pull left only
+  temporary files, which no later mount took for a bundle.
+
+No mount evicts from the tier, counts its limits against it, or alters a file in it; reclaiming it
+is an explicit command. What it costs a mount to learn a bundle's signature (a request per bundle,
+one list per mount, or none if it trusts what is staged) is an open choice of
+`issues/shared-staged-tier.md`.
+
+### (h) What the durable tier records about itself, and what a mount's database holds given that
+
+*Follows from:* S3, C6; Ruling D; Decision 4.
+
+In its own files: the marker (whose tier this is, or that it is shared), each staged bundle under a
+name that says which source object it is, each bundle's index, each bundle's record, and the
+altered files. The database (Ruling D) holds everything that changes: the namespace, every copy on
+every tier and which is fastest, what is modified and waiting, the intents, the lifecycle row. It is
+the authority while it exists. The tier's files are what a rebuild takes its bytes from, what a
+mount after a kill checks the database against (Decision 5), what a second mount reads instead of
+scanning, and what is left to recover from if the database is lost: with the database deleted, the
+tier's files and the record rebuilt the oracle, and the files alone did not. A record is written
+when the tier is brought up to date for its bundle, so it may be behind the database and is never
+ahead of it by more than the change being recorded.
 
 
 Architecture
 ------------
+
+*Follows from:* S1, a mount over a stack of tiers, and Ruling D, one database; each subsection names its own.
 
 Four layers, strictly separated so the core is testable without a mount:
 
@@ -103,6 +427,8 @@ Four layers, strictly separated so the core is testable without a mount:
 ```
 
 ### Tier protocol
+
+*Follows from:* S1 and S4, the source and how a bundle reaches it; Decisions 1 and 2.
 
 A small, purpose-built protocol we own (no fsspec). Sketch:
 
@@ -157,6 +483,8 @@ Adapters:
   mount root and carries no single-top-level-dir requirement.)
 
 ### Overlay engine
+
+*Follows from:* S2, C1, C2 and C4, what moves a copy; Rulings A to C; Decisions 2 and 3.
 
 The engine is the product. It exposes a synchronous VFS-operations API (`getattr`, `readdir`,
 `open`, `read`, `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`,
@@ -243,6 +571,8 @@ parallel; on GIL builds the workload is I/O-bound and degrades gracefully.
 
 ### State store
 
+*Follows from:* C6; Rulings D and G; Decision 6.
+
 Stdlib `sqlite3`, WAL mode (`synchronous=NORMAL`), plain SQL schema (`schema.sql`), per-thread
 connections. Tables (sketch): `entry` (namespace + metadata), `residency` (entry × tier, atime
 for LRU, clean/dirty, recorded size/mtime and optional blake2b checksum), `writeback` (queued
@@ -276,12 +606,16 @@ scan — cached in `archive_index`). No eager full scan at mount.
 
 ### FUSE adapter
 
+*Follows from:* S1, the mount.
+
 mfusepy's high-level path-based API. Notable mappings: `statfs` reports the source tier's
 capacity (or configured quota for unbounded sources like S3) so `df` is meaningful;
 per-file tiering state is exposed read-only via xattrs (`user.terrace.tiers`,
 `user.terrace.dirty`) for observability and testing.
 
 ### Control channel
+
+*Follows from:* Ruling D, the state directory that holds the socket.
 
 A Unix domain socket in the overlay's state directory, serving a small line-oriented JSON
 protocol. `terrace status` and `terrace flush [path]` talk to the live mount through it; `status`
@@ -291,10 +625,14 @@ can also read the SQLite state directly when no mount is running.
 Lifecycle and recovery
 ----------------------
 
+*Follows from:* S3, S5, C3 and C5; Rulings E and F; Decisions 4 and 5.
+
 Named tiers are managed locations: the overlay owns their contents, and the state database is
 the authority on what is where. The lifecycle design follows from that principle.
 
 ### Shutdown
+
+*Follows from:* C3 and C5; Ruling E.
 
 | Trigger | Behavior |
 |---|---|
@@ -314,6 +652,8 @@ silent nor unbounded: the loss window at each boundary is capped by its write-ba
 policy knobs an explicit trade between upstream write amplification and exposure at the fast end.
 
 ### Deferred commit (`terrace commit`)
+
+*Follows from:* S5 and C3; Ruling F.
 
 The motivating pattern: a GPU job stages and writes against fast tiers, computation finishes,
 and the write-back policies haven't pushed recent outputs upstream. A full drain would finalize
@@ -350,6 +690,8 @@ last committed version requires an explicit `--forfeit`, since an audit or mount
 host may still recover it.
 
 ### Audit
+
+*Follows from:* S3, a halted job recovers; Decisions 4 and 5.
 
 `terrace audit <spec.toml>` reconciles the state database against the managed locations. It runs
 standalone with no mount (taking an exclusive lock on the state database), and `terrace mount`
@@ -388,6 +730,8 @@ fault-injection suite (Testing) asserts exactly that.
 
 Configuration
 -------------
+
+*Follows from:* S1 and C1; Rulings A and J; Decision 1.
 
 Two TOML surfaces, both cmdkit-backed:
 
@@ -468,6 +812,8 @@ sync     = { max_frequency = "4/day" }
 CLI surface
 -----------
 
+*Follows from:* C3 and C5; Rulings E and F.
+
 `terrace` (cmdkit `ApplicationGroup`, hypershell pattern):
 
 | Command | Purpose |
@@ -483,6 +829,8 @@ CLI surface
 
 Technology decisions
 --------------------
+
+*Follows from:* the decision each row records; the archives and state-store rows also Decisions 2 and 6.
 
 Decided 2026-07-01 with rationale; alternatives noted.
 
@@ -502,6 +850,8 @@ Decided 2026-07-01 with rationale; alternatives noted.
 
 Testing strategy
 ----------------
+
+*Follows from:* S3, recovery after a halt, and the decision each bullet tests.
 
 * **Engine-first**: the bulk of the suite drives the VFS-operations API directly against
   tmpdir POSIX tiers — no mount, fast, portable (this is the payoff of the layered design).
@@ -527,6 +877,8 @@ Testing strategy
 
 Risks and mitigations
 ---------------------
+
+*Follows from:* the decision each risk names.
 
 * **Python FUSE throughput** — this is a reference implementation, not a kernel bypass;
   mitigate with passthrough file handles for resident-copy I/O, free-threading, and a
@@ -615,6 +967,8 @@ Risks and mitigations
 Phase outline
 -------------
 
+*Follows from:* Ruling J, the names; `ROADMAP.md` orders what is left.
+
 Expanded with discrete checklist steps in ROADMAP.md; summarized here:
 
 1. **Scaffolding** — pyproject (hatchling, uv, 3.15 pin), src layout, core config/logging/
@@ -649,6 +1003,8 @@ Expanded with discrete checklist steps in ROADMAP.md; summarized here:
 
 Future work (explicitly deferred)
 ---------------------------------
+
+*Follows from:* Rulings H and I.
 
 * Chunk-level partial staging (protocol already range-ready).
 * File pinning (`terrace pin <path> --tier <name>`), per-path policy overrides.

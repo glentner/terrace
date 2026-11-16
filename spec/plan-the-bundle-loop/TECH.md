@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: docs/plan-the-bundle-loop
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: 'tools/lint.sh && uv run python spec/plan-the-bundle-loop/prototype/rebuild.py | grep ''^RESULT trees_equal=yes'' >/dev/null && uv run python spec/plan-the-bundle-loop/prototype/shared.py | grep ''^RESULT oracle_bytes=yes'' >/dev/null && grep -q ''^Trees equal in names and bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Each process read the oracle.s bytes: yes'' spec/plan-the-bundle-loop/prototype/RECORD.md && grep -q ''^Helper commit: [0-9a-f]'' spec/plan-the-bundle-loop/prototype/RECORD.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock AGENTS.md'
 - id: P2
   name: The story, the settled rulings and the tier model
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -216,28 +216,48 @@ criteria and by running the phase's `verify:`.
 **Goal:** the root `PLAN.md` opens with the story, every section names what it follows from, the ten
 rulings are recorded as settled, and a builder reads the tier model in one section.
 
-- [ ] Frontmatter: `last_updated`; the opening paragraph restated in the story's terms.
-- [ ] § *The story*, first: the statement of 2026-11-11 as a block quote in the maintainer's words,
+- [x] Frontmatter: `last_updated`; the opening paragraph restated in the story's terms.
+- [x] § *The story*, first: the statement of 2026-11-11 as a block quote in the maintainer's words,
       exactly as `GOAL.md` § *Problem* quotes it; the six clarifications; the labels S1–S5 and C1–C6.
-- [ ] § *Decisions* → `### Settled rulings`: one table row per ruling, first cell the letter A to J,
+- [x] § *Decisions* → `### Settled rulings`: one table row per ruling, first cell the letter A to J,
       then the ruling, the date, the reason, the alternative turned down (cycle plan § 2.2). None is
       worded as open. Ruling G names `issues/namespace-sync-redesign.md` as the owner of the bump.
       Leave the other two subsections of § *Decisions* as headings with their trace lines and one
       sentence each saying which phase fills them.
-- [ ] § *Vision and scope* and § *Terminology*, rewritten (cycle plan § 2.1 rows 3 and 4). The
+- [x] § *Vision and scope* and § *Terminology*, rewritten (cycle plan § 2.1 rows 3 and 4). The
       non-goals state Ruling H and Ruling I. The command list names the seven commands
       `uv run terrace --help` prints.
-- [ ] § *The tier model*, new, with eight subsections headed `### (a) …` to `### (h) …` in the order
+- [x] § *The tier model*, new, with eight subsections headed `### (a) …` to `### (h) …` in the order
       of GOAL R5 (cycle plan § 2.4). (g) cites `spec/plan-the-bundle-loop/prototype/RECORD.md` for
       the fetch count. (f)'s statement of when many bundles and SFTP are built agrees with
       `ROADMAP.md`: read the two entries on this commit.
-- [ ] A `*Follows from:*` line as the first line under every heading of the root `PLAN.md`, the
+- [x] A `*Follows from:*` line as the first line under every heading of the root `PLAN.md`, the
       carried sections included (cycle plan § 2.1, last column).
-- [ ] Sections not yet reached keep their bodies in this phase.
+- [x] Sections not yet reached keep their bodies in this phase.
 - **Verify:** the frontmatter command: the first section is "The story" and holds the statement's
   opening words; ten ruling rows with a date and no empty cell; the tier model with eight lettered
   subsections; the record cited; a trace line under every heading; nothing outside scope changed.
 - **Touches:** `PLAN.md`.
+
+**Amendment (P2 build, 2026-11-16).**
+- *Where the story was quoted from.* The statement and the six clarifications in the root `PLAN.md`
+  § *The story* are taken from the git object `a0c88f1:issues/local-bundle-loop.md` (lines 25 to 35
+  and 39 to 57), since `f76bb02` retired the file. The statement is that object's block quote line
+  for line, and equals the copy in `GOAL.md` § *Problem*. The clarifications are the object's text,
+  which the seed itself calls a paraphrase, word for word, with two changes of form and none of
+  wording: each bullet opens with its label (`**C1.**` to `**C6.**`), and C6's two links point at
+  `issues/…` from the root instead of at the seed's siblings. Their link text is unchanged.
+- *The two Decisions subsections P3 and P4 fill* carry their exact headings now, so P3's and P4's
+  greps find them, each with its trace line and one sentence naming the build phase that fills it.
+- *(f) on this commit.* `ROADMAP.md` puts *Sharded archive sources* and *A bundle source over SFTP*
+  in § *Queued: the bundle loop, driven locally*, after the entries that make one bundle work end to
+  end and before § *Queued: release*; (f) and § *Vision and scope* say so. The carried sentences that
+  still say "post-v0.1.0" (§ *Tier protocol*, § *Configuration*, § *Technology decisions*) are P3's,
+  by the cycle plan § 2.1.
+- *A note for P4.* P3's `verify:` counts table rows that open `| A |` to `| J |` and requires
+  exactly ten. The cycle plan § 2.6 draws § *What the tree does not yet do* with rows that open the
+  same way (`| A |`, `| B, C |`, …); P3's gate does not run after P4, but a row of that list written
+  as `| A |` would make a rerun of P3's or P2's ruling check count eleven or more.
 
 ## Phase P3 — The decisions of this cycle, the state store, the lifecycle and the remaining sections
 **Satisfies:** R3, R4 · **Depends on:** P2
