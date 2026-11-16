@@ -3,11 +3,11 @@ slug: posix-surface-gaps
 title: Entries created through the mount belong to their creator, and link is refused plainly
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/posix-surface-gaps
 base: main
 current_phase: done
-last_updated: '2026-11-12'
+last_updated: '2026-11-16'
 phases:
 - id: P1
   name: Created entries take the caller's owner and the setgid group; link fails with EPERM
@@ -26,10 +26,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && uv run pytest -m unit tests/fuse/test_surface.py tests/engine/test_ownership.py && uv run pytest -n auto -m unit
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 5565f1b0c4f4732b0d4b5c746291ddaf5a1f182b
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 HIGH (line length, in create) and F2 LOW (surviving mutant, _place_parents) CONFIRMED; human gate: both in high-blast-radius functions'
+  cycle: 1
 ---
 
 # TECH.md — Entries created through the mount belong to their creator, and link is refused plainly
