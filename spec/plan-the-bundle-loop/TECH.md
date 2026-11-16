@@ -3,7 +3,7 @@ slug: plan-the-bundle-loop
 title: Redraw the root PLAN.md around the user story
 kind: docs
 appetite: big
-status: in_review
+status: blocked
 branch: docs/plan-the-bundle-loop
 base: main
 current_phase: done
@@ -58,10 +58,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && grep -q '^### What the tree does not yet do$' PLAN.md && git diff --cached --numstat --merge-base main -- AGENTS.md | awk '$2 != 0 {bad=1} END {exit bad}' && awk '/Scheduled to change [(]2026-11-1[0-9][)]/ {n++} END {exit !(n>=3)}' AGENTS.md && grep -q 'spec/plan-the-bundle-loop' issues/namespace-sync-redesign.md && grep -q 'spec/plan-the-bundle-loop' issues/plan-md-reconciliation.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-spec-plumbing.md && grep -q 'spec/plan-the-bundle-loop' issues/sharded-archive-sources.md && grep -q 'spec/plan-the-bundle-loop' issues/archive-finalization-integration.md && grep -q 'spec/plan-the-bundle-loop' issues/hpc-deployment.md && test -f issues/durable-tier-record.md && grep -q 'issues/durable-tier-record.md' ROADMAP.md && test -f issues/state-store-journal-mode.md && grep -q 'issues/state-store-journal-mode.md' ROADMAP.md && awk '/^-+$/ && length($0)>3 && length($0)==length(prev) {n++; want=NR+2} /^### / {n++; want=NR+2} /^[*]Follows from:[*]/ && NR<=want {t++; want=0} {prev=$0} END {exit !(n>=14 && t==n)}' PLAN.md && git diff --cached --quiet --merge-base main -- src tests tools pyproject.toml uv.lock
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 16da8b79a562dd2b22be92605cb8b8575609d1a0
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 LOW (wal mode claim), F2 LOW triaged fix (Decision 1 not tied to helper/tests), F3 LOW (P1 gate red on final tree)'
+  cycle: 1
 ---
 
 # TECH.md — Redraw the root `PLAN.md` around the user story
