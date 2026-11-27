@@ -3,7 +3,7 @@ slug: posix-surface-gaps
 title: Entries created through the mount belong to their creator, and link is refused plainly
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/posix-surface-gaps
 base: main
 current_phase: done
