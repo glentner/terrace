@@ -85,7 +85,7 @@ Draft R-IDs, to be firmed up at promotion.
   follows the read side of the bundle loop
   ([`issues/sharded-archive-sources.md`](sharded-archive-sources.md)).
 - The plan cycle's second prototype, two processes pulling one bundle onto one tier, is this seed's
-  R3 and R4 in miniature ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R9).
+  R3 and R4 in miniature (`spec/plan-the-bundle-loop/GOAL.md` R9).
 - Open question — **staging ahead of time.** A command that pulls a dataset's bundles before any job
   starts would make every mount a pure reader and remove pulls from job time altogether.
 - Open question — **"or otherwise".** The tiers below the shared one may be node-local "or

@@ -124,8 +124,8 @@ Draft R-IDs, to be firmed up at promotion. The first is a design decision and be
 before any code, under the plan-drift rule.
 
 - **R1** — `PLAN.md` SHALL record, with the maintainer, the decision on each of these, and the
-  prototype evidence for it. [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) is the cycle
-  that writes them; if it has landed, this criterion is met by citing it:
+  prototype evidence for it. The plan cycle (`spec/plan-the-bundle-loop/`) wrote them into the root
+  `PLAN.md` § *Decisions*; it has landed, so this criterion is met by citing it:
   1. **Stable ids.** `AUTOINCREMENT` on `entry.id`, `writeback.id` and `intent.id`, as a schema version
      bump taken before any state database is deployed. Ruled yes by the maintainer on 2026-11-11.
   2. **Where tombstones live.** Out of the logical namespace: a removed or moved-away entry holds a

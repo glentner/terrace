@@ -174,7 +174,7 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
   step. [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) R8 owns shrinking them if it is
   adopted. If it is declined, that residue is this seed's.
 - 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)):
-  [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) redraws `PLAN.md` around the user story and
+  the plan cycle (`spec/plan-the-bundle-loop/`, since landed) redraws `PLAN.md` around the user story and
   absorbs most of the residue listed here. Shape this after it, from what it leaves.
 - 2026-11-16 (`spec/plan-the-bundle-loop/`): the redraw rewrote or amended every section items 1 to 5
   cite, and met the draft criterion for each. Item by item:

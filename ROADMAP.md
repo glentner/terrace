@@ -26,9 +26,10 @@ every engine cycle worked on one mechanism, deferred namespace replay against a 
 entry outside it moved. Meanwhile the loop that sets the project apart — a dataset held as compressed
 bundles at the source, read and written through the overlay, and re-aggregated into those bundles on a
 delay — cannot be configured from a spec file, and nothing in the engine calls the re-aggregation. The
-first section below redraws `PLAN.md` around that story and then turns the loop green, stage by stage,
-on a developer machine against a local object store: the helper that stands the loop up and the
-scenario that records how far the tree gets through it landed as `local-bundle-loop`. The lifecycle around the loop and the mount a researcher
+first section below turns the loop green, stage by stage, on a developer machine against a local
+object store. `PLAN.md` was redrawn around that story first (it landed as `plan-the-bundle-loop`), and
+the helper that stands the loop up and the scenario that records how far the tree gets through it
+landed as `local-bundle-loop`. The lifecycle around the loop and the mount a researcher
 uses follow. Sharing the staged bundles between read-only mounts may come early; many writers on one
 overlay are for a later day. The maintainer agreed this order on 2026-11-11 and ruled the decisions that
 gated it; what is still open is in the next section.
@@ -45,7 +46,7 @@ Ruled on 2026-11-11, and recorded in the seeds: the order of the sections below;
 expired delay moves a copy one tier up and no further, a clean copy included
 ([`issues/eviction-one-hop.md`](issues/eviction-one-hop.md)); what a soft unmount leaves
 ([`issues/shutdown-rescue-gaps.md`](issues/shutdown-rescue-gaps.md)); one database for everything, on
-storage every host sees ([`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md)); row ids
+storage every host sees (root [`PLAN.md`](PLAN.md) § *Settled rulings*, Ruling D); row ids
 that are never reused; and the namespace rebuild, with the two parked cycles folded into it
 ([`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)).
 
@@ -84,24 +85,11 @@ put back to its source on its own delay or under pressure on scratch. A signal c
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
 
-### Redraw `PLAN.md` around the user story
-
-**Seed:** [`issues/plan-the-bundle-loop.md`](issues/plan-the-bundle-loop.md) · `docs` · appetite big
-
-`PLAN.md` and the invariants describe a different product from the one in the user story, and every cycle
-is graded against them: eviction that commits to the source, changes replayed against the source one
-operation at a time, a soft unmount that leaves the next node unable to mount, and sharding and SFTP
-after the release. This cycle writes the contract the later ones build to: the tier model, what the
-durable tier holds, the one database and where it lives, how a bundle is rebuilt, what a soft unmount and
-a commit do, stable ids, and what sharing a staged tier between mounts needs. It writes no engine code.
-Two throwaway prototypes on the local loop's helper keep its decisions from being made by reading. Before
-any engine cycle, because a builder working toward the story today is working against its own contract.
-
 ### Reconcile `PLAN.md` against the implementation
 
 **Seed:** [`issues/plan-md-reconciliation.md`](issues/plan-md-reconciliation.md) · `docs` · appetite small
 
-Small and cheap, and it follows the redraw above, which absorbs most of it. It matters because
+Small and cheap. It was to follow the redraw of `PLAN.md`, which has landed and absorbed most of it. It matters because
 `code terrace review` grades a cycle against a contract shaped from `PLAN.md`, so every inaccuracy
 left standing is a chance to grade correct code as wrong. The audit
 found `PLAN.md` internally inconsistent in one place (its summary lists an `fsck` command its own CLI

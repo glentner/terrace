@@ -109,7 +109,7 @@ Draft R-IDs, to be firmed up at promotion.
   file is a drop.
 - Related: `AGENTS.md` § *Invariants* § 6, § 7, § 8 ("Rescue stops at the first shared tier");
   [`issues/sharded-archive-sources.md`](sharded-archive-sources.md) (a staged bundle as a unit the
-  durable tier's limits count); [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md).
+  durable tier's limits count); the root `PLAN.md` § *Settled rulings*, where the plan cycle (`spec/plan-the-bundle-loop/`) recorded the rulings.
 - 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): the root `PLAN.md`
   records Rulings A, B and C as settled (§ *Decisions*) and states the rule in § *Overlay engine* →
   *Eviction*; `AGENTS.md` § 7 keeps its text with a note *Scheduled to change* naming this seed.
