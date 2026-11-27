@@ -211,7 +211,10 @@ class S3Tier:
 
     def mkdir(self, path: PurePosixPath, mode: int = 0o777, *,
               uid: Optional[int] = None, gid: Optional[int] = None) -> None:
-        """Create a directory marker at `path`; the parent must exist. `mode`, `uid` and `gid` are not retained on S3."""
+        """
+        Create a directory marker at `path`; the parent must exist. `mode`, `uid` and `gid` are not retained on
+        S3.
+        """
         pure, key = self._split(path)
         if pure == ROOT or self._internal(pure):
             raise PermissionError(f'Managed internal: {pure}')

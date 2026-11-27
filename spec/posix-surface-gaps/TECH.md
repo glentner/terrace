@@ -3,11 +3,11 @@ slug: posix-surface-gaps
 title: Entries created through the mount belong to their creator, and link is refused plainly
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/posix-surface-gaps
 base: main
 current_phase: done
-last_updated: '2026-11-16'
+last_updated: '2026-11-27'
 phases:
 - id: P1
   name: Created entries take the caller's owner and the setgid group; link fails with EPERM
@@ -24,7 +24,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: tools/lint.sh && uv run pytest -m unit tests/fuse/test_surface.py tests/engine/test_ownership.py && uv run pytest -n auto -m unit
+  verify: tools/lint.sh && uv run --no-project --python 3.15 python -I spec/posix-surface-gaps/remediation/C1-F1-line-length.py && uv run pytest -m unit tests/fuse/test_surface.py tests/engine/test_ownership.py && uv run --no-project --python 3.15 python -I spec/posix-surface-gaps/remediation/C1-F2-owner-mutants.py && uv run pytest -n auto -m unit
 review:
   last_reviewed_commit: 5565f1b0c4f4732b0d4b5c746291ddaf5a1f182b
   verdict: changes-requested
@@ -157,6 +157,35 @@ not the blind reviewer. R5's root `PLAN.md` sentence likewise.
   `src/terrace/tier/protocol.py`, `src/terrace/tier/posix.py`, `src/terrace/tier/s3.py`,
   `src/terrace/tier/archive.py`, `tests/fuse/test_surface.py`, `tests/engine/test_ownership.py`,
   `README.md`, `PLAN.md`, `AGENTS.md`.
+
+**Remediation, review cycle 1 (build, 2026-11-27).** `REVIEW.md` requested changes on `5565f1b`: F1
+(HIGH, line length in `create` and `s3.py`) and F2 (LOW, a surviving mutant in `_place_parents`); the
+maintainer signed off on both as routed. `main` was merged in first (`2d64830`: `AGENTS.md`'s open-violations
+table kept main's five new rows and dropped the row this cycle retires; every figure equalled the tree, and the
+full gate passed 837 with 9 xfailed). P1 is reopened; the findings share `overlay.py`, so one commit. Its
+`verify:` adds two class checkers to its own steps: `remediation/C1-F1-line-length.py` after the lint, and
+`remediation/C1-F2-owner-mutants.py` after the focused tests.
+
+- [x] **F1, the class: no line this cycle adds or changes under `src/`, `tests/` or `tools/` exceeds 120.**
+      Ruff's E501 at 120 over the nine files the diff touches found exactly the review's two lines; both are
+      rewrapped (`create` names its `FileMeta` first; `S3Tier.mkdir`'s docstring goes multi-line). The one
+      other hit, `archive.py:175`, predates the cycle and is left alone. The checker grades only the added
+      side of `git diff --merge-base origin/main`, and was red on the two lines before the fix. `tools/lint.sh`
+      still does not check line length (out of scope here).
+- [x] **F2, the class: dropping the owner where the engine creates an entry on a tier fails a test.** Four
+      sites (`create`'s `FileMeta`, the replayed mkdir's and `_place_parents`'s `source.mkdir`,
+      `PosixTier.mkdir`'s ownership step). Five `test_foreign_root_*` tests in
+      `tests/engine/test_ownership.py` move every tier root into a supplementary group of the process and
+      drive each site with the default identity (kills on BSD group inheritance) and with that group given
+      (kills on Linux), skipping with a reason when the process has no supplementary group. The sweep, its
+      table and why `materialize_dirs` is not a site: `remediation/C1-F2-owner-mutants.md`. 4 of 4 mutants
+      killed; without the new pins M3 survived 609 tests, as the review found.
+- [x] **Figures.** The five tests move `AGENTS.md`'s unit count to 851 (§ Commands, § Repository map,
+      § Conventions, § Verification), the total to 870 and the engine tests to 437; the file counts hold.
+      `spec/racing-write-marked-clean/remediation/F1-agents-figures.py` reads all ten numeric figures equal to
+      the tree; its two reds are its own patterns, not stale figures (it reads number words only up to
+      "twelve", and § CI says "nineteen"; § Code style's SPDX sentence was reworded on `main` to name
+      `tools/`, and its 88 equals `tools/lint.sh`'s count), checked by hand.
 
 ---
 

@@ -5,11 +5,12 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple
 
 # Standard libs
 import os
 from pathlib import Path
+from contextlib import contextmanager
 
 # External libs
 from pytest import fixture, mark, skip
@@ -141,3 +142,122 @@ def test_explicit_group_reaches_the_source(tmp_path: Path, clock: Clock) -> None
         assert_source_agrees(direct, root, '/grouped.dat')
     finally:
         direct.stop()
+
+
+# -- agreement under tier roots in another group ------------------------------------------------------------------
+#
+# A new file or directory takes its group from the creating process on Linux and from its parent directory on BSD
+# and macOS, so under tier roots in the process's own group a test passes whether or not the engine sets the owner.
+# Here every tier root sits in a supplementary group of this process, and each place the engine creates an entry on
+# a tier is driven twice: with the default identity (the process's gid, which a BSD parent would not give) and with
+# that supplementary group given (which a Linux process would not give). Dropping the owner at any one place fails
+# one of the two on either kind of system.
+
+def foreign_group() -> int:
+    """A supplementary group of this process other than its own gid; the test skips when there is none."""
+    groups = sorted(set(os.getgroups()) - {os.getgid()})
+    if not groups:
+        skip('this process belongs to no supplementary group, so no tier root can sit in a group other than its own')
+    return groups[0]
+
+
+@contextmanager
+def foreign_engine(tmp_path: Path, clock: Clock, tiers: int) -> Iterator[Tuple[OverlayEngine, int]]:
+    """A started engine of `tiers` tiers whose every root is in a supplementary group, without the setgid bit."""
+    group = foreign_group()
+    seed(tmp_path / 'project', 'top.txt', b'top-level')
+    spec = build_spec(tmp_path, tiers=tiers)
+    for tier in spec.tiers:
+        root = Path(tier.path)
+        root.mkdir(parents=True, exist_ok=True)
+        os.chown(root, -1, group)
+        os.chmod(root, 0o755)                               # no setgid bit: the root must not decide the group
+        assert root.stat().st_gid == group != os.getgid()
+    instance = OverlayEngine(spec, clock=clock)
+    instance.start()
+    try:
+        yield instance, group
+    finally:
+        if instance.started:
+            instance.stop()
+
+
+def assert_identities(engine: OverlayEngine, group: int, plain: str, grouped: str) -> None:
+    """The catalog records the process's gid for `plain` and `group` for `grouped`: the two cases differ."""
+    assert engine.catalog.get(plain).gid == os.getgid()
+    assert engine.catalog.get(grouped).gid == group
+
+
+def test_foreign_root_file_created_on_the_source(tmp_path: Path, clock: Clock) -> None:
+    """A file created straight onto a one-tier source has the catalog's owner there."""
+    with foreign_engine(tmp_path, clock, tiers=1) as (engine, group):
+        engine.create('/plain.dat')
+        engine.create('/grouped.dat', gid=group)
+        assert_identities(engine, group, '/plain.dat', '/grouped.dat')
+        for path in ('/plain.dat', '/grouped.dat'):
+            assert_source_agrees(engine, tmp_path / 'project', path)
+
+
+def test_foreign_root_file_created_on_a_stage(tmp_path: Path, clock: Clock) -> None:
+    """A file created on a stage has the catalog's owner there before it commits, and on the source after."""
+    with foreign_engine(tmp_path, clock, tiers=2) as (engine, group):
+        engine.create('/plain.dat')
+        engine.create('/grouped.dat', gid=group)
+        assert_identities(engine, group, '/plain.dat', '/grouped.dat')
+        for path in ('/plain.dat', '/grouped.dat'):
+            entry = engine.catalog.get(path)
+            info = os.stat(tmp_path / 'scratch' / path.lstrip('/'))
+            assert (info.st_uid, info.st_gid) == (entry.uid, entry.gid)
+        engine.flush()
+        for path in ('/plain.dat', '/grouped.dat'):
+            assert_source_agrees(engine, tmp_path / 'project', path)
+
+
+def test_foreign_root_directory_made_by_its_replay(tmp_path: Path, clock: Clock) -> None:
+    """A directory its own queued mkdir places on the source has the catalog's owner there."""
+    with foreign_engine(tmp_path, clock, tiers=2) as (engine, group):
+        engine.mkdir('/plain')
+        engine.mkdir('/grouped', gid=group)
+        assert_identities(engine, group, '/plain', '/grouped')
+        engine.flush()
+        for path in ('/plain', '/grouped'):
+            assert_source_agrees(engine, tmp_path / 'project', path)
+
+
+def test_foreign_root_ancestors_placed_by_a_commit(tmp_path: Path, clock: Clock) -> None:
+    """
+    Ancestors a file's commit places on the source before their own queued mkdir replays have the catalog's
+    owner there, and keep it once the queue drains.
+    """
+    with foreign_engine(tmp_path, clock, tiers=2) as (engine, group):
+        engine.mkdir('/p')
+        engine.mkdir('/p/q')
+        engine.create('/p/q/r.dat')
+        engine.mkdir('/g', gid=group)
+        engine.mkdir('/g/h', gid=group)
+        engine.create('/g/h/s.dat', gid=group)
+        assert_identities(engine, group, '/p/q', '/g/h')
+        engine.commit_upstream('/p/q/r.dat')
+        engine.commit_upstream('/g/h/s.dat')
+        for path in ('/p', '/p/q', '/g', '/g/h'):
+            assert [row.op for row in engine.journal.queued_for(path)] == ['mkdir']   # placed, not replayed
+            assert_source_agrees(engine, tmp_path / 'project', path)
+        engine.flush()
+        for path in ('/p', '/p/q', '/p/q/r.dat', '/g', '/g/h', '/g/h/s.dat'):
+            assert_source_agrees(engine, tmp_path / 'project', path)
+
+
+def test_foreign_root_ancestors_placed_by_a_direct_create(tmp_path: Path, clock: Clock) -> None:
+    """Ancestors a file created straight onto a one-tier source places there have the catalog's owner."""
+    with foreign_engine(tmp_path, clock, tiers=1) as (engine, group):
+        engine.mkdir('/p')
+        engine.mkdir('/p/q')
+        engine.mkdir('/g', gid=group)
+        engine.mkdir('/g/h', gid=group)
+        assert_identities(engine, group, '/p/q', '/g/h')
+        for path in ('/p', '/p/q', '/g', '/g/h'):
+            assert engine.catalog.get(path).source_path is None               # not yet on the source
+        engine.create('/p/q/r.dat')
+        engine.create('/g/h/s.dat', gid=group)
+        for path in ('/p', '/p/q', '/p/q/r.dat', '/g', '/g/h', '/g/h/s.dat'):
+            assert_source_agrees(engine, tmp_path / 'project', path)

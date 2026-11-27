@@ -407,7 +407,8 @@ class OverlayEngine:
                 intent = self.journal.begin('promote', dest.name, now=now, detail={'path': path, 'op': 'create'})
                 try:
                     materialize_dirs(self.catalog, dest, where)
-                    dest.put(_pure(where), io.BytesIO(b''), meta=FileMeta(size=0, mtime=now, mode=mode, uid=uid, gid=gid))
+                    meta = FileMeta(size=0, mtime=now, mode=mode, uid=uid, gid=gid)
+                    dest.put(_pure(where), io.BytesIO(b''), meta=meta)
                 except BaseException:
                     self.journal.rollback(intent)
                     raise
