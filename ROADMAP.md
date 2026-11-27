@@ -51,10 +51,12 @@ that are never reused; and the namespace rebuild, with the two parked cycles fol
 ([`issues/namespace-sync-redesign.md`](issues/namespace-sync-redesign.md)).
 
 - **Feasibility on a real cluster.** Whether compute nodes give ordinary users `/dev/fuse` and an unmount
-  helper, how a Python 3.15 runtime arrives, and whether SQLite's locks and journal mode are sound on the
-  home filesystem, where the one database is ruled to live. It does not gate the first section. It is
-  minutes of checking, and it decides what the third section is
-  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1, 2 and 6).
+  helper, and how a Python 3.15 runtime arrives. It does not gate the first section. It is minutes of
+  checking, and it decides what the third section is
+  ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1 and 2). Those checks come next.
+  - 2026-11-27: SQLite's locks and journal mode on the home filesystem (question 6) are ruled sound
+    there, which is ZFS, where the one database lives; the question is closed. Real-cluster testing
+    comes soon, FUSE first.
   - 2026-11-16 (`spec/plan-the-bundle-loop/`): the check for question 6 is written. `PLAN.md`
     § *Architecture* → *The state store on shared storage* prints the commands to type on a compute
     node and a login node and the output that means the assumption holds, and the seed carries it.
