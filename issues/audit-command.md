@@ -251,3 +251,12 @@ Draft R-IDs, to be firmed up at promotion.
   written before the rename to Terrace: the first attempt reports the missing marker, and the state
   database then reads `mounted`. The walk should expect a missing marker together with a crash flag
   that no crash set.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): Decision 5 of the
+  root `PLAN.md` settles what a mount does after a kill: it recovers and mounts, and does not stop
+  (§ *Lifecycle and recovery* → *After a kill*, § *Audit*). `AGENTS.md` § 8 keeps "an unconditional
+  stop" with a note *Scheduled to change* and a row naming this seed and its read-only slice
+  `issues/read-only-mount.md`. **Work that moves here:** the walk gains one check, the durable tier's
+  staged bundles, indexes, bundle records and altered files against what the database says each bundle
+  holds, which needs the record `issues/durable-tier-record.md` defines; and, if the state database is
+  ever lost, recovery reads those files. No prototype of a recovery was run; the walk's design stays
+  with this seed.

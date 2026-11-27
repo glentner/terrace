@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:plan-the-bundle-loop
 kind: docs
 appetite: big
 lane: public

@@ -177,6 +177,17 @@ observed against MinIO or a real endpoint, and CI runs no integration job.
   often)". As built, `_extract` opens the working archive again for every member read
   (`src/terrace/tier/archive.py:402-410`). A bounded pool of open descriptors on recently used bundles
   belongs with the streaming read.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`): the reconciliation of `PLAN.md`'s "post-v0.1.0" that
+  *Why it was deferred* above and this seed's `ROADMAP.md` entry assign to this cycle is done. The
+  redrawn root `PLAN.md` queues sharded sources after one bundle works end to end and not after the
+  first release, agreeing with `ROADMAP.md`, in § *The tier model* (f), § *Tier protocol*,
+  § *Configuration* and § *Technology decisions*; § *Phase outline* is now a dated record with no
+  forward phase. This cycle no longer reconciles `PLAN.md` before its code. Three questions above are
+  now the root `PLAN.md`'s: a member is read by offset from the staged bundle, which is never unpacked
+  (§ *Terminology*, *Staged bundle*); a staged bundle is counted by the durable tier's limits at its
+  uncompressed size and is evictable (Decision 1; § *The tier model* (d)); and a source of many bundles
+  differs from one only in the count (§ *The tier model* (f)). Whether a shard is a managed location
+  of its own stays here.
 - Found by: scheduled post-v0.1.0 work carried forward from `PLAN.md` § *Phase outline*, promoted in
   priority by the owner's statement of intent (2026-11-04). The memory-shape constraint was confirmed
   by the invariant audit run during the software-factory port (2026-08-22) — tier-layer review.

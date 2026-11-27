@@ -110,4 +110,19 @@ Draft R-IDs, to be firmed up at promotion.
 - Related: `AGENTS.md` § *Invariants* § 6, § 7, § 8 ("Rescue stops at the first shared tier");
   [`issues/sharded-archive-sources.md`](sharded-archive-sources.md) (a staged bundle as a unit the
   durable tier's limits count); [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md).
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): the root `PLAN.md`
+  records Rulings A, B and C as settled (§ *Decisions*) and states the rule in § *Overlay engine* →
+  *Eviction*; `AGENTS.md` § 7 keeps its text with a note *Scheduled to change* naming this seed.
+  **Work that moves here:** Decision 1 puts a staged bundle in the durable tier, counted by its limits,
+  and the maintainer's ruling at sign-off makes it evictable: under pressure a staged bundle whose
+  source already holds its recorded state is dropped, and the next access pulls it again with one
+  read; one with changes not yet at the source is first rebuilt and written (Decision 2), then dropped
+  with its altered files. The mechanism is built with the bundle loop
+  (`issues/archive-finalization-integration.md`); the pressure rule itself, which copies the durable
+  tier reclaims and in what order, is this seed's. The two questions above stay here: whether a spec
+  must state the limits or gets defaults, and what a clean copy does at a full neighbour.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): three places assert the rules Rulings A to C overturn, and the cycle
+  that builds this seed changes them: `tests/tier/test_spec.py:101` (a quota and `max_interval` default to
+  none), `tests/engine/test_evict.py:169` (an unbounded tier is never reclaimed) and the engine model's
+  `evict` rule, which commits a dirty copy upstream and drops it (`tests/engine/test_model.py:331`).
 - Found by: comparing the maintainer's user story of 2026-11-11 with the tree at `64faf27`.
