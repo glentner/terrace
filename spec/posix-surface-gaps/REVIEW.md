@@ -95,3 +95,13 @@ The reviewer's evidence lives in the worktree's gitignored `.local/review1/` (na
 ## Out of scope, reproduced and not graded
 
 - The real-mount attempt above: a threaded process forking under macFUSE; not this diff's.
+
+## Maintainer's sign-off on the human gate (2026-11-27)
+
+- **Sign-off (the maintainer, 2026-11-27):** the foreman's recommendation is accepted. Both CONFIRMED
+  findings are fixed as routed: F1, no line the cycle adds or changes exceeds 120 characters; F2, every
+  site where the engine creates an entry on a tier with an owner is pinned by a test run under a source
+  root whose group differs from the process gid, with a mutant sweep recording the test that kills each
+  mutant. The human gate this cycle raised is satisfied by this sign-off: once a scoped re-review of the
+  remediation comes back clean, the cycle proceeds to publish with no further stop for it.
+- Neither finding is a correctness defect of the shipped behaviour (cycle 1, above).
