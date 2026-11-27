@@ -189,8 +189,8 @@ Draft R-IDs, to be firmed up at promotion.
     created file, a read-only mount) change behaviour only a real mount shows, so each would otherwise
     land with its mount-level case owed.
   - **A first payload.** A POSIX conformance suite run against a real mount.
-    [`issues/posix-surface-gaps.md`](posix-surface-gaps.md) found root-owned entries and missing symlink
-    creation by reading; a suite finds the rest of that class by measurement.
+    the `posix-surface-gaps` seed (retired when its cycle landed; `spec/posix-surface-gaps/`) found
+    root-owned entries and missing symlink creation by reading; a suite finds the rest of that class by measurement.
 - 2026-11-12 (local-bundle-loop): **the bundle loop's MinIO variant has never run.**
   `tests/loop/test_scenario_minio.py` holds the nine stages of the bundle loop under the integration
   marker, against the endpoint the `TERRACE_TEST_MINIO_*` variables name. It is written and

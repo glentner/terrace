@@ -449,9 +449,9 @@ only real-S3 round trip — execute on no automated machine. CI has no integrati
 starts MinIO. Worse, the obvious gate is a trap: `uv run pytest -m integration` exits 0 when every
 test skipped, so a criterion verified that way proves nothing. Moved ahead of the mount-level fixes
 below because each of them is a behaviour only a real mount shows: the daemonized branch has no test
-at all, the owner of a created file is decided in the adapter, and a read-only mount is defined by
-what the kernel is told. The orphan fix (landed 2026-11-06) and the handle-less truncate fix owe
-mount-level cases this lane makes run. The bundle loop's scenario runs its MinIO and mounted halves
+at all, and a read-only mount is defined by what the kernel is told. The orphan fix (landed
+2026-11-06), the handle-less truncate fix and the owner of created entries (landed 2026-11-27, its
+real-mount check not run) owe mount-level cases this lane makes run. The bundle loop's scenario runs its MinIO and mounted halves
 here. Needs a Linux runner with `/dev/fuse` and a MinIO service container, and a decision about
 whether the lane blocks a landing or reports.
 
@@ -466,17 +466,6 @@ exits 1 with `FileNotFoundError`; `mkdir -p` the directory first and the identic
 `-f` is unaffected, and every unit and integration test uses foreground mode or calls
 `start()`/`shutdown()` directly, so nothing in the suite covers the daemonized branch at all. Small
 fix, and the first thing a new user hits.
-
-### Everything created through the mount is owned by root
-
-**Seed:** [`issues/posix-surface-gaps.md`](issues/posix-surface-gaps.md) · `fix` · appetite small
-
-`create` and `mkdir` default the owner to `0:0` and the FUSE adapter never passes the caller's
-identity, so `ls -l` shows root on a user's own new files and the catalog disagrees with the source
-it commits to. Measured through the engine API; the adapter half is read from the code. The same seed
-carries `link`, which fails without a chosen errno, and the unwritten decision that the mount records
-permission bits and does not enforce them. A conformance suite in the integration lane would find the
-rest of this class by measurement.
 
 ### Symlinks can be read through the mount and never made
 

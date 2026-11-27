@@ -14,11 +14,11 @@ lane: public
 ## Problem
 
 **Symlinks can be read and never made.** The engine adopts a source symlink and serves `readlink`
-(`src/terrace/engine/overlay.py:349-354`), and the adapter defines no `symlink` callback
+(`src/terrace/engine/overlay.py:361-366`), and the adapter defines no `symlink` callback
 (`src/terrace/fuse/adapter.py`), so `ln -s` through the mount fails with whatever the binding's
 default returns. `PLAN.md` puts special files and hard links out of scope and says nothing against
 symlinks; environments, build trees and "latest" pointers all make them. Anchors confirmed at
-`3e85305` (2026-11-12).
+`3e85305` (2026-11-12); the `readlink` citation re-anchored at `821bc6d` (2026-11-27).
 
 Creating one is more than a callback: a symlink entry made through the overlay has to reach the source
 through the write-back queue like any created entry, under the deferred-op replay rules of
@@ -50,4 +50,4 @@ Draft R-IDs, to be firmed up at promotion.
 - Related: `spec/posix-surface-gaps/` (where this was cut from); `issues/engine-error-mapping.md`;
   `issues/ci-integration-lane.md` (a conformance suite against a real mount would measure this class).
 - Found by: an out-of-cycle review of the whole tree at `64faf27` (2026-11-11), recorded in
-  `issues/posix-surface-gaps.md`.
+  the retired `posix-surface-gaps` seed (see `spec/posix-surface-gaps/GOAL.md`).
