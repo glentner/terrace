@@ -169,5 +169,19 @@ or a faithful stand-in; none is checkable in CI as it stands.
   archive's S3 interface is not yet available. FUSE on compute nodes is tried first (question 1); if it
   is unavailable, the maintainer takes it up with the center's operations team. Questions 1 and 2 are
   what remains of the feasibility checks.
+- 2026-11-27 (a read-only probe from a one-core batch job on one of the center's compute nodes):
+  **question 1 is answered at the device and helper level.** `/dev/fuse` is world read-write
+  (`crw-rw-rw-`) and opened read-write from the job. The kernel lists `fuse`. A setuid `fusermount`
+  (libfuse 2.9.9) is present but there is no `fusermount3`, although both `libfuse.so.2` and
+  `libfuse3.so.3` are installed. `/etc/fuse.conf` leaves `user_allow_other` commented out. This suits
+  the binding: on Linux mfusepy loads `libfuse.so.2` before `libfuse3`, and libfuse 2 mounts through
+  the setuid `fusermount`, which is also the second helper `fuse/mount.py:71` tries for unmounting.
+  If libfuse 3 were ever forced (`FUSE_LIBRARY_PATH`), an unprivileged mount would fail, because
+  libfuse 3 needs `fusermount3`. Two things stay open. First, a real mount and unmount, which needs a
+  Python 3.15 runtime on the node (question 2). Second, whether any feature the overlay relies on is
+  libfuse 3 only, since the CI's integration suite runs against whichever libfuse the runner has.
+  `allow_other` is unavailable to ordinary users, so a mount serves only its owner, which matches the
+  single-user job shape. Node-local `/tmp` on that node is XFS on NVMe. The archive's dedicated test
+  directory now exists under the maintainer's archive home.
 - Found by: the owner's statement of the deployment goal (2026-11-04). Nothing here has been checked
   on a cluster.

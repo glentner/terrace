@@ -54,6 +54,8 @@ that are never reused; and the namespace rebuild, with the two parked cycles fol
   helper, and how a Python 3.15 runtime arrives. It does not gate the first section. It is minutes of
   checking, and it decides what the third section is
   ([`issues/hpc-deployment.md`](issues/hpc-deployment.md), questions 1 and 2). Those checks come next.
+  - 2026-11-27: a probe found `/dev/fuse` open to users and a setuid `fusermount` (libfuse 2) on compute
+    nodes, which is the path mfusepy takes on Linux. A real mount there waits on question 2.
   - 2026-11-27: SQLite's locks and journal mode on the home filesystem (question 6) are ruled sound
     there, which is ZFS, where the one database lives; the question is closed. Real-cluster testing
     comes soon, FUSE first.
