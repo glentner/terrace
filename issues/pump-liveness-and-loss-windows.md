@@ -198,5 +198,7 @@ below names one observable outcome so it is worth negotiating, not because that 
   write held inside `os.pwrite` across 25, measured on that cycle's planning prototype). It ends when that
   one call returns. Bound it, or wait on the change's return with a finite timeout, when the pumps get
   their liveness.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): `tests/tier/test_spec.py:101` asserts that `max_interval` defaults to
+  none, the default Ruling A overturns; `issues/eviction-one-hop.md` carries the change.
 - Found by: the invariant audit run during the software-factory port (2026-08-22), engine-policy topic
   — FSM threads, write-back, eviction, drain and rescue.

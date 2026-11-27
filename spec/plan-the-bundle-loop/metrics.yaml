@@ -1,0 +1,35 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: plan-the-bundle-loop
+escaped_from: null
+planned: {date: '2026-11-12', phases: 4}
+landed: {date: '2026-11-27', phases: 4, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-12T01:13:52-05:00', stop: '2026-11-12T01:23:35-05:00', seconds: 583, end: gate, agent: claude-fable-5-2}
+- {step: plan, start: '2026-11-12T02:00:00-05:00', stop: '2026-11-12T05:11:58-05:00', seconds: 11518, end: error, agent: claude-fable-5-2}
+- {step: plan, start: '2026-11-12T05:40:18-05:00', stop: '2026-11-12T05:57:40-05:00', seconds: 1042, end: gate, agent: claude-fable-5-2}
+- {step: 'build:P1', start: '2026-11-16T10:44:45-05:00', stop: '2026-11-16T10:59:56-05:00', seconds: 911, end: done, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-16T10:59:57-05:00', stop: '2026-11-16T11:08:19-05:00', seconds: 502, end: done, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-16T11:08:20-05:00', stop: '2026-11-16T11:20:33-05:00', seconds: 733, end: done, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-16T11:20:34-05:00', stop: '2026-11-16T11:33:49-05:00', seconds: 795, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-16T11:40:35-05:00', stop: '2026-11-16T11:56:33-05:00', seconds: 958, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-16T11:56:33-05:00', stop: '2026-11-16T12:04:00-05:00', seconds: 447, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-16T12:10:43-05:00', stop: '2026-11-16T12:24:04-05:00', seconds: 801, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-27T13:29:00-05:00', stop: '2026-11-27T13:31:14-05:00', seconds: 134, end: done, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-27T13:31:31-05:00', stop: '2026-11-27T13:31:43-05:00', seconds: 12, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-16'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 2}
+  plausible: 1
+- cycle: 2
+  date: '2026-11-16'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 4}
+  plausible: 1
+- cycle: 3
+  date: '2026-11-27'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

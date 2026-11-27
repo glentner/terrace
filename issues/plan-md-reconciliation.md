@@ -174,8 +174,31 @@ Draft R-IDs, to be firmed up at promotion. All of these are checkable by reading
   step. [`issues/namespace-sync-redesign.md`](namespace-sync-redesign.md) R8 owns shrinking them if it is
   adopted. If it is declined, that residue is this seed's.
 - 2026-11-11 (the maintainer's clarification, [`spec/local-bundle-loop/GOAL.md`](../spec/local-bundle-loop/GOAL.md)):
-  [`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) redraws `PLAN.md` around the user story and
+  the plan cycle (`spec/plan-the-bundle-loop/`, since landed) redraws `PLAN.md` around the user story and
   absorbs most of the residue listed here. Shape this after it, from what it leaves.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`): the redraw rewrote or amended every section items 1 to 5
+  cite, and met the draft criterion for each. Item by item:
+  1. **Resolved.** § *Vision and scope* names the seven commands `uv run terrace --help` prints,
+     `commit` and `audit` included, and the root `PLAN.md` holds no `fsck` (R1).
+  2. **Resolved.** § *CLI surface*'s `umount` row takes a spec file and says the daemon's pidfile in
+     the spec's state directory records the mounting host, which is what makes the cross-host guard
+     possible (R2).
+  3. **Resolved in `PLAN.md`; one part left here.** The Python-baseline row of § *Technology
+     decisions* marks the four language features it names, `frozendict` included, as intent with no
+     code behind them, and the root `PLAN.md` names no `rich` (R3). Whether `rich` leaves
+     `pyproject.toml` stays with this seed: that cycle's GOAL forbade changing `pyproject.toml` or
+     `uv.lock`. So does R7.
+  4. **Resolved.** No forward `Phase N` pointer remains; the phase numbers left are dated records of
+     past work (§ *Phase outline* dates each phase, and § *Risks* keeps "verified 2026-07-11, Phase 7
+     start"). § *Phase outline* calls `ROADMAP.md` the ordered index of seeded cycles and names no
+     `wip` branch (R5, R6).
+  5. **Resolved.** Each of the four overstated bullets of § *Testing strategy* names its test path or
+     is marked unbuilt with its seed (R4).
+
+  What is left here: the `rich` question and R7, and, if `issues/namespace-sync-redesign.md` is
+  declined, the residue of the 2026-11-11 note above. Its R8 still owns shortening the replay account,
+  which the root `PLAN.md` keeps in § *Risks and mitigations* as the record of a mechanism Decisions 2
+  and 3 retire.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   FUSE/CLI/layering brief (items 1-3), the verification-substrate brief (item 5), and the
   remaining-work brief (item 4).

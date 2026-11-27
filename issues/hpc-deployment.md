@@ -119,7 +119,8 @@ or a faithful stand-in; none is checkable in CI as it stands.
 - 2026-11-11 (whole-tree review at `64faf27`): questions 1 and 2 decide whether the product can run where
   it is meant to, and each is a few minutes on a real cluster. Take them early and out of cycle;
   they are the maintainer's to run. Three more belong on the list:
-  6. **The state database on shared storage.** A commit from another host needs the state directory on a
+  6. **The state database on shared storage.** (Answered 2026-11-27: sound on the home filesystem; see
+     the note of that date.) A commit from another host needs the state directory on a
      shared filesystem. SQLite's documentation rules out WAL across hosts, and its locking needs POSIX
      locks, which some parallel-filesystem mounts do not provide. One host at a time is the design, so
      this may work; it is unverified, and the alternative (state on node-local storage, shipped at
@@ -138,5 +139,35 @@ or a faithful stand-in; none is checkable in CI as it stands.
   script should ask the scheduler for a signal ahead of the limit and forward it to the mount, instead of
   relying on the grace after the terminating signal
   ([`issues/shutdown-rescue-gaps.md`](shutdown-rescue-gaps.md)).
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): **the check for
+  question 6.** The root `PLAN.md` § *Architecture* → *The state store on shared storage* prints it:
+  the commands to type on two hosts that see one directory (host A a compute node, host B a login
+  node, in a throwaway directory on the filesystem that will hold the state directory), the five lines
+  of output that mean the assumption holds, a table of what each differing line means, and a
+  single-host variant with what it does not show. It needs only Python's standard library. Decision 6
+  chose the journal mode the check runs by default, `journal_mode = DELETE` with `synchronous = FULL`;
+  `wal` as a last argument runs the tree's mode instead, WAL with `synchronous = NORMAL`. By the maintainer's ruling at sign-off,
+  `issues/state-store-journal-mode.md` builds the safer mode without waiting on this check, so the
+  check no longer gates that change: it says whether the one database can stay on that filesystem
+  while mounted, and if a line fails, the root `PLAN.md` says what changes. Running it is this seed's,
+  and the maintainer's. Two more belong beside it:
+  - the check covers the state directory's filesystem only. The plan cycle's prototypes assumed of
+    shared scratch, the durable tier, an atomic rename, an exclusive create, and that a reader keeps
+    the bytes of an open file renamed over (`spec/plan-the-bundle-loop/research/03-shared-read-only-tier-prototype.md`).
+    A like check for the durable tier's filesystem is not written; it belongs with this seed;
+  - the cost of a commit on that filesystem in the safer mode is unmeasured. Measuring throughput
+    across SQLite's options is deferred until the project is more mature, by the same ruling, and
+    recorded in `issues/state-store-journal-mode.md`.
+- 2026-11-27 (the maintainer's ruling): **question 6 is answered.** SQLite is sound on the center's home
+  filesystem, which is ZFS, where the one database lives: the maintainer's other project runs extremely
+  high-throughput SQLite workloads there. The working assumption is that no other node touches a
+  mounted overlay's database while a compute job holds the mount. The check the 2026-11-16 note
+  describes is therefore not a gate; it stays as a way to confirm on a given filesystem. Real-cluster
+  testing comes soon. The plan: a dedicated development bucket on the center's object store for the
+  full end-to-end loop (object store, then shared scratch, then node-local disk on a compute node),
+  and live tests against the center's tape archive over SFTP in a dedicated directory, since the
+  archive's S3 interface is not yet available. FUSE on compute nodes is tried first (question 1); if it
+  is unavailable, the maintainer takes it up with the center's operations team. Questions 1 and 2 are
+  what remains of the feasibility checks.
 - Found by: the owner's statement of the deployment goal (2026-11-04). Nothing here has been checked
   on a cluster.

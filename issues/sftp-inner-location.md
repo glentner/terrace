@@ -71,4 +71,10 @@ Draft R-IDs, to be firmed up at promotion.
 - Tape punishes small frequent writes, which is what a bundle's re-aggregation interval is for. A
   default interval for a tape source may want to be longer than for an object store.
 - Related: `PLAN.md` § *Phase outline* (phase 12), § *Tier protocol* → ArchiveTier.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`): the redrawn root `PLAN.md` places SFTP as this seed's
+  entry does, after one bundle works end to end and before the first release (§ *The tier model* (f));
+  § *Phase outline* no longer has a phase 12. The plan cycle's sharing prototype named a staged bundle
+  by the source object's ETag and size; an SFTP source has no ETag, so the signature
+  `InnerLocation.signature` returns there must come from something else, which was not tested
+  (`issues/shared-staged-tier.md`).
 - Found by: comparing the maintainer's user story of 2026-11-11 with the tree at `64faf27`.

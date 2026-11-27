@@ -214,6 +214,11 @@ testing the one-second scan tick, not the sixty-second delay.
 **No module-global mutable state and no unlocked counters below `main()`** — the free-threaded build
 is a supported target, not an aspiration.
 
+**Scheduled to change.** §§ 2, 5, 7, 8 and 10 each end with a dated note naming a ruling or decision
+of `PLAN.md` that overturns a rule summarized above, and the seed whose cycle changes it; each has a
+row in § *Known open violations*. Until that cycle lands, code is graded against the section as
+written, and a cycle building toward the new rule is not in violation of the plan.
+
 ### High-blast-radius paths (human gate)
 
 A CONFIRMED finding in any of these files needs a human decision before the cycle lands; a plan touching one always runs research. The list only widens: when code moves, add the new home and never remove the old entry. Skills and templates cite this list and never copy it. Paths are relative to `src/terrace/`, except the `tests/` row.
@@ -312,6 +317,12 @@ review; where its grain differs from the table above, the table governs.
   overlays, not a schema detail.
 - Single-statement catalog calls are individually durable, so an unwrapped pair (`add` followed by
   `add_residency`) has a crash window producing an entry with no copy anywhere. Wrap them.
+
+**Scheduled to change (2026-11-16).** Decision 6 of `PLAN.md` overturns "WAL, `synchronous =
+NORMAL` … applied per connection" and "WAL is what makes committed transactions survive `SIGKILL`":
+the design assumes a rollback journal, `journal_mode = DELETE`, with `synchronous = FULL`, for a state
+directory on storage every host sees (Ruling D). `issues/state-store-journal-mode.md` changes the
+pragmas and this section. Until it lands, code is graded against this section as written.
 
 ### 3. SQL construction
 
@@ -497,6 +508,14 @@ review; where its grain differs from the table above, the table governs.
   size/mtime.** `transfer.copy` builds its `FileMeta` accordingly. Reversing it lets a `chmod` queued
   behind a data commit be clobbered by the stale on-disk mode of the copy that commits.
 
+**Scheduled to change (2026-11-16).** For a bundle source, Decisions 2 and 3 of `PLAN.md` overturn
+"the source follows when the queued op commits": a change inside a bundle, a rename included, is
+recorded state, and the bundle is rebuilt from it and replaced in one object write, with nothing
+replayed. Ruling G, row ids never reused, retires the reused-id machinery this section narrates (rows
+known by their mark, the purge watch). `issues/namespace-sync-redesign.md` builds both, and decides
+what replaces the replay for a POSIX or object-prefix source. Until it lands, code is graded against
+this section as written.
+
 ### 6. Write-back policy and the loss windows
 
 - **A boundary's policy belongs to the tier the data commits *from*, keyed by the tier it commits
@@ -566,6 +585,12 @@ review; where its grain differs from the table above, the table governs.
   `SUM`. A counter drifting high evicts a healthy tier to nothing, one drifting low never reclaims.
   Reconciliation is the audit's job.
 
+**Scheduled to change (2026-11-16).** Ruling B of `PLAN.md` overturns "to the *source*, not one hop":
+pressure moves a dirty copy one tier up and no further, where the tier above starts its own delay for
+it. Ruling C overturns dropping a clean copy, as `evict_copy` does under the first rule above: a clean
+copy pushed out of a tier is kept one tier up when that tier has room. `issues/eviction-one-hop.md`
+builds both. Until it lands, code is graded against this section as written.
+
 ### 8. Lifecycle — mount, drain, detach, rescue
 
 - **`shutdown_state` is a three-valued dirty bit on a single-row table**, and finding `mounted` at
@@ -596,6 +621,14 @@ review; where its grain differs from the table above, the table governs.
 - The `shutdown_state` this code settles is what tells a later `terrace commit` whether to audit.
   **Settling `detached` asserts that metadata is trusted and node-local dirty data was rescued.** A
   path that settles it without having done the rescue is silent data loss with a clean exit code.
+
+**Scheduled to change (2026-11-16).** Decision 5 of `PLAN.md` overturns "finding `mounted` at mount
+time is an unconditional stop": a mount after a kill recovers, checking the tiers against the
+database, and then serves. `issues/audit-command.md` builds it, with its read-only slice
+`issues/read-only-mount.md`. Ruling E adds what this section is silent on: a soft unmount ends with
+every modified file recorded on the durable tier and nothing recorded on any tier below it, where the
+tree leaves copies recorded on the node-scope tiers; `issues/shutdown-rescue-gaps.md` builds it. Until
+they land, code is graded against this section as written.
 
 ### 9. Layering and import discipline
 
@@ -698,6 +731,14 @@ review; where its grain differs from the table above, the table governs.
   cancelled row's id, and that op must stay queued. Removal racing a replayed `mkdir` that has placed
   the directory but not yet recorded it is still open; see § *Known open violations*.
 
+**Scheduled to change (2026-11-16).** Decision 6 of `PLAN.md` overturns the ground of "a WAL reader
+does not wait on a writer's open transaction", on which the purge-watch read is argued: in the
+rollback journal the design assumes, a reader still does not wait on an open write transaction, but a
+commit waits on every open read on another connection. `issues/state-store-journal-mode.md` audits
+which reads hold a cursor that long and restates the argument. Ruling G retires the purge watch
+itself, with the reused ids it guards against; `issues/namespace-sync-redesign.md` builds it. Until
+they land, code is graded against this section as written.
+
 ### 11. The engine API contract
 
 - The engine exposes a **synchronous, mount-free VFS-operations API**. Making an op asynchronous
@@ -778,6 +819,11 @@ re-files it nor mistakes it for an accepted standard. **These are violations, no
 names the seed that owns the repair; a cycle that touches the region should either fix it or say why
 not.
 
+The rows whose text opens **Scheduled to change** are of another kind, added by `spec/plan-the-bundle-loop/`
+on 2026-11-16: the code does what its section states, and `PLAN.md` § *Decisions* → *What the tree
+does not yet do* records a ruling or decision that changes it. Each names the seed that changes the
+code and the section together.
+
 | § | Violation | Seed |
 |---|---|---|
 | 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. | `issues/archive-journaling-and-locking.md` |
@@ -795,6 +841,11 @@ not.
 | 6, 7 | A **write through a handle on a stage is lost once a commit from a faster tier replaces that stage's file**. One entry can have handles open on two tiers; the faster tier's commit renames a new file over the slower tier's, a write through the older handle then returns success into a file no path reaches, and the next commit records the copy clean without it. No commit is in flight when the write is lost. Reproduced on a three-tier stack. | `issues/stage-handle-outlives-its-file.md` |
 | 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
 | 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
+| 2 | **Scheduled to change (2026-11-16)**, Decision 6: every connection opens WAL with `synchronous = NORMAL` (`state/db.py:94-95`), where the design assumes a rollback journal with `synchronous = FULL`. | `issues/state-store-journal-mode.md` |
+| 5 | **Scheduled to change (2026-11-16)**, Decisions 2 and 3, Ruling G: a change reaches a bundle source as replayed operations, each of which the adapter answers with a whole re-pack, where the design rebuilds the bundle from recorded state; row ids are reused. | `issues/namespace-sync-redesign.md` |
+| 7 | **Scheduled to change (2026-11-16)**, Rulings B and C: eviction commits a dirty copy to the source and drops a clean copy, where the design moves either one tier up and keeps a clean copy there when it has room. | `issues/eviction-one-hop.md` |
+| 8 | **Scheduled to change (2026-11-16)**, Decision 5 and Ruling E: a mount that finds `mounted` stops, where the design recovers and serves; a soft unmount leaves copies recorded on node-scope tiers, where the design records every modified file on the durable tier and nothing below it. The row above for the same seed records the defect this ruling decides. | `issues/audit-command.md`, `issues/read-only-mount.md`; `issues/shutdown-rescue-gaps.md` |
+| 10 | **Scheduled to change (2026-11-16)**, Decision 6 and Ruling G: the purge-watch read is argued on a WAL reader not waiting, where in the assumed journal a commit waits on open reads; the purge watch exists because ids are reused. | `issues/state-store-journal-mode.md`; `issues/namespace-sync-redesign.md` |
 
 Several of these are also `PLAN.md` inaccuracies rather than pure code defects. Under the repository's
 plan-drift rule the reconciliation belongs in `PLAN.md` first, with the maintainer; that work is

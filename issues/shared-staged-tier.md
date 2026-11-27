@@ -85,12 +85,27 @@ Draft R-IDs, to be firmed up at promotion.
   follows the read side of the bundle loop
   ([`issues/sharded-archive-sources.md`](sharded-archive-sources.md)).
 - The plan cycle's second prototype, two processes pulling one bundle onto one tier, is this seed's
-  R3 and R4 in miniature ([`issues/plan-the-bundle-loop.md`](plan-the-bundle-loop.md) R9).
+  R3 and R4 in miniature (`spec/plan-the-bundle-loop/GOAL.md` R9).
 - Open question — **staging ahead of time.** A command that pulls a dataset's bundles before any job
   starts would make every mount a pure reader and remove pulls from job time altogether.
 - Open question — **"or otherwise".** The tiers below the shared one may be node-local "or
   otherwise". A mount with a private durable tier beneath the shared one could take writes there, but
   re-aggregating them into bundles other mounts are reading is many writers at the source, which is
   the day this is not.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`): the root `PLAN.md` § *The tier model* (g) states what
+  sharing needs, from the plan cycle's second prototype (`spec/plan-the-bundle-loop/prototype/RECORD.md`:
+  504 of 504 processes read the oracle's bytes). A marker of its own kind whose text is a function of
+  the source alone, since with a writer id and a time in it one mount read a marker that was then
+  replaced; one member index beside each staged bundle, renamed into place before the bundle, which
+  is the index `issues/durable-tier-record.md` writes; a staged name carrying the source object's
+  signature, a fetch to a name unique to the process and a rename into place, and a lock file that only
+  saves a second fetch. **Work that moves here:** what it costs a mount to learn a bundle's signature
+  (a request per bundle, one list per mount, or none if it trusts what is staged) is left open by that
+  record, and is this seed's to choose. Not tested there, and this seed's too: more than two mounts,
+  several waiters timing out at once, and a source with no ETag, such as SFTP, where the signature must
+  come from something else (`issues/sftp-inner-location.md`).
 - Sources: `uv-manager`, `README.md` § *Design notes* (the lock rules).
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, review cycle 1): the tests that assert a marker names one overlay and a second overlay
+  reads it as foreign are `tests/state/test_registry.py:136` and `tests/state/test_lifecycle.py:133`; they
+  change with the marker.
 - Found by: the maintainer's ruling of 2026-11-11.

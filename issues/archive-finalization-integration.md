@@ -147,5 +147,24 @@ commit boundary, not a wall-clock time.
   ([`issues/sharded-archive-sources.md`](sharded-archive-sources.md)). The story also puts altered files
   on scratch as files beside the bundle until that repack, where the adapter as built writes each one
   into the working archive at once.
+- 2026-11-16 (`spec/plan-the-bundle-loop/`, signed by the maintainer 2026-11-15): the rebuild's inputs
+  and its triggers are now the root `PLAN.md`'s (§ *The tier model* (c) and (e); Decision 2), and this
+  seed builds them. A rebuild reads the database for what the bundle should hold and the durable tier
+  for the bytes: unchanged members copied from the staged bundle at their recorded offsets, changed and
+  created ones from the altered files, removed ones left out, renamed ones under their new names; it is
+  compressed and replaces the source object in one write, and no operation is replayed. After the
+  write the staged bundle is never replaced in place: it and its altered files stay as they are,
+  correct only together, or a new staged bundle is written under a new name and the database switches
+  to it in one transaction. Three triggers: the bundle's own delay (the durable tier's write-back delay
+  from the last change that reached it for that bundle, bounded by `sync.max_frequency`); pressure on
+  the durable tier, which now counts the staged bundle (Decision 1, answering the note above); and a
+  commit, with the clocks collapsed. Open question 2 is answered for the staged mode: altered files
+  live on the durable tier beside the staged bundle (§ *The tier model* (b)). The model that marks a
+  bundle dirty is `issues/namespace-sync-redesign.md`'s, and the bundle record a rebuild writes first
+  is `issues/durable-tier-record.md`'s. The plan cycle's rebuild prototype did not test, and this seed
+  carries: a streamed or multipart upload (it spooled the whole compressed object, and a store's ETag
+  after a multipart upload differs); a source object changed by another writer between the pull and
+  the write-back (no precondition was set); writes during a rebuild; and symbolic links, hard links,
+  empty directories and ownership inside a bundle.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work brief (dossier 2) and the tier-invariants brief.
