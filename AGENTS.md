@@ -59,7 +59,7 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 833 tests, ~80 s — must pass before every commit
+uv run pytest -m unit                            # 851 tests, ~75 s — must pass before every commit
 uv run pytest -n auto -m unit                    # pytest-xdist; ~35 s, test_model alone takes ~25 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
@@ -118,7 +118,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 52 files, 852 tests (833 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the one step a stage may stop at (`blocked`, `REFUSAL`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
+| `tests/` | 54 files, 870 tests (851 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the one step a stage may stop at (`blocked`, `REFUSAL`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
 | `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set; every option and variable under § *Commands*). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -143,7 +143,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 425 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 437 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -797,7 +797,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 833 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 851 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -813,7 +813,7 @@ Violations are HIGH, not auto-CRITICAL.
 
 ### Known open violations
 
-Defects the harness port's audit found and reproduced, three a review of the whole tree reproduced
+Defects the harness port's audit found and reproduced, two a review of the whole tree reproduced
 on 2026-11-11, and one a design review reproduced on 2026-11-12, each recorded so a reviewer neither
 re-files it nor mistakes it for an accepted standard. **These are violations, not exceptions.** Each
 names the seed that owns the repair; a cycle that touches the region should either fix it or say why
@@ -841,7 +841,6 @@ code and the section together.
 | 6, 7 | A **write through a handle on a stage is lost once a commit from a faster tier replaces that stage's file**. One entry can have handles open on two tiers; the faster tier's commit renames a new file over the slower tier's, a write through the older handle then returns success into a file no path reaches, and the next commit records the copy clean without it. No commit is in flight when the write is lost. Reproduced on a three-tier stack. | `issues/stage-handle-outlives-its-file.md` |
 | 5, 11 | A **cancelled rename leaks its old-path tombstone**. Rename a file, remove it before the move commits, and the masking row at the old path outlives every drain and remount; a later directory rename that brings the same name under that path raises `sqlite3.IntegrityError`, not an `OSError`. | `issues/namespace-sync-redesign.md` |
 | 8 | A **detach leaves an overlay the next node cannot mount**. After a complete rescue the database still records copies on the node-scope tiers, so a mount where those tiers are empty is refused with "audit required". | `issues/shutdown-rescue-gaps.md` |
-| 5, 9 | **Entries created through the mount are recorded `0:0`.** `create` and `mkdir` default the owner to root and the FUSE adapter passes no caller identity, so the catalog disagrees with the source it commits to. The engine half is measured; the adapter half is read from the code. | `issues/posix-surface-gaps.md` |
 | 2 | **Scheduled to change (2026-11-16)**, Decision 6: every connection opens WAL with `synchronous = NORMAL` (`state/db.py:94-95`), where the design assumes a rollback journal with `synchronous = FULL`. | `issues/state-store-journal-mode.md` |
 | 5 | **Scheduled to change (2026-11-16)**, Decisions 2 and 3, Ruling G: a change reaches a bundle source as replayed operations, each of which the adapter answers with a whole re-pack, where the design rebuilds the bundle from recorded state; row ids are reused. | `issues/namespace-sync-redesign.md` |
 | 7 | **Scheduled to change (2026-11-16)**, Rulings B and C: eviction commits a dirty copy to the source and drops a clean copy, where the design moves either one tier up and keeps a clean copy there when it has room. | `issues/eviction-one-hop.md` |
@@ -854,7 +853,7 @@ tracked in `issues/plan-md-reconciliation.md`.
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **833 unit tests in ~80 s serial, ~35 s under
+The suite is the gate, and it is fast enough to be one: **851 unit tests in ~75 s serial, ~35 s under
 `-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
@@ -917,7 +916,7 @@ symbols, documented invariants, `PLAN.md` sections.
 
 Follows hypershell conventions (the author's house style):
 
-* `src/` layout; 120-character lines; SPDX headers on every module (all 86 `.py` files under `src/`,
+* `src/` layout; 120-character lines; SPDX headers on every module (all 88 `.py` files under `src/`,
   `tests/` and `tools/` carry them; `lint.sh` keeps it that way).
 * Module template:
 

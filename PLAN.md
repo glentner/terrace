@@ -969,6 +969,8 @@ capacity (or configured quota for unbounded sources like S3) so `df` is meaningf
 per-file tiering state is exposed read-only via xattrs (`user.terrace.tiers`,
 `user.terrace.dirty`) for observability and testing.
 
+The mount records permission bits and does not enforce them: it passes no `default_permissions` and defines no `access` callback.
+
 ### Control channel
 
 *Follows from:* Ruling D, the state directory that holds the socket.

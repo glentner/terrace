@@ -209,8 +209,12 @@ class S3Tier:
             obstore.delete(self.store, key)
         log.trace(f'Deleted {pure} (tier={self.name})')
 
-    def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
-        """Create a directory marker at `path`; the parent must exist. `mode` is not retained on S3."""
+    def mkdir(self, path: PurePosixPath, mode: int = 0o777, *,
+              uid: Optional[int] = None, gid: Optional[int] = None) -> None:
+        """
+        Create a directory marker at `path`; the parent must exist. `mode`, `uid` and `gid` are not retained on
+        S3.
+        """
         pure, key = self._split(path)
         if pure == ROOT or self._internal(pure):
             raise PermissionError(f'Managed internal: {pure}')

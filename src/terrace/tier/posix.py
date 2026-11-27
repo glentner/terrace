@@ -179,13 +179,16 @@ class PosixTier:
         os.unlink(self.resolve(pure))
         log.trace(f'Deleted {pure} (tier={self.name})')
 
-    def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
-        """Create the directory at `path`; the parent must already exist."""
+    def mkdir(self, path: PurePosixPath, mode: int = 0o777, *,
+              uid: Optional[int] = None, gid: Optional[int] = None) -> None:
+        """Create the directory at `path`; the parent must already exist. Ownership is best-effort."""
         pure = self._pure(path)
         if self._internal(pure):
             raise PermissionError(f'Managed internal: {pure}')
         real = self.resolve(pure)
         os.mkdir(real, mode)
+        # Owner before the exact bits: a chown that changes the group can clear the setgid bit.
+        self._apply_meta(real, FileMeta(size=0, mtime=None, uid=uid, gid=gid))
         os.chmod(real, stat.S_IMODE(mode))  # exact bits, unaffected by the process umask
         log.trace(f'Mkdir {pure} (tier={self.name})')
 

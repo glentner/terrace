@@ -621,8 +621,9 @@ class ArchiveTier:
         self._repack([spec for spec in self._current_specs() if spec.path != str(pure)])
         log.trace(f'Deleted {pure} (tier={self.name})')
 
-    def mkdir(self, path: PurePosixPath, mode: int = 0o777) -> None:
-        """Create the directory at `path`; the parent must exist."""
+    def mkdir(self, path: PurePosixPath, mode: int = 0o777, *,
+              uid: Optional[int] = None, gid: Optional[int] = None) -> None:
+        """Create the directory at `path`; the parent must exist. `uid` and `gid` are accepted and ignored."""
         self.index()
         pure = self._pure(path)
         self._guard(pure)

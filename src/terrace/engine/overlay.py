@@ -11,6 +11,7 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 import io
 import os
 import time
+import stat
 import errno
 import socket
 import sqlite3
@@ -368,15 +369,16 @@ class OverlayEngine:
         """Create a directory: durable in the catalog now, on the source via the queue."""
         path = normalize(path)
         with self.locks.hold(path):
-            self._require_parent(path)
+            parent = self._require_parent(path)
             if self._ensure(path) is not None:
                 raise FileExistsError(errno.EEXIST, 'File exists', path)
             self._vacate(path)
+            uid, gid = self._owner(parent, uid, gid)
+            if parent.mode & stat.S_ISGID:
+                mode |= stat.S_ISGID                        # a directory under a setgid one carries the bit on
             now = self.clock()
             with self.db.transaction():
-                self.catalog.add(path, 'dir', mode=mode,
-                                 uid=uid if uid is not None else 0, gid=gid if gid is not None else 0,
-                                 mtime=now, ctime=now, atime=now)
+                self.catalog.add(path, 'dir', mode=mode, uid=uid, gid=gid, mtime=now, ctime=now, atime=now)
                 self.catalog.set_listed(path)               # a new directory has no upstream children
                 self.journal.queue(path, 'mkdir', to_tier=self.source.name, now=now, detail={'mode': mode})
         log.trace(f'Mkdir {path}')
@@ -390,10 +392,11 @@ class OverlayEngine:
         """
         path = normalize(path)
         with self.locks.hold(path):
-            self._require_parent(path)
+            parent = self._require_parent(path)
             if self._ensure(path) is not None:
                 raise FileExistsError(errno.EEXIST, 'File exists', path)
             self._vacate(path)
+            uid, gid = self._owner(parent, uid, gid)
             now = self.clock()
             dest = self.eligible_tier(0)
             upstream = self.upstream_of(dest.name)
@@ -404,15 +407,15 @@ class OverlayEngine:
                 intent = self.journal.begin('promote', dest.name, now=now, detail={'path': path, 'op': 'create'})
                 try:
                     materialize_dirs(self.catalog, dest, where)
-                    dest.put(_pure(where), io.BytesIO(b''), meta=FileMeta(size=0, mtime=now, mode=mode))
+                    meta = FileMeta(size=0, mtime=now, mode=mode, uid=uid, gid=gid)
+                    dest.put(_pure(where), io.BytesIO(b''), meta=meta)
                 except BaseException:
                     self.journal.rollback(intent)
                     raise
                 with self.db.transaction():
                     # A file created straight onto the source (no upstream) is already there; one staged
                     # upstream of the source has no source copy yet (source_path stays NULL until it commits).
-                    entry = self.catalog.add(path, 'file', mode=mode,
-                                             uid=uid if uid is not None else 0, gid=gid if gid is not None else 0,
+                    entry = self.catalog.add(path, 'file', mode=mode, uid=uid, gid=gid,
                                              mtime=now, ctime=now, atime=now,
                                              source_path=None if upstream is not None else where)
                     state = 'dirty' if upstream is not None else 'clean'
@@ -529,6 +532,18 @@ class OverlayEngine:
         if entry.kind != 'dir':
             raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', parent)
         return entry
+
+    @staticmethod
+    def _owner(parent: Entry, uid: Optional[int], gid: Optional[int]) -> Tuple[int, int]:
+        """
+        Owner and group of a new entry under `parent`: as given, else the engine process's own; the group is
+        the parent's whatever was given when the parent's recorded mode carries the setgid bit.
+        """
+        uid = uid if uid is not None else os.getuid()
+        gid = gid if gid is not None else os.getgid()
+        if parent.mode & stat.S_ISGID:
+            gid = parent.gid
+        return uid, gid
 
     def _remove(self, entry: Entry, replaced: bool = False) -> None:
         """
@@ -1218,7 +1233,7 @@ class OverlayEngine:
                 if source_path is None:                     # else a placement or a commit already put it there
                     placed = self._place_parents(path, now)
                     try:
-                        self.source.mkdir(_pure(placed), entry.mode)
+                        self.source.mkdir(_pure(placed), entry.mode, uid=entry.uid, gid=entry.gid)
                     except FileExistsError:
                         pass
             elif row.op in ('unlink', 'rmdir'):
@@ -1326,7 +1341,7 @@ class OverlayEngine:
                                             detail={'op': 'mkdir', 'source_path': target})
                 try:
                     try:
-                        self.source.mkdir(_pure(target), entry.mode)
+                        self.source.mkdir(_pure(target), entry.mode, uid=entry.uid, gid=entry.gid)
                     except FileExistsError:
                         pass
                 except BaseException:

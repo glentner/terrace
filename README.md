@@ -19,4 +19,9 @@ uv run terrace --help                      # CLI surface
 uv run terrace mount spec.toml /mnt/space  # mount an overlay (foreground: -f)
 ```
 
+Limitations
+-----------
+
+- Hard links are not supported: `link` on a mount fails with `EPERM`.
+
 License: Apache-2.0
