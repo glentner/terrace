@@ -105,3 +105,39 @@ The reviewer's evidence lives in the worktree's gitignored `.local/review1/` (na
   mutant. The human gate this cycle raised is satisfied by this sign-off: once a scoped re-review of the
   remediation comes back clean, the cycle proceeds to publish with no further stop for it.
 - Neither finding is a correctness defect of the shipped behaviour (cycle 1, above).
+
+## Review cycle 2 — approved (2026-11-27)
+
+- **Reviewed commit:** `d1860b6` (merge of `main` at `2d64830`, remediation of F1 and F2 at `d1860b6`)  ·  **Base:** `main`
+- **Verdict:** approved
+- **Mode:** default: one fresh blind reviewer, full spec-excluded diff (`git diff origin/main...HEAD -- . ':(exclude)spec/'`), given `GOAL.md` and the rubric by byte-exact copy in `.local/review2/inputs/`. The subagent route ran. The orchestrator re-ran cycle 1's findings itself.
+- **CI at `d1860b6`** (run 46053061499): all four jobs green; Linux 842 passed, 9 xfailed, no skips (the five `foreign_root` tests ran there).
+
+Evidence: the reviewer's in `.local/review2/R2/`, the orchestrator's in `.local/orch2/`.
+
+### Verification run
+
+- Reviewer: `tools/lint.sh` clean (SPDX on 88 files); `uv run pytest -n auto -m unit`: 842 passed, 9 xfailed, 0 skipped. Develop control (main's source with the new tests): `test_ownership` 11 failed / 1 passed, `test_surface` 4 failed / 2 passed. Mutants: 16 run, 15 killed. Driven through the FUSE binding layer on one- and two-tier stacks; a real mount was not run (no FUSE device on the build host, as GOAL records).
+- Orchestrator: cycle 1's F1 probe (`ruff --select E501 --line-length 120` over the changed files) reports only the pre-existing `tier/archive.py:175` (`orch2/e501.log`). The spec-held gate `remediation/C1-F2-owner-mutants.py`: green, 4 of 4 mutants killed, every file restored (`orch2/c1-f2.log`). It covers the listed sites; the reviewer's independent sweep above is the class evidence.
+
+### Matrix
+
+| R | Verdict | Who |
+|---|---|---|
+| R1 | ✅ adapter passes the caller's uid and gid; mutants killed; binding-layer drive | reviewer |
+| R2 | ✅ setgid parent's group; see P1 below | reviewer |
+| R3 | ✅ every owner-carrying creation site passes the catalog's owner; 11 of 12 engine tests fail on main | reviewer |
+| R4 | ✅ `link` returns `EPERM`, creates nothing | reviewer |
+| R5 | ✅ the sentence sits under `### FUSE adapter` in the root `PLAN.md` (checked by the orchestrator: the reviewer is blind to `PLAN.md`) | reviewer, orchestrator |
+| R6 | ✅ figures equal measurement (851 unit, 870 total); the row is removed; the squash makes the change one commit | reviewer |
+| R7 | ✅ setgid set on directories under a setgid parent, not on files | reviewer |
+| Cycle 1 F1, F2 | ✅ remediated | orchestrator |
+
+### Findings and triage
+
+- **P1 · LOW · PLAUSIBLE (contract reading).** `_owner` (`engine/overlay.py:536-546`): an unprivileged engine that `chown`s a directory to a group it is not in, sets setgid, and makes a child records the parent's group (R2) where the source holds the process's group, so R3's source = catalog cannot hold. No code satisfies both on that input; the parent already diverges through the best-effort `chown` that `AGENTS.md` § 4 documents, and main recorded `0:0` here. **Triage (foreman, under the mandate): drop.** R3's premise is an owner the source can hold; a group the daemon cannot hold is the existing best-effort case of § 4, not a defect of this change. Reported to the maintainer in the landing report.
+- Not filed, noted: mutant M10 (chown and chmod swapped in `PosixTier.mkdir`) survives; the order is right (on macOS `chown` clears setgid), and no R-ID grades the source's mode. The new seed `issues/symlink-create.md` cites `overlay.py:349-354`, current at `3e85305` and stale on the landing tree; anchors are re-taken when that seed is shaped.
+
+### Human gate
+
+Cycle 1's triggers (F1, F2 in high-blast-radius functions) carry the maintainer's sign-off above. Cycle 2 raises no new trigger. Recommended: publish.
