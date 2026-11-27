@@ -166,3 +166,23 @@ in that decision's row and in the owning seed's note") was wider than R6 asks: R
 that pins an old rule, by line, is open-ended (mutants keep finding more) and goes stale as lines move;
 the cycle that builds a decision finds those tests by running the suite. The maintainer's call is
 asked on how to close it.
+
+## Maintainer's ruling on the escalation, and the spot fix (2026-11-27)
+
+- **Ruling (the maintainer, 2026-11-27):** the foreman's recommendation is accepted. F2 closes at R6's
+  own level: the root `PLAN.md` names each decision the tree does not yet follow and the cycle that
+  owns it. Enumerating every test that pins an old rule, by line, is not required; the cycle that builds
+  a decision finds those tests by running the suite.
+- **Triage of N1–N5 under the ruling:**
+  - N1 (CONFIRMED, wrong citation): **fixed.** Ruling G's row no longer cites
+    `tests/engine/test_replay.py:1085`, `:1100`; the schema lines it cites are the evidence of reuse.
+  - N5 (PLAUSIBLE, citations of the direct-update `zip` mode): **fixed** as N1 is. The Decisions 2 and 3
+    row no longer cites `tests/tier/test_archive.py:260`, `:312`, which § Tier protocol leaves standing.
+  - The 2026-11-16 note in `issues/namespace-sync-redesign.md` drops both line lists and says the owning
+    cycle finds the pinning tests by running the suite.
+  - N2, N3, N4 (CONFIRMED, completeness of the routed sweep): **dropped.** They grade the property the
+    ruling narrows; R6 does not require them.
+- **Spot fix:** proposed and verified by the orchestrator (Step 6, LOW-only exception), touching only
+  `PLAN.md` (two table rows) and `issues/namespace-sync-redesign.md` (one dated note). No source, test,
+  tool or `AGENTS.md` line changed.
+- **Verdict:** approved by ruling.
