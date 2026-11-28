@@ -63,11 +63,11 @@ order means the gate opens only once reads work and writes are refused.
 - **`TierRegistry.enlist(name, *, position, type, role, scope, meta)`** sits beside `_attach` and
   leaves `_attach`, `attach` and `attach_tier` untouched. It calls `register` (spec drift is caught as
   today), and on a first registration it writes `meta` (JSON) into `tier.meta`. On a re-registration it
-  compares the stored `meta` with the one given and raises `SpecDrift`, naming the tier and both
-  values, on a mismatch. It returns `(record, MarkerStatus.OK)`: an archive source carries no marker,
-  and registration records it by type (Q1, Option A). `meta` is
-  `{"location": inner.identity, "signature": [size, mtime]}`. Comparing `signature` is open question
-  O1; if it is declined, only `location` is compared.
+  compares the stored `meta` with the one given and, on a mismatch, raises `SpecDrift`. The message
+  names the tier and the archive, and says the archive changed since this state directory recorded
+  it. It returns `(record, MarkerStatus.OK)`: an archive source carries no marker, and registration
+  records it by type (Q1, Option A). `meta` is `{"location": inner.identity, "signature": [size,
+  mtime]}`, and both halves are compared. O1 was ruled yes, and GOAL's R6 Clarification records it.
 - **`start`**, for a tier whose type is in the archive types:
   1. Function-local import of `ArchiveTier`, `inner_location` and `bundle_path` (§ 9).
   2. Build `inner = inner_location(tier_spec.location)`. If `inner.signature()` is `None`, raise
@@ -269,8 +269,16 @@ with an invariant.
 | D6 | The tar.gz bundle is pulled at engine start (journaled, counted) when absent, not lazily on the first member read (R7). | The engine owns the journal and the counters; a pull made inside the adapter's `index()` cannot be bracketed or counted. The tree already pulls at a first start. | Lazy pull (brief 02): unbracketed, uncounted, or an adapter-to-engine callback. |
 
 Each row was re-read against the wording of R2, R6, R7, R8 and R9. D7 reads "mutating call" as a call that changes the namespace, the bytes or the metadata of an entry. D3 and D4 choose a reading of an
-edge that R2's and R8's wording does not reach, and they go to the sign-off as flagged rows. D5 adds a
-refusal to R6's second start for a changed archive only, so it goes as open question O1.
+edge that R2's and R8's wording does not reach, and they went to the sign-off as flagged rows. D5 adds a
+refusal to R6's second start for a changed archive only, so it went as open question O1.
+
+**Ruled at the PLAN gate (2026-11-28, the foreman as judge):**
+- D1 and D6 are accepted as design. D6 is also recorded in GOAL as an R7 Clarification.
+- D2 is accepted (O2). The § 4 text changes in P2's commit, and the foreman flags it to the maintainer
+  at the cycle's report.
+- D3 (R2), D4 (R8), D5 (R6, O1: yes) and D7 (R9) are accepted, and each is recorded in GOAL as a dated
+  Clarification.
+- No deferrals were ruled.
 
 ## 4. Rabbit holes (resolved)
 
@@ -316,14 +324,12 @@ refusal to R6's second start for a changed archive only, so it goes as open ques
 
 ## 5. Risks & open questions
 
-- **O1 (for the sign-off).** Should `enlist` also refuse a changed **signature** (the same file,
-  rewritten between mounts)? *Recommendation: yes.* Read-only sources make an out-of-band rewrite the
-  only way the cached index goes stale, and TAR offset reads then return wrong bytes silently. The
-  refusal names the tier and points at a fresh state directory. The recovery (reindex) stays with
-  `issues/archive-finalization-integration.md`. If declined, P1 drops the signature half of
-  `enlist`'s comparison and its test row, and P5 records the risk in that seed's notes.
-- **O2 (for the sign-off).** D2 changes § 4's text. *Recommendation: accept.* The alternative is a known
-  counter-oracle split.
+- **O1 (ruled yes, 2026-11-28).** `enlist` refuses a changed **signature** (the same file, rewritten
+  between mounts) as well as a changed location. Read-only sources make an out-of-band rewrite the only
+  way the cached index goes stale, and TAR offset reads would then return wrong bytes silently. The
+  refusal names the tier and the archive, and says it changed since this state directory recorded it.
+  The recovery (reindex) stays with `issues/archive-finalization-integration.md`.
+- **O2 (ruled accepted, 2026-11-28).** D2 changes § 4's text in P2's commit.
 - **The stage-3 pin text** is pytest's assertion rendering (`nothing was pushed out of the fastest
   tier\nassert []`, measured by brief 05). The P4 gate checks its prefix and cause, not the exact
   rendering.

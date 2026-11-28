@@ -200,6 +200,31 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
 - **Q:** Does this cycle refuse an S3 source with no POSIX stage tier? — **A:** No; it stays with
   `issues/engine-error-mapping.md` (Non-goals). (The foreman's ruling at the GOAL gate; resolved
   2026-11-28.)
+- **Q (R2, PLAN D3):** What does the `staging` refusal name when the stack has no shared POSIX stage
+  tier directly below the source, so no tier can hold the bundle? — **A:** It still refuses, and still
+  names `staging` and the tier that carries it. Instead of a holder's name, it says the stack has no
+  such tier. (The foreman's ruling at the PLAN gate; resolved 2026-11-28.)
+- **Q (R6, PLAN D5, O1):** With no marker, what notices an archive source whose location changes, or
+  whose archive is rewritten, between mounts of one state directory? — **A:** Registration records the
+  location's identity and signature in `tier.meta`, and a re-attach that finds either one changed is
+  refused. The message names the tier and the archive, and says the archive changed since this state
+  directory recorded it. R6's second start is over the same archive. (The foreman's ruling at the PLAN
+  gate; resolved 2026-11-28.)
+- **Q (R7, PLAN D6):** When is a tar.gz bundle pulled? — **A:** At engine start, when the durable tier
+  does not already hold it, under an intent and counted. It is therefore in place and counted when
+  members are first read. Pulling lazily across many bundles belongs to
+  `issues/sharded-archive-sources.md`. (The foreman's ruling at the PLAN gate; resolved 2026-11-28.)
+- **Q (R8, PLAN D4):** Which tar or zip entries are "the archive's member names"? — **A:** Regular
+  files, directories and symlinks. A hard link and a sparse member read as regular files with their
+  data. Device, FIFO and character members are not listed, under v1's special-files exclusion
+  (`AGENTS.md` § *Out of scope for v1*). Neither are entries the adapter drops as unsafe: names under
+  `.terrace/`, names containing `..`, and the root. (The foreman's ruling at the PLAN gate; resolved
+  2026-11-28.)
+- **Q (R9, PLAN D7):** Which engine calls are "mutating"? — **A:** A mutating call is a call that
+  changes the namespace, the bytes or the metadata of an entry. `fsync`, `release`, `flush`,
+  `commit_row`, `commit_upstream`, `commit_to_shared` and `evict_copy` are not refused: they act only
+  on admitted writes, and with every write refused they do nothing. (The foreman's ruling at the PLAN
+  gate; resolved 2026-11-28.)
 
 ## Related materials
 

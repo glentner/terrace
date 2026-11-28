@@ -169,10 +169,9 @@ where libfuse loads, as this development host does. Every mode's lane check also
   So `ArchiveTier.stage` is the method name, and P2's and P4's rows must exercise what their names
   say.
 
-**Sign-off note (O1).** `test_rewritten_archive_is_refused_at_restart` and the signature half of
-`enlist` exist only if the sign-off accepts PLAN's open question O1. If O1 is declined, the planner
-removes that row from `ROWS['p1']` in the gate and from P1 below before build starts, and P5's ledger
-adds the risk to `issues/archive-finalization-integration.md`.
+**Sign-off (2026-11-28).** The foreman ruled at the PLAN gate: O1 yes, O2 accepted, and D1–D7
+accepted. D3, D4, D5, D6 and D7 are recorded as GOAL Clarifications. No deferrals were ruled.
+`test_rewritten_archive_is_refused_at_restart` and the signature half of `enlist` stand.
 
 ---
 
@@ -187,7 +186,8 @@ cleanly, and lists and reads every member through the engine API. Nothing parses
 - [ ] `state/registry.py`: add `TierRegistry.enlist(name, *, position, type, role, scope, meta) ->
   (TierRecord, MarkerStatus)` beside `_attach`, with `_attach`, `attach` and `attach_tier` untouched.
   - It calls `register`. On a first registration it stores `meta` as JSON in `tier.meta`; on a later one
-    it compares and raises `SpecDrift` naming the tier and both values.
+    it compares and raises `SpecDrift`. The message names the tier and the archive, and says the
+    archive changed since this state directory recorded it.
   - It returns `MarkerStatus.OK` and does no marker I/O.
   - `meta = {'location': inner.identity, 'signature': list(inner.signature())}`.
 - [ ] `engine/overlay.py` `start`: add an archive branch ahead of the POSIX `else` (PLAN § 2.2).
@@ -220,7 +220,8 @@ cleanly, and lists and reads every member through the engine API. Nothing parses
       root.
   - `test_missing_archive_is_refused_at_start`
   - `test_moved_location_is_refused_at_restart`
-  - `test_rewritten_archive_is_refused_at_restart` (O1)
+  - `test_rewritten_archive_is_refused_at_restart`: it also asserts that the message names the tier
+    and the archive, and says the archive changed since this state directory recorded it.
 - [ ] `tests/state/test_registry.py`: `test_enlist_reads_ok_with_no_marker` and
   `test_enlist_refuses_changed_meta`.
 - [ ] `tests/tier/test_archive.py`: `test_directory_without_mode_is_searchable[zip|tar]`,
@@ -476,7 +477,6 @@ Linux host with `/dev/fuse`, and here the test skips by the platform gate. The r
     downloads the whole object for each first read of a member, and no test covers that form.
   - The note in `issues/audit-command.md` also says how the audit reads a pending bundle pull: a
     `promote` intent with no entry and `detail.kind == 'bundle'`.
-  - If O1 was declined, a note in `issues/archive-finalization-integration.md`.
 
   Each note cites `spec/archive-spec-plumbing/`.
 - **Verify:** `tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p5`.
