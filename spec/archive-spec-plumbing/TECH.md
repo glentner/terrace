@@ -3,7 +3,7 @@ slug: archive-spec-plumbing
 title: Make archive sources reachable from a spec file
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/archive-spec-plumbing
 base: main
 current_phase: done
@@ -74,10 +74,10 @@ phases:
   hill: uphill
   verify: tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p5
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: fcb11dcf47dd787c2cdd59ae2e5e2d16d913f499
+  verdict: changes-requested
+  blocked_reason: 'review 1: F1-F3 CONFIRMED in high-blast paths; human gate'
+  cycle: 1
 ---
 
 # TECH.md — Make archive sources reachable from a spec file
