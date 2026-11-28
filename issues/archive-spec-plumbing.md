@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:archive-spec-plumbing
 kind: feature
 appetite: big
 lane: public
