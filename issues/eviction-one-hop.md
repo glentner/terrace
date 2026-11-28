@@ -125,4 +125,12 @@ Draft R-IDs, to be firmed up at promotion.
   that builds this seed changes them: `tests/tier/test_spec.py:101` (a quota and `max_interval` default to
   none), `tests/engine/test_evict.py:169` (an unbounded tier is never reclaimed) and the engine model's
   `evict` rule, which commits a dirty copy upstream and drops it (`tests/engine/test_model.py:331`).
+- 2026-11-28 (`spec/archive-spec-plumbing/`): a tar.gz source's staged bundle now sits at
+  `.terrace/bundles/<source tier>.tar` in the durable tier, pulled at mount under a journal intent and
+  counted by that tier's limits as one file at its uncompressed size. Nothing reclaims it: the evictor
+  walks residency rows and the bundle has none, so the pressure rule this seed owns is what will. That
+  cycle's plan (§ 5) leaves two residuals here. A bundle deleted out of band during a mount is pulled
+  again by the adapter's `index()`, outside any intent, so the re-pull is unjournaled and recounted. A
+  bundle larger than the durable tier's low watermark keeps the tier above it, so that tier's clean
+  copies are evicted on every tick, though reads still succeed.
 - Found by: comparing the maintainer's user story of 2026-11-11 with the tree at `64faf27`.

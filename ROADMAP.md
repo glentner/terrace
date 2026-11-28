@@ -469,6 +469,16 @@ that has been unlinked raises `LookupError` out of `mark_dirty`. The second is t
 maps neither, so it reaches libfuse as an unhandled exception. The existing test covers only the read
 case.
 
+### A source directory with no mode, or without owner search, blocks promotion below it
+
+**Seed:** [`issues/source-directory-mode.md`](issues/source-directory-mode.md) · `fix` · appetite small
+
+The engine catalogs a source directory that reports no mode as `0o644`, and a promotion creates the
+stage's ancestors with those exact bits, so no file below can be promoted by a user who is not root.
+An S3 source reports every directory that way; a directory whose own mode lacks owner `w` or `x`
+does the same at any source. `archive-spec-plumbing` met it over a ZIP and fixed only the archive
+adapter (2026-11-28). Small, and independent of the order above.
+
 ### An empty or relative `XDG_*_HOME` is used as written
 
 **Seed:** [`issues/xdg-empty-and-relative-values.md`](issues/xdg-empty-and-relative-values.md) · `fix` · appetite small

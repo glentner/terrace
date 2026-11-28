@@ -287,12 +287,12 @@ and one mount at a time writes an overlay.
 | Ruling G | Row ids are reused: `entry`, `writeback` and `intent` take `INTEGER PRIMARY KEY` with no `AUTOINCREMENT` (`state/schema.sql:59`, `:106`, `:124`). | `issues/namespace-sync-redesign.md` | § 5, § 10 |
 | Ruling I | A tier's marker names one overlay, so a second overlay reads it as foreign; the member index is in each overlay's database (`archive_index`); `tests/state/test_registry.py:136` and `tests/state/test_lifecycle.py:133` assert the `FOREIGN` reading. | `issues/shared-staged-tier.md`, after `issues/read-only-mount.md` | — |
 | Ruling J | The names agree. An empty or relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is used as written (`core/platform.py:35-36`). | `issues/xdg-empty-and-relative-values.md` | — |
-| Decision 1 | The staged `.tar` is pulled to a `staging` path of its own (`tier/archive.py:236-241`), outside every tier and every quota; no spec reaches the adapter (`tier/spec.py:25`, `:28`). The loop helper writes that `staging` line (`tools/bundle_loop.py:201-204`, with its comment citing the example the redraw removed) and the spec it prints carries it; `tests/loop/test_helper.py:76` reads it back and `:92` asserts the staged path lies in no tier root; stage 8 asserts the bundle at that path (`tests/loop/stages.py:402`); the stages' pinned refusal names the `staging` key (`tests/loop/stages.py:82`); and the adapter's own tests build the staged form on a working path of its own (`tests/tier/test_archive.py:365`, `:371`, `:384`). | `issues/archive-spec-plumbing.md`; the pressure rule that reclaims a staged bundle, `issues/eviction-one-hop.md` | — |
-| Decisions 2 and 3 | Each queued operation is replayed into the adapter, which re-packs the whole working archive on every call (`_repack`, `tier/archive.py:529`); a rename is an operation like any other. | `issues/namespace-sync-redesign.md` (the model); `issues/archive-finalization-integration.md` (the rebuild and its triggers) | § 5 |
+| Decision 1 | The staged bundle sits in the durable tier's `.terrace/bundles/` and its limits count it (`engine/overlay.py:188`, `tier/posix.py:211`), but nothing reclaims it under pressure: the evictor walks residency rows and the bundle has none, so it stays until the tier is wiped. | the pressure rule that reclaims a staged bundle, `issues/eviction-one-hop.md` | — |
+| Decisions 2 and 3 | Each queued operation is replayed into the adapter, which re-packs the whole working archive on every call (`_repack`, `tier/archive.py:575`); a rename is an operation like any other. Over an archive source the replay is unreachable while every mutating engine call is refused `EROFS`. | `issues/namespace-sync-redesign.md` (the model); `issues/archive-finalization-integration.md` (the rebuild and its triggers) | § 5 |
 | Decision 4 | Nothing on the durable tier records a bundle's index, a removal or a rename; the member index is in each overlay's database. | `issues/durable-tier-record.md` | — |
 | Decision 5 | `begin_mount` raises `CrashDetected` on `mounted` (`state/lifecycle.py:101`) and nothing catches it (`tests/state/test_lifecycle.py:67`, `tests/state/test_survival.py:101` and `tests/engine/test_namespace.py:46` assert the raise); `terrace audit` is a stub (`tests/test_cli.py:43`). | `issues/audit-command.md`; its read-only slice `issues/read-only-mount.md` | § 8 |
 | Decision 6 | `journal_mode = WAL` and `synchronous = NORMAL` on every connection (`state/db.py:94-95`), and `tests/state/test_db.py:35-39` reads those two pragmas back. | `issues/state-store-journal-mode.md`; the check on the real filesystem, `issues/hpc-deployment.md` | § 2, § 10 |
-| Decision 7 | No rule names the durable tier: the rescue moves a copy to the nearest shared tier (`engine/rescue.py`), and no spec rule limits a bundle source's stack to one shared stage tier. | `issues/shutdown-rescue-gaps.md` (the tier a soft unmount commits to); `issues/archive-spec-plumbing.md` (refusing the stack) | — |
+| Decision 7 | No rule names the tier a soft unmount commits to: the rescue moves a copy to the nearest shared tier (`engine/rescue.py`). Over an archive source the parser already holds the stack to one shared POSIX stage tier directly below it (`tier/spec.py:398`), so there the two are one tier. | `issues/shutdown-rescue-gaps.md` (the tier a soft unmount commits to) | — |
 
 The evidence behind the decisions has limits, and each is carried by the seed that builds what it
 bears on. Not run on a network filesystem or through FUSE: the state store's locks, `fsync` and the
@@ -640,7 +640,7 @@ Adapters:
      entries or tombstones accumulate; compaction is implicit in the re-pack). This suits the
      low, batched write frequency of an archive source (one re-pack per commit/flush, never
      per-file — PLAN.md → Deferred commit); the member index is rebuilt from the new archive.
-  2. **Staged re-sync** (tar.gz and any compressed/remote archive): on first access the whole
+  2. **Staged re-sync** (tar.gz and any compressed/remote archive): at mount the whole
      archive is pulled to the durable tier just below the source and decompressed once to an
      uncompressed `.tar` there, the staged bundle, which sits in the tier's root and is counted by
      its limits (Decision 1); a member read seeks to its data offset in that `.tar` (no repeated
@@ -650,18 +650,21 @@ Adapters:
      `max_frequency` and forced at a commit. The pull and the rebuild are O(whole bundle); a
      source of many bundles (below) bounds that cost to the touched bundle.
 
-     The tree differs in three places, kept here as the record of what it does. The `.tar` is
-     pulled to a working path of its own, the `staging` key, outside every tier and every quota.
-     *Overturned by Decision 1, which `issues/archive-spec-plumbing.md` builds; the tree still
-     does this.* Every member is indexed into SQLite (data offsets in `archive_index`, full
-     metadata in the catalog), so `find`/`stat`/`readdir` are served from the state store alone,
-     and nothing on the durable tier records the index, a removal or a rename. *Overturned by
-     Decision 4 and the tier model's (b), which `issues/durable-tier-record.md` builds; the tree
-     still does this.* A member write re-packs the staged `.tar` on every call, and
-     `resync`, which recompresses it and pushes it to the source, has no caller in the engine.
-     *Overturned by Decision 2, which `issues/namespace-sync-redesign.md` (the model) and
-     `issues/archive-finalization-integration.md` (the triggers) build; the tree still does
-     this.*
+     The bundle lives at `.terrace/bundles/<source tier>.tar` in the durable tier's root, a
+     name no overlay entry can take, and is never listed. A mount that finds it absent pulls it
+     under a journal intent and counts it as one file at its uncompressed size; a mount that finds
+     it in place pulls and counts nothing.
+
+     The tree differs in two places, kept here as the record of what it does. Every member is
+     indexed into SQLite (data offsets in `archive_index`, full metadata in the catalog), so
+     `find`/`stat`/`readdir` are served from the state store alone, and nothing on the durable tier
+     records the index, a removal or a rename. *Overturned by Decision 4 and the tier model's (b),
+     which `issues/durable-tier-record.md` builds; the tree still does this.* Every mutating engine
+     call over an archive source is refused `EROFS`, so the adapter's per-call re-pack of the
+     staged `.tar` is unreachable, and `resync`, which recompresses it and pushes it to the source,
+     has no caller in the engine. *Overturned by Decision 2, which
+     `issues/namespace-sync-redesign.md` (the model) and
+     `issues/archive-finalization-integration.md` (the triggers) build; the tree still does this.*
 
   **Sharded sources** (`prefix/*.tar.gz`) split a dataset into independent per-subtree archives
   so a write reconstructs only its shard. `ROADMAP.md` queues them in its section *Queued: the
@@ -829,6 +832,12 @@ missing one by one. The state directory itself must live on durable storage — 
 volatile tier; `terrace mount` refuses a spec that puts it in one. By Ruling D that storage is seen
 by every host of the workflow, and the directory is outside every tier, which the spec parser
 already enforces for every tier root.
+
+An archive source carries no marker of its own while writes over it are refused: it has no root to
+hold one, and its registration records it by type, with the location's identity and signature, which
+a later mount must match or be refused. What the overlay owns over a tar.gz source, the staged
+bundle, sits in the durable tier under that tier's marker. The cycle that first lets a write reach an
+archive source settles where a direct-update archive's marker lives.
 
 The namespace is populated lazily: directory listings hit the catalog first and fall through
 to the source tier on first touch (archives index once — ZIP central directory, TAR single
@@ -1226,11 +1235,13 @@ example does; whether a spec must state them or gets defaults is `issues/evictio
 decide. A source of many bundles is queued in `ROADMAP.md` after one bundle works end to end, not
 after the first release (§ *The tier model* (f); `issues/sharded-archive-sources.md`).
 
-The tree's archive adapter takes its working copy at a path of its own, which the staged example
-once gave as `staging = "/scratch/space.tar.gz"`, outside every tier and every quota. *Overturned
-by Decision 1, which `issues/archive-spec-plumbing.md` builds; the tree still does this.* No archive
-example here is accepted by the tree's spec parser yet, which refuses the archive types and keys
-(`issues/archive-spec-plumbing.md`; `AGENTS.md` § *Known open violations*).
+The two single-bundle examples load as written: the ZIP above one shared POSIX stage tier, the
+tar.gz as shown. The sharded example is refused at load, naming the tier and its seed,
+`issues/sharded-archive-sources.md`. Over any archive source the parser requires exactly one shared
+POSIX stage tier directly below the source, refuses an archive type at a stage position, and refuses
+`sync` on a `zip` or `tar` source, which has no re-sync to rate-limit. Over an archive source every
+mutating engine call fails `EROFS`; through the mount a hard link stays `EPERM` and an xattr write
+`ENOTSUP`, the FUSE layer's defaults (`issues/archive-journaling-and-locking.md`).
 
 
 CLI surface

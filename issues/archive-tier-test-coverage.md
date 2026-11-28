@@ -113,5 +113,9 @@ Draft R-IDs, to be firmed up at promotion.
   3. **Where the archive stack fixture lives.** `tests/engine/conftest.py`'s `Clock`, `seed` and
      `build_spec` are imported across test packages and are effectively an interface; adding an
      archive variant there is convenient and widens that interface for every later cycle.
+- 2026-11-28 (`spec/archive-spec-plumbing/`): a zip or tar source over an S3 location downloads the
+  whole object for each first read of a member (`_extract` reads through the location's `open_read`,
+  which buffers the whole object), and no test covers that form. That cycle's engine and mount tests
+  use POSIX locations, and its tar.gz bundle is pulled once.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   remaining-work brief (dossier 3 and the ROADMAP checkbox-accuracy table).

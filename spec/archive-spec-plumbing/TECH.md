@@ -3,10 +3,10 @@ slug: archive-spec-plumbing
 title: Make archive sources reachable from a spec file
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/archive-spec-plumbing
 base: main
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-28'
 phases:
 - id: P1
@@ -63,7 +63,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p4
 - id: P5
   name: The mount test, the documents and the figures
-  status: pending
+  status: done
   satisfies:
   - R10
   - R11
@@ -430,7 +430,7 @@ pinned at their new stops in the same commit.
 Linux host with `/dev/fuse`, and here the test skips by the platform gate. The root `PLAN.md` and
 `AGENTS.md` say what the tree now does, and the residuals have homes.
 
-- [ ] `tests/fuse/test_integration.py`:
+- [x] `tests/fuse/test_integration.py`:
   - `start_mount` takes an optional `spec`. Its thread target records any exception `Mount.serve`
     raises, such as the engine's start failing. The wait calls `fail()` with it rather than skipping
     on the timeout. The existing `_loop_error` skip, for a host that refuses the mount itself, stays a
@@ -439,10 +439,10 @@ Linux host with `/dev/fuse`, and here the test skips by the platform gate. The r
     `sub/`, `sub/nested.txt`) and a spec parsed from TOML with `OverlaySpec.parse` (a zip source over
     a posix location, one shared POSIX stage). It asserts `sorted(os.listdir(point)) == ['sub',
     'top.txt']`.
-- [ ] `tests/fuse/test_adapter.py` (`unit`): `test_zip_source_readdir_through_the_adapter`. It uses the
+- [x] `tests/fuse/test_adapter.py` (`unit`): `test_zip_source_readdir_through_the_adapter`. It uses the
   same archive and spec through `OverlayOperations` with no mount, and asserts `readdir('/')`,
   `getattr('/')` is a directory, and `statfs('/')` returns.
-- [ ] **R11, the root `PLAN.md`** (PLAN § 2.8):
+- [x] **R11, the root `PLAN.md`** (PLAN § 2.8):
   - § *Configuration* (`:1225-1233`): the two single-bundle examples load; the sharded one is refused
     naming its seed. The working-copy paragraph is removed.
   - ArchiveTier (`:653-655`): the bundle lives in `.terrace/bundles/` of the durable tier and is
@@ -456,19 +456,19 @@ Linux host with `/dev/fuse`, and here the test skips by the platform gate. The r
     source are refused, so no re-pack is reachable.
   - The Decision 1 row's "no spec reaches the adapter" and the Decision 7 row's "no spec rule limits a
     bundle source's stack to one shared stage tier" are gone.
-- [ ] **R11, `AGENTS.md` § Project's honest status** (`:31-32`): drop "adapter-complete but not yet
+- [x] **R11, `AGENTS.md` § Project's honest status** (`:31-32`): drop "adapter-complete but not yet
   reachable from a spec file"; say archive sources are readable and refuse writes.
-- [ ] **R11, `AGENTS.md` § Known open violations:**
+- [x] **R11, `AGENTS.md` § Known open violations:**
   - Remove the `issues/archive-spec-plumbing.md` row.
   - In the two `issues/archive-journaling-and-locking.md` rows, say the defects are unreachable while
     every write over an archive source is refused, and "stale staging copy" becomes the staged bundle.
-- [ ] **`AGENTS.md` figures:**
+- [x] **`AGENTS.md` figures:**
   - The unit and integration counts, both 19 to 20 integration (lines 66 and 105, the word "twenty").
   - The `tests/` row's files and tests, the `-m integration` skip line, the unit count and timings in
     § Verification, and the engine test count in § Architecture.
   - Measure the timings on this tree.
   - Optionally, name the archive-source readdir in the list of tests CI never runs.
-- [ ] **Deferral ledger.** Walk every phase above for deferral phrases ("not in this cycle", "residual",
+- [x] **Deferral ledger.** Walk every phase above for deferral phrases ("not in this cycle", "residual",
   "stays with", "out of scope", "left as") and confirm each has its seed and a `ROADMAP.md` entry. The
   plan's are:
   - The new seed `issues/source-directory-mode.md` (`status: unshaped`, from the KB's ISSUE template):

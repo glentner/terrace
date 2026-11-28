@@ -260,3 +260,12 @@ Draft R-IDs, to be firmed up at promotion.
   holds, which needs the record `issues/durable-tier-record.md` defines; and, if the state database is
   ever lost, recovery reads those files. No prototype of a recovery was run; the walk's design stays
   with this seed.
+- 2026-11-28 (`spec/archive-spec-plumbing/`): the staged bundle of a tar.gz source is counted against
+  the durable tier when a mount pulls it, and `PosixTier.usage()` counts the regular `*.tar` files
+  directly in `.terrace/bundles/`, so a rebuild of the counters through `usage()` counts it too. A
+  bundle deleted between mounts is pulled and counted again by the next mount while the old count
+  stays; the audit's rebuild heals that through `usage()`. **A pending bundle pull** reads as a
+  `promote` intent with no entry and `detail.kind == 'bundle'` (`detail` also names `bundle`, the
+  path, and `source`, the tier). The next start settles such an intent itself, counting and confirming
+  when the bundle is there and rolling it back when not, so the audit meets one only in a state
+  directory no mount has reopened since.

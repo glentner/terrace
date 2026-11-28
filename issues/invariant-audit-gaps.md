@@ -170,6 +170,10 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   `'active'` (`src/terrace/state/schema.sql:112`) and nothing sets it.
   [`issues/copy-lifecycle-state-machine.md`](copy-lifecycle-state-machine.md) notes the state it was reserved
   for.
+- 2026-11-28 (`spec/archive-spec-plumbing/`): the tar.gz bundle pull's temp now sits beside the bundle
+  in the durable tier's `.terrace/bundles/` (the adapter's `atomic_write` sibling), inside the tier root
+  but still outside `partial/`, so item 3's orphan convention does not cover it. The pull itself is
+  bracketed by a `promote` intent with no entry.
 - Found by: the invariant audit run during the software-factory port (2026-08-22). Findings 1, 2 and 3
   from the state-store topic; 3 (the archive temp), 5 and 6 from the tier-atomicity topic; 4 from the
   FUSE-adapter and layering topic.

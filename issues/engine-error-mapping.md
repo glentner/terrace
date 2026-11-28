@@ -149,5 +149,9 @@ Draft R-IDs, to be firmed up at promotion.
   needs its own handling rather than an early return. Whether the entry keeps a residency row until the
   last release, or the handle carries enough state to write without one, is the actual design decision
   in this cycle.
+- 2026-11-28 (`spec/archive-spec-plumbing/`): archive sources are now reachable from a spec file, and
+  with them one more escape: a corrupt archive raises `zipfile.BadZipFile` or `tarfile.ReadError` from
+  the adapter's scan, not an `OSError`, at `start` on a first start (that cycle's research brief 06,
+  § 3 and § 5).
 - Found by: the invariant audit run during the software-factory port (2026-08-22), engine-core-invariants
   brief, divergence D.

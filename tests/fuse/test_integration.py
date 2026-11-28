@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 # Standard libs
 import os
@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 
 # External libs
-from pytest import mark, skip
+from pytest import fail, mark, skip
 
 # Internal libs
 from terrace.state.db import Database
@@ -25,6 +25,7 @@ from terrace.tier.spec import OverlaySpec, WritebackSpec
 from terrace.engine.overlay import DB_NAME
 from terrace.fuse.mount import Mount, Shutdown, unmount, request_shutdown, MountError
 from tests.engine.conftest import build_spec, seed
+from tests.fuse.conftest import zip_source_spec
 
 
 def _linux_fuse() -> bool:
@@ -56,27 +57,44 @@ def settled_state(state_dir: Path) -> Optional[str]:
         db.close()
 
 
-def start_mount(tmp_path: Path, *, tiers: int = 2,
-                seeds: Sequence[Tuple[str, bytes]] = ()) -> Tuple[Mount, OverlaySpec, Path, threading.Thread]:
-    """Bring up a real FUSE mount on a worker thread; returns once the mount is live."""
+def start_mount(tmp_path: Path, *, tiers: int = 2, seeds: Sequence[Tuple[str, bytes]] = (),
+                spec: Optional[OverlaySpec] = None) -> Tuple[Mount, OverlaySpec, Path, threading.Thread]:
+    """
+    Bring up a real FUSE mount on a worker thread; returns once the mount is live. Without `spec`, the
+    engine suite's POSIX stack is built. A host that refuses the mount itself skips the test; an overlay
+    that raises before the mount comes up (the engine's start, say) fails it with that error.
+    """
     (tmp_path / 'project').mkdir(exist_ok=True)
     for relpath, data in seeds:
         seed(tmp_path / 'project', relpath, data)
     point = tmp_path / 'mnt'
     point.mkdir()
-    overrides = {'scratch_writeback': FROZEN, 'tmp_writeback': FROZEN}
-    spec = build_spec(tmp_path, tiers=tiers, **overrides)
+    if spec is None:
+        overrides = {'scratch_writeback': FROZEN, 'tmp_writeback': FROZEN}
+        spec = build_spec(tmp_path, tiers=tiers, **overrides)
     mount = Mount(spec, point, foreground=True, writeback_tick=0.2, evict_tick=0.5)
-    server = threading.Thread(target=mount.serve, name='terrace-serve', daemon=True)
+    raised: List[Exception] = []
+
+    def serve() -> None:
+        try:
+            mount.serve()
+        except Exception as error:
+            raised.append(error)
+
+    server = threading.Thread(target=serve, name='terrace-serve', daemon=True)
     server.start()
     deadline = time.time() + MOUNT_TIMEOUT
     while time.time() < deadline and not os.path.ismount(point):
         if mount._loop_error is not None:
             server.join(JOIN_TIMEOUT)
             skip(f'FUSE mount unavailable: {mount._loop_error}')
+        if raised:
+            fail(f'the overlay failed before the mount came up: {raised[0]!r}')
         time.sleep(0.1)
     if not os.path.ismount(point):
         stop_mount(mount, server, point, mode=Shutdown.FORCE)
+        if raised:
+            fail(f'the overlay failed before the mount came up: {raised[0]!r}')
         skip('FUSE mount did not come up within the timeout')
     return mount, spec, point, server
 
@@ -179,3 +197,12 @@ def test_force_umount_skips_rescue(tmp_path: Path) -> None:
         assert not (tmp_path / 'project' / 'x.dat').exists()   # force skipped the drain
     finally:
         stop_mount(mount, server, point, mode=Shutdown.FORCE)
+
+
+def test_zip_source_mount_readdir_lists_top_level_members(tmp_path: Path) -> None:
+    """A mount over a ZIP source, from a spec file, lists the archive's top-level members at its root."""
+    mount, spec, point, server = start_mount(tmp_path, spec=zip_source_spec(tmp_path))
+    try:
+        assert sorted(os.listdir(point)) == ['sub', 'top.txt']
+    finally:
+        stop_mount(mount, server, point)

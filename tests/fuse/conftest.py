@@ -8,12 +8,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterator
 
 # Standard libs
+import zipfile
 from pathlib import Path
 
 # External libs
 from pytest import Config, Item, fixture, mark
 
 # Internal libs
+from terrace.tier.spec import OverlaySpec
 from terrace.engine.overlay import OverlayEngine
 from tests.engine.conftest import Clock, build_spec, seed
 
@@ -28,6 +30,37 @@ except OSError as error:
     LIBFUSE_UNAVAILABLE = f'libfuse cannot be loaded: {error}'
 
 HERE = Path(__file__).parent
+
+ZIP_MEMBERS = {'top.txt': (0o100644, b'top-level'), 'sub/': (0o040755, b''), 'sub/nested.txt': (0o100644, b'nested')}
+
+
+def zip_source_spec(tmp_path: Path) -> OverlaySpec:
+    """
+    A ZIP of `top.txt`, `sub/` and `sub/nested.txt`, each with an explicit unix mode, and a spec parsed from
+    TOML that names it as a direct-update source over a POSIX location, above one shared POSIX stage.
+    """
+    archive = tmp_path / 'data.zip'
+    with zipfile.ZipFile(archive, mode='w') as bundle:
+        for name, (mode, data) in ZIP_MEMBERS.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 2, 3, 4, 5))
+            info.external_attr = mode << 16 | (0x10 if name.endswith('/') else 0)
+            bundle.writestr(info, data)
+    return OverlaySpec.parse(f'''
+[overlay]
+name = "zipspace"
+state = "{tmp_path / 'state'}"
+
+[[tier]]
+name = "archive"
+type = "zip"
+role = "source"
+location = {{ type = "posix", path = "{archive}" }}
+
+[[tier]]
+name = "scratch"
+type = "posix"
+path = "{tmp_path / 'scratch'}"
+''')
 
 
 def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:

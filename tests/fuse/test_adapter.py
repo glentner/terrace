@@ -19,6 +19,7 @@ from pytest import mark, raises
 from terrace.engine.overlay import OverlayEngine
 from terrace.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec
 from tests.engine.conftest import Clock, build_spec, seed
+from tests.fuse.conftest import zip_source_spec
 
 # Without libfuse these names stay unbound and tests/fuse/conftest.py skips every test here by name.
 try:
@@ -71,6 +72,21 @@ def test_readlink_returns_target(operations: OverlayOperations) -> None:
     attrs = operations.getattr('/link')
     assert stat.S_ISLNK(attrs['st_mode'])
     assert attrs['st_size'] == len('data/a.txt')
+
+
+def test_zip_source_readdir_through_the_adapter(tmp_path: Path, clock: Clock) -> None:
+    """Over a ZIP source parsed from a spec file, the adapter lists the top level, stats the root and reports capacity."""
+    engine = OverlayEngine(zip_source_spec(tmp_path), clock=clock)
+    engine.start()
+    try:
+        operations = OverlayOperations(engine)
+        assert sorted(operations.readdir('/', 0)) == ['.', '..', 'sub', 'top.txt']
+        assert stat.S_ISDIR(operations.getattr('/')['st_mode'])
+        stv = operations.statfs('/')
+        assert stv['f_bsize'] > 0
+        assert stv['f_namemax'] > 0
+    finally:
+        engine.stop()
 
 
 # -- data path --------------------------------------------------------------------------------------------------

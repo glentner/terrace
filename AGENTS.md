@@ -28,11 +28,12 @@ The design goal, stated in `PLAN.md`, is **legibility as a reference implementat
 abstractions, modern Python, and no framework semantics leaking into the core model. That is the
 value this repository trades against convenience, the way another project trades against latency.
 
-**Honest status.** Phases 1–8 of the original flat roadmap are complete; the archive tiers are
-adapter-complete but not yet reachable from a spec file, and the whole operational surface —
-`status`, `flush`, `commit`, `audit`, `config` — is still stubs. The detach half of the
-differentiating lifecycle works; the finalize half does not exist yet. A document, a plan or a
-`verify:` gate that assumes otherwise is wrong. `ROADMAP.md` is the index of what is left.
+**Honest status.** Phases 1–8 of the original flat roadmap are complete. An archive source (ZIP,
+TAR, tar.gz) loads from a spec file and is readable, and every write over it is refused `EROFS`. The
+whole operational surface — `status`, `flush`, `commit`, `audit`, `config` — is still stubs. The
+detach half of the differentiating lifecycle works; the finalize half does not exist yet. A
+document, a plan or a `verify:` gate that assumes otherwise is wrong. `ROADMAP.md` is the index of
+what is left.
 
 Document map:
 
@@ -59,11 +60,11 @@ Document map:
 
 ```bash
 uv sync                                          # install (dev group included by default)
-uv run pytest -m unit                            # 851 tests, ~75 s — must pass before every commit
-uv run pytest -n auto -m unit                    # pytest-xdist; ~35 s, test_model alone takes ~25 s
+uv run pytest -m unit                            # 954 tests, ~80 s — must pass before every commit
+uv run pytest -n auto -m unit                    # pytest-xdist; ~35 s, test_model alone takes ~27 s
 uv run pytest -m unit tests/engine               # scoped
 docker compose up -d --wait                      # MinIO for the S3 integration tests
-uv run pytest -m integration                     # 19 tests: real mounts (Linux) + MinIO
+uv run pytest -m integration                     # 20 tests: real mounts (Linux) + MinIO
 tools/lint.sh                                    # ruff + layering + SPDX + version + CLAUDE.md symlink
 tools/temp_site.sh uv run terrace --version      # CLI drive in a throwaway site
 uv run python tools/bundle_loop.py               # the bundle loop on a local object store; prints the spec (below)
@@ -104,9 +105,9 @@ Each of the four jobs (`Lint & build`, `Unit (Linux, 3.15)`, `Unit (Linux, 3.15t
 red job is a defect to fix, never a known failure to read past.
 
 **CI does not run the integration suite.** There is no integration job and nothing starts MinIO, so
-nineteen tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, the
-only real-S3 round trip, and the bundle loop's nine stages against MinIO — execute on no automated
-machine. Never infer from a green PR that they
+twenty tests — the entire drain / detach / force-umount / xattr / metadata-propagation surface, the
+readdir of a mount over a ZIP source, the only real-S3 round trip, and the bundle loop's nine stages
+against MinIO — execute on no automated machine. Never infer from a green PR that they
 passed. Worse, `uv run pytest -m integration` **exits 0 when every test skipped**, so a gate written
 that way proves nothing; assert a pass count.
 
@@ -120,7 +121,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 54 files, 870 tests (851 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the steps a stage may stop at, each pinned with its exact refusal (`blocked`; `SHARDED`, `READ_ONLY`, `PUSHED`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
+| `tests/` | 56 files, 974 tests (954 `unit`, 20 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the steps a stage may stop at, each pinned with its exact refusal (`blocked`; `SHARDED`, `READ_ONLY`, `PUSHED`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
 | `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set; every option and variable under § *Commands*). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -145,7 +146,7 @@ FUSE callback ──► fuse/adapter.py ──► engine/overlay.py ──┬─
 
 The engine is the product: a synchronous VFS-operations API (`getattr`, `readdir`, `open`, `read`,
 `write`, `create`, `unlink`, `rename`, `truncate`, `fsync`, `chmod`, `chown`, `utimens`, …) consumed
-by the FUSE adapter and, directly, by 437 engine tests with no mount. Everything moves through three
+by the FUSE adapter and, directly, by 507 engine tests with no mount. Everything moves through three
 methods — `commit_row`, `commit_upstream`, `commit_to_shared` — which funnel into `_commit_hop`, the
 single point at which a copy is allowed to go clean.
 
@@ -803,7 +804,7 @@ Violations are HIGH, not auto-CRITICAL.
 - **Every test module declares `pytestmark`** with `unit` or `integration`. Markers are strict. A
   module without one is collected but deselected by `-m unit`, so it never runs in CI or in any gate —
   a test that is written, reviewed, merged, and permanently green because it never executes.
-- **An `-m integration` gate exits 0 when nothing ran** (19 skipped, 851 deselected on a host with no
+- **An `-m integration` gate exits 0 when nothing ran** (20 skipped, 954 deselected on a host with no
   `/dev/fuse` and no MinIO). Any integration gate must assert a pass count, not an exit code.
 - `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. A second `test_db.py`
   under a non-package directory collides at the top-level module name and aborts collection for the
@@ -832,15 +833,14 @@ code and the section together.
 
 | § | Violation | Seed |
 |---|---|---|
-| 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. | `issues/archive-journaling-and-locking.md` |
+| 1, 4 | Archive re-pack and re-sync mutate a managed location with **no intent bracket**. `'compact'` and `'resync'` exist in the journal's action vocabulary and have no producer. Unreachable while every write over an archive source is refused `EROFS`. | `issues/archive-journaling-and-locking.md` |
 | 5 | Sizes a state database written before `fe26962` may hold wrong for a copy held on the source: `entry.size` and the source residency's `size`. The residency heals on the next `release` of any handle on that copy; `entry.size` heals only on a write or a `truncate`, so `getattr` and placement read the stale figure meanwhile. Staged-tier quota counters are unaffected. | `issues/audit-command.md` |
 | 5, 10 | A user `rmdir` racing a replayed `mkdir` that has placed the directory but not yet recorded it reads a `NULL` `source_path`, purges the entry and its intent row (the cascade), and the replay's confirm then raises; the source keeps a directory the catalog no longer has. Threaded; reproduced by a single-thread injection, and pre-existing (`141aa86` raises at its settle instead). | `issues/freethreaded-concurrency-stress.md` |
 | 8 | A **second SIGINT settles `detached` without running the rescue**, so node-local dirty data is stranded behind a state that promises it is safe. `umount --detach` is bounded by `drain_timeout` where PLAN says it completes, and an incomplete rescue is never recorded. | `issues/shutdown-rescue-gaps.md` |
-| 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staging copy silently wins over a newer source. | `issues/archive-journaling-and-locking.md` |
+| 4, 10 | `ArchiveTier` has **no tier-wide lock** and re-packs per call; two concurrent puts to different paths lose a member with both calls returning success. A stale staged bundle silently wins over a newer source. Both are unreachable while every write over an archive source is refused `EROFS`. | `issues/archive-journaling-and-locking.md` |
 | 2, 8 | The **audit does not exist**: `journal.pending()` has no consumer, `begin_mount` raises rather than recovering, and `terrace audit` is a stub. The recovery half of §1 is unimplemented. | `issues/audit-command.md` |
 | 10 | **Nothing monitors pump liveness**; a dead scheduler is unbounded, unreported loss. | `issues/pump-liveness-and-loss-windows.md` |
 | 11 | `EngineError` and `LookupError` escape the VFS API; writing through a handle to an unlinked file fails where POSIX requires success. | `issues/engine-error-mapping.md` |
-| 4, Conventions | `ArchiveTier` is **unreachable from a spec file** — the tier types are rejected and the archive keys are unknown — so the archive capability PLAN.md documents cannot be configured. | `issues/archive-spec-plumbing.md` |
 | Conventions | The **integration suite runs on no automated machine**; CI has no integration job. | `issues/ci-integration-lane.md` |
 | — | Smaller measured gaps: `residency.checksum` is never written though the spec parses the flag; `tier.generation` never advances in production; `intent.temp_name` is dead and the archive's sibling `.tmp` is outside the orphan convention; `statfs` reports 100% full for an unquota'd non-POSIX source; no directory `fsync` anywhere; `S3Tier.rename`'s docstring claims an atomicity S3 does not have. | `issues/invariant-audit-gaps.md` |
 | — | The daemonized (default) mount **fails on a first-ever mount** — the log file is opened before the state directory exists. No test covers the daemonized branch. | `issues/daemonized-mount-first-run.md` |
@@ -861,8 +861,8 @@ inaccuracies that no seed's work touches were reconciled by `spec/plan-the-bundl
 
 ## Verification
 
-The suite is the gate, and it is fast enough to be one: **851 unit tests in ~75 s serial, ~35 s under
-`-n auto`** (the stateful model alone takes ~25 s). Four layers; a `verify:` should use at least one and
+The suite is the gate, and it is fast enough to be one: **954 unit tests in ~80 s serial, ~35 s under
+`-n auto`** (the stateful model alone takes ~27 s). Four layers; a `verify:` should use at least one and
 name the post-condition it asserts:
 
 - **Static** — `tools/lint.sh`: the ruff selection CI runs, the layering assertion, SPDX headers,
