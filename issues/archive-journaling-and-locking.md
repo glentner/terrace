@@ -181,5 +181,10 @@ Draft R-IDs, to be firmed up at promotion.
   4. **Does `'compact'` keep its slot?** Re-pack makes compaction implicit, so the action may be dead
      vocabulary — but removing it from the schema `CHECK` carries the same migration cost as adding
      anything else.
+- 2026-11-28 (the GOAL gate of `spec/archive-spec-plumbing/`): `archive-spec-plumbing` ships archive
+  sources read-only: every mutating engine call over an archive source fails `EROFS`. The cycle that
+  first lets a write reach an archive source lifts that refusal and settles where a direct-update
+  archive's marker lives (`spec/archive-spec-plumbing/GOAL.md`, Clarification Q1, the write case);
+  while writes are refused an archive source carries no marker of its own.
 - Found by: the invariant audit run during the software-factory port (2026-08-22) — the
   tier-invariants and state-invariants briefs.

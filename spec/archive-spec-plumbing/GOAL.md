@@ -86,18 +86,19 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
   rate SHALL be carried. The two archive examples of `PLAN.md` § *Configuration* that are not sharded
   (direct-update ZIP, staged tar.gz on S3) SHALL load with their `[[tier]]` tables unchanged, inside an
   `[overlay]` table and, where the example shows no stage tier, above one POSIX shared stage tier.
-  Whether `sync` is accepted on a `zip` or `tar` tier: Q5.
+  IF a `zip` or `tar` tier carries `sync`, THEN the parser SHALL refuse it at load, naming the tier.
 - **R2** — IF a tier carries the retired `staging` key, THEN the spec parser SHALL refuse it at load
   with a message naming `staging` and the tier that holds the staged bundle under Decision 1. IF a
-  tier carries `sharded`, THEN the parser SHALL refuse it at load as Q2 settles, with a message the
-  bundle loop's stage 9 can pin.
+  tier declares `sharded = true`, THEN the parser SHALL refuse it at load as a known key whose feature
+  is not yet supported, with a message naming the tier and `issues/sharded-archive-sources.md` (not
+  as an unknown key), which the bundle loop's stage 9 can pin.
 - **R3** — IF a tier at a stage position declares `zip`, `tar` or `tar.gz`, THEN the spec parser SHALL
   refuse the spec at load with a message naming that tier.
-- **R4** — IF a spec has an archive source and its stack does not have exactly one shared stage tier,
-  directly below the source, of type `posix`, THEN the spec parser SHALL refuse it at load with a
-  message naming the tier at fault (or, with no stage tier, naming the missing one). No spec the
-  parser loads SHALL reach the `EngineError` of `eligible_tier` (`overlay.py:230-231`) for want of a
-  POSIX stage tier. Whether this binds `zip` and `tar` sources as well as `tar.gz`: Q4.
+- **R4** — IF a spec has an archive source of any of the three types and its stack does not have
+  exactly one shared stage tier, directly below the source, of type `posix`, THEN the spec parser
+  SHALL refuse it at load with a message naming the tier at fault (or, with no stage tier, naming
+  the missing one). No spec the parser loads SHALL reach the `EngineError` of `eligible_tier`
+  (`overlay.py:230-231`) for want of a POSIX stage tier.
 - **R5** — IF two tier roots overlap once symlinks are resolved, or the state directory resolves
   inside a tier root, THEN the spec parser SHALL refuse the spec at load, naming both tiers (or the
   tier and the state directory). For an archive tier the root compared is its inner location's file
@@ -105,8 +106,9 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
   into the source root and observe the refusal.
 - **R6** — WHEN an overlay engine starts over a spec with an archive source, `engine.source` SHALL be
   an `ArchiveTier` over the inner location the spec names, not a `PosixTier`; the start SHALL succeed;
-  and a second start over the same state directory, after a clean stop, SHALL also succeed. What the
-  registration records for the archive tier's marker: Q1.
+  and a second start over the same state directory, after a clean stop, SHALL also succeed, the
+  archive tier's registration reading `OK` both times although the archive carries no marker of its
+  own; no file or object SHALL be written at or beside the archive's inner location.
 - **R7** — WHEN a `tar.gz` source's members are first read, the staged bundle SHALL be one file inside
   the durable tier's root (none outside any tier root); the durable tier's recorded usage SHALL count
   it as one file at its uncompressed size; and a listing of the overlay root through the engine API
@@ -117,8 +119,7 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
   passing tests under the `unit` marker, with no expected-failure marker, over the spec the loop
   helper writes, which SHALL carry no `staging` key.
 - **R9** — WHILE the source is an archive, every mutating call of the engine API SHALL fail with
-  `OSError` `EROFS` and leave the archive's bytes unchanged. *This R-ID stands only if Q3 rules
-  option A; otherwise it is struck at the ruling.*
+  `OSError` `EROFS` and leave the archive's bytes unchanged.
 - **R10** — WHEN a real FUSE mount is served over a ZIP source, a `readdir` of the mount root SHALL
   list the archive's top-level members. Observable only on Linux with `/dev/fuse`: CI runs no
   integration job (`issues/ci-integration-lane.md`), so the test is under the `integration` marker
@@ -129,16 +130,17 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
   same diff: § *Configuration*'s paragraph that no archive example loads (`PLAN.md:1229-1233`); the
   `staging` note under ArchiveTier (`PLAN.md:653-655`); the Decision 1 and Decision 7 rows of § *What
   the tree does not yet do* (`PLAN.md:290`, `:295`), each narrowed to what remains; § *Managed
-  locations* (`PLAN.md:825-831`) as Q1 settles it; and the § *Known open violations* row for this seed
-  in `AGENTS.md`, removed or narrowed.
+  locations* (`PLAN.md:825-831`), saying an archive source carries no marker while writes over it are
+  refused; and the § *Known open violations* row for this seed in `AGENTS.md`, removed or narrowed.
 
 ## Non-goals (no-gos)
 
-- **Writing through an archive source** (if Q3 rules option A): lifting R9's refusal, and with it the
-  marker an overlay owns on an archive it re-packs in place (Q1's write case). That waits on
-  `issues/archive-journaling-and-locking.md` (bracket, lock) and, for a staged bundle, on Decisions 2
-  and 3 (`issues/namespace-sync-redesign.md`, `issues/archive-finalization-integration.md`). A draft
-  seed for it goes with the shaping report.
+- **Writing through an archive source**: lifting R9's refusal, and with it settling where the
+  marker of a direct-update archive the overlay re-packs in place lives (Q1, write case). No seed of
+  its own: the cycle that first lets a write reach an archive source does both, as the note of
+  2026-11-28 in `issues/archive-journaling-and-locking.md` records. It waits on that seed (bracket,
+  lock) and, for a staged bundle, on Decisions 2 and 3 (`issues/namespace-sync-redesign.md`,
+  `issues/archive-finalization-integration.md`).
 - Sharded sources (`issues/sharded-archive-sources.md`); this cycle only settles how the key is
   refused (Q2).
 - Archives at stage positions, in v1 (R3).
@@ -169,58 +171,35 @@ prerequisite for the three archive cycles after it; the documents say exactly wh
 - **Q:** Does this cycle or `issues/invariant-audit-gaps.md` own the symlink-blind overlap check? —
   **A:** This cycle (R5). `issues/invariant-audit-gaps.md` carries no symlink or overlap item (checked
   on `184115f`), and this cycle changes `_validate_stack` for R3 and R4, so the function changes once.
-  (Shaping finding, 2026-11-28; the gate may move it.)
-- **Q1 — the archive source's marker.** [NEEDS CLARIFICATION: an archive source has no root for
-  `.terrace/marker` and `ArchiveTier` implements no marker I/O; what does its registration record, so
-  that a first and a second start both read `OK`?]
-  - **A.** In this read-side cycle an archive source carries no marker of its own: registration
-    records it, and its attach reads `OK` by type. The overlay never alters the archive here (R9), and
-    what it does own over a tar.gz source, the staged bundle, sits in the durable tier under that
-    tier's marker (the seed's note of 2026-11-16). The write-side cycle settles where a marker lives
-    for an archive the overlay re-packs in place. `PLAN.md` § *Managed locations* says so (R11).
-  - **B.** A marker file beside the archive (`some.zip.terrace-marker`, or a sibling key on S3): a new
-    write path on every inner location, and it puts a file in the source's directory.
-  - **C.** A fourth `InnerLocation` method for marker I/O: protocol surface every future inner
-    location (SFTP next) must implement.
-  - **D.** The archive tier's marker kept in the durable tier below it, naming the archive.
-  - **Recommended: A.** It is the only option that needs no new write to a source the cycle otherwise
-    only reads, and it defers the choice to the cycle that first writes the archive. If Q3 rules B
-    (writes reachable now), A no longer holds for `zip` and `tar` and this becomes B, C or D.
-- **Q2 — `sharded`.** [NEEDS CLARIFICATION: is `sharded` a known tier key that is refused, or left
-  unknown?]
-  - **A.** Admit `sharded` to the tier keys and refuse `sharded = true` at load with "sharded archive
-    sources are not yet supported", naming the tier and `issues/sharded-archive-sources.md`.
-  - **B.** Leave it out of `TIER_KEYS`: the third example keeps failing as an unknown key, and the
-    sharded cycle opens `TIER_KEYS` (high-blast-radius) again.
-  - **Recommended: A.** `TIER_KEYS` changes once; the refusal says what is missing instead of calling a
-    documented key a typo; stage 9's pinned reason then names its real owner.
-- **Q3 — writes over an archive source in this cycle.** [NEEDS CLARIFICATION: once an archive source
-  is reachable, do mutating calls reach the adapter as the tree has them, or are they refused until
-  the cycles that make them safe land?]
-  - **A.** Refused: every mutating engine call over an archive source fails `EROFS` (R9). The cycle is
-    the read side; a write-side seed lifts the refusal after
-    `issues/archive-journaling-and-locking.md`.
-  - **B.** Reachable as the tree has them: per-call re-pack, no bracket, no lock, replay into a staged
-    bundle; the exposure stays recorded in § *Known open violations* and the journaling cycle runs
-    next.
-  - **Recommended: A.** B makes a recorded data-loss defect (two concurrent puts lose a member, both
-    returning success) live for every archive user, and builds on the replay model Decisions 2 and 3
-    overturn. A costs the loop nothing: stage 4 (change) is owned elsewhere and stays an expected
-    failure either way.
-- **Q4 — Decision 7 and direct-update sources.** [NEEDS CLARIFICATION: does R4's rule (exactly one
-  shared POSIX stage tier, directly below the source) bind a `zip` or `tar` source, or only `tar.gz`?
-  The `PLAN.md` terminology defines a bundle as "a compressed archive at the source (`tar.gz` in the
-  story)".]
-  - **A.** Every archive source: one rule, the same message.
-  - **B.** `tar.gz` only; a `zip` or `tar` source needs at least one POSIX stage tier anywhere below.
-  - **Recommended: A.** Loosening a load-time refusal later breaks no spec; tightening one does. The
-    ZIP example in R1 already loads under A with one shared stage tier below it.
-- **Q5 — `sync` on a direct-update archive.** [NEEDS CLARIFICATION: is `sync` accepted on a `zip` or
-  `tar` tier?]
-  - **A.** Refused at load, as the parser refuses `url`/`s3` on a POSIX tier (`spec.py:236-237`):
-    direct-update has no re-sync to rate-limit, and `PLAN.md`'s examples put `sync` only on tar.gz.
-  - **B.** Accepted and ignored.
-  - **Recommended: A.** It keeps the parser's rule that a key with no effect is a typo.
+  (Shaping finding, kept at the GOAL gate; resolved 2026-11-28.)
+- **Q1:** An archive source has no root for `.terrace/marker` and `ArchiveTier` implements no marker
+  I/O; what does its registration record, so that a first and a second start both read `OK`? —
+  **A:** Option A. An archive source carries no marker of its own: registration records it and its
+  attach reads `OK` by type. What the overlay owns over a tar.gz source, the staged bundle, sits in
+  the durable tier under that tier's marker. This holds only while Q3's refusal of writes stands; the
+  cycle that first lets a write reach an archive source settles where a direct-update archive's
+  marker lives (options then on the table: beside the archive, a fourth `InnerLocation` method, or in
+  the durable tier). (The foreman's ruling at the GOAL gate; resolved 2026-11-28.)
+- **Q2:** Is `sharded` a known tier key that is refused, or left unknown? — **A:** Option A. Admitted
+  to the tier keys and refused at load, naming the tier and `issues/sharded-archive-sources.md`, so
+  `TIER_KEYS` changes once (R2). (The foreman's ruling at the GOAL gate; resolved 2026-11-28.)
+- **Q3:** Once an archive source is reachable, do mutating calls reach the adapter as the tree has
+  them? — **A:** Option A. No: every mutating engine call over an archive source fails `EROFS` (R9);
+  this cycle is the read side. The tree's per-call re-pack has no bracket and no lock (a recorded
+  member-loss defect) and replays into a staged bundle as Decisions 2 and 3 overturn. (The foreman's
+  ruling at the GOAL gate; resolved 2026-11-28.)
+- **Q4:** Does Decision 7's stack rule bind a `zip` or `tar` source, or only `tar.gz`? — **A:**
+  Option A. Every archive source, with one rule and one message (R4); a load-time refusal can be
+  loosened later without breaking a spec. (The foreman's ruling at the GOAL gate; resolved
+  2026-11-28.)
+- **Q5:** Is `sync` accepted on a `zip` or `tar` tier? — **A:** Option A. Refused at load, as the
+  parser refuses `url`/`s3` on a POSIX tier (`spec.py:236-237`): direct-update has no re-sync to
+  rate-limit (R1). (The foreman's ruling at the GOAL gate; resolved 2026-11-28.)
+- **Q:** Accept 11 R-IDs, or split under the size circuit-breaker? — **A:** Accepted as one
+  deliverable at 11 R-IDs; no split. (The foreman's ruling at the GOAL gate; resolved 2026-11-28.)
+- **Q:** Does this cycle refuse an S3 source with no POSIX stage tier? — **A:** No; it stays with
+  `issues/engine-error-mapping.md` (Non-goals). (The foreman's ruling at the GOAL gate; resolved
+  2026-11-28.)
 
 ## Related materials
 
