@@ -26,6 +26,7 @@ from contextlib import contextmanager, AbstractContextManager
 # Internal libs
 from terrace.core.logging import Logger
 from terrace.core.units import Rate
+from terrace.state.journal import BUNDLE_DIR
 from terrace.state.lifecycle import MARKER_DIR
 from terrace.tier.protocol import TierStat, TierEntry, TierUsage, FileMeta
 
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 # Public interface
 __all__ = ['ArchiveTier', 'ArchiveMember', 'InnerLocation', 'PosixInnerLocation', 'S3InnerLocation',
-           'inner_location']
+           'inner_location', 'bundle_path']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -161,6 +162,11 @@ class S3InnerLocation:
         obstore.put(self.store, self.key, buffer.getvalue())
 
 
+def bundle_path(root: str | Path, source: str) -> Path:
+    """Where a staged bundle of the source tier `source` lives under the durable tier's `root`; no disk access."""
+    return Path(root) / MARKER_DIR / BUNDLE_DIR / f'{source}.tar'
+
+
 def inner_location(location: LocationSpec) -> InnerLocation:
     """Select and build the `InnerLocation` an archive tier layers over from a parsed `location` spec."""
     if location.type == 's3':
@@ -220,9 +226,9 @@ class ArchiveTier:
       temp+rename atomicity invariant holds and the archive stays compact (compaction implicit;
       no tombstones).
 
-    * **Staged re-sync** (`tar.gz`): the working copy is an uncompressed `.tar` on a durable
-      staging path (the tier below the source). On first access the source archive is pulled
-      and decompressed once into that `.tar`; all member ops then run against it exactly as in
+    * **Staged re-sync** (`tar.gz`): the working copy is an uncompressed `.tar`, the bundle, at a
+      path inside the durable tier below the source (`bundle_path`). `stage` pulls and decompresses
+      the source archive once into that `.tar` (the engine calls it at start); all member ops then run against it exactly as in
       direct-update, and `resync` reconstructs the archive by recompressing the working `.tar`
       and atomically pushing it to the source, rate-limited by `max_frequency` (forced at
       drain/commit). This bounds source I/O to periodic pushes rather than per-write uploads.
@@ -235,22 +241,22 @@ class ArchiveTier:
     """
 
     def __init__(self, name: str, inner: InnerLocation, db: Database, fmt: str, *,
-                 staging: Optional[str | Path] = None, max_frequency: Optional[Rate] = None) -> None:
-        """Initialize over `inner`; `tar.gz` is staged re-sync and requires a `staging` working path."""
+                 bundle: Optional[str | Path] = None, max_frequency: Optional[Rate] = None) -> None:
+        """Initialize over `inner`; `tar.gz` is staged re-sync and requires a `bundle` path for its working `.tar`."""
         if fmt not in FORMATS:
             raise ValueError(f'Unsupported archive format: {fmt!r} (expected one of {", ".join(sorted(FORMATS))})')
-        if fmt in STAGED and staging is None:
-            raise ValueError(f'A {fmt} (staged re-sync) archive requires a `staging` working path')
+        if fmt in STAGED and bundle is None:
+            raise ValueError(f'A {fmt} (staged re-sync) archive requires a `bundle` path')
         self.name = name
         self.inner = inner
         self.db = db
         self.fmt = fmt
-        self.staging = Path(staging) if staging is not None else None
+        self.bundle = Path(bundle) if bundle is not None else None
         self.max_frequency = max_frequency
         self._staged = fmt in STAGED
         # Member ops act on the working location: the source itself for direct-update, or the
-        # uncompressed staging `.tar` for staged re-sync (source touched only on populate/resync).
-        self._loc: InnerLocation = PosixInnerLocation(self.staging) if self._staged else inner
+        # uncompressed bundle `.tar` for staged re-sync (source touched only on populate/resync).
+        self._loc: InnerLocation = PosixInnerLocation(self.bundle) if self._staged else inner
         self._loc_fmt = 'tar' if self._staged else fmt
         self._last_resync: Optional[float] = None
         self._members: Optional[dict[str, ArchiveMember]] = None
@@ -458,6 +464,10 @@ class ArchiveTier:
                     shutil.copyfileobj(decompressed, out)
         log.debug(f'Populated staging {self._loc.identity} from {self.inner.identity} (tier={self.name})')
         return True
+
+    def stage(self) -> bool:
+        """Pull the bundle of a staged tier if it is absent; True only when this call created it."""
+        return self._populate() if self._staged else False
 
     def resync(self, now: float, *, force: bool = False) -> bool:
         """

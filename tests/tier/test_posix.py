@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from pytest import fixture, mark, raises
 
 # Internal libs
-from terrace.state.journal import PARTIAL_DIR, is_temp_name
+from terrace.state.journal import PARTIAL_DIR, BUNDLE_DIR, is_temp_name
 from terrace.state.lifecycle import Marker
 from terrace.tier.protocol import Tier, FileMeta
 from terrace.tier.posix import PosixTier
@@ -198,6 +198,27 @@ def test_usage_excludes_internals(tier: PosixTier) -> None:
     os.symlink('a', tier.resolve('/link'))
     usage = tier.usage()
     assert usage.files == 3 and usage.bytes == 8 + os.lstat(tier.resolve('/link')).st_size
+
+
+def test_usage_counts_staged_bundles(tier: PosixTier) -> None:
+    """A staged bundle in '.terrace/bundles' counts; the pull's temp beside it, 'partial/' and the marker do not."""
+    Marker(uuid=UUID, tier='scratch', generation=0, written=100.0).write(tier.root)
+    put(tier, '/a', b'12345')
+    assert tier.usage().files == 1 and tier.usage().bytes == 5
+    bundles = Path(tier.root) / '.terrace' / BUNDLE_DIR
+    bundles.mkdir()
+    (bundles / 'source.tar').write_bytes(b'b' * 1000)
+    (bundles / '.source.tar.0123abcd.tmp').write_bytes(b't' * 300)          # an interrupted pull's temp
+    (bundles / '.hidden.tar').write_bytes(b'h' * 70)
+    (bundles / 'notes.txt').write_bytes(b'n' * 20)
+    (bundles / 'nested.tar').mkdir()
+    (bundles / 'nested.tar' / 'inner.tar').write_bytes(b'i' * 9)
+    partial = Path(tier.root) / PARTIAL_DIR
+    partial.mkdir(parents=True, exist_ok=True)
+    (partial / '7-a').write_bytes(b'p' * 400)
+    assert (Path(tier.root) / '.terrace' / 'marker').is_file()
+    usage = tier.usage()
+    assert (usage.files, usage.bytes) == (2, 1005)
 
 
 def test_managed_internals_hidden_and_guarded(tier: PosixTier) -> None:

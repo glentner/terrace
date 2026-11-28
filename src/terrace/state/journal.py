@@ -21,7 +21,7 @@ from terrace.state.catalog import normalize
 
 # Public interface
 __all__ = ['Journal', 'Intent', 'Writeback', 'ACTIONS', 'NAMESPACE_OPS',
-           'PARTIAL_DIR', 'temp_name', 'is_temp_name']
+           'PARTIAL_DIR', 'BUNDLE_DIR', 'temp_name', 'is_temp_name']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -32,6 +32,8 @@ ACTIONS: Final[frozenset] = frozenset({'promote', 'commit', 'evict', 'compact', 
 NAMESPACE_OPS: Final[frozenset] = frozenset({'create', 'unlink', 'rename', 'mkdir', 'rmdir', 'meta'})
 
 PARTIAL_DIR: Final[str] = '.terrace/partial'
+
+BUNDLE_DIR: Final[str] = 'bundles'            # under '.terrace': a staged tar.gz bundle, one counted file
 
 
 def temp_name(intent_id: int, path: str) -> str:

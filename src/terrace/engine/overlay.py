@@ -144,12 +144,15 @@ class OverlayEngine:
                     tier, position=position, type=tier_spec.type, role=tier_spec.role,
                     scope=tier_spec.scope, uuid=self.overlay.uuid, now=now)
             elif tier_spec.type in ARCHIVE_TYPES:
-                from terrace.tier.archive import ArchiveTier, inner_location     # lazy, like the S3 branch
+                from terrace.tier.archive import ArchiveTier, inner_location, bundle_path   # lazy, like S3
                 inner = inner_location(tier_spec.location)
                 signature = inner.signature()
                 if signature is None:
                     raise EngineError(f'Source archive does not exist: {inner.identity}')
-                tier = ArchiveTier(tier_spec.name, inner, self.db, tier_spec.type,
+                bundle = None
+                if tier_spec.type == 'tar.gz':                   # the bundle sits in the durable tier below
+                    bundle = bundle_path(Path(self.spec.tiers[position + 1].path), tier_spec.name)
+                tier = ArchiveTier(tier_spec.name, inner, self.db, tier_spec.type, bundle=bundle,
                                    max_frequency=tier_spec.max_frequency)
                 record, status = self.registry.enlist(
                     tier_spec.name, position=position, type=tier_spec.type, role=tier_spec.role,
@@ -168,6 +171,8 @@ class OverlayEngine:
             if status is not MarkerStatus.OK:
                 raise EngineError(f'Tier {tier_spec.name!r} marker is {status.value} — audit required')
             self.tiers[tier_spec.name] = tier
+        if self.spec.source.type == 'tar.gz':
+            self._stage_bundle()
         if self.catalog.get('/') is None:
             stat = self.source.stat(PurePosixPath('/'))
             self.catalog.add('/', 'dir', mode=stat.mode if stat.mode is not None else 0o755,
@@ -175,6 +180,40 @@ class OverlayEngine:
                              ctime=stat.ctime or stat.mtime, atime=stat.atime or stat.mtime, source_path='/')
         self.started = True
         log.info(f'Engine started (overlay={self.spec.name}, tiers={len(self.tiers)})')
+
+    def _stage_bundle(self) -> None:
+        """
+        Pull a tar.gz source's bundle into the durable tier below it when absent: journaled, and counted there as one
+        file in the confirm's transaction. A pending pull of the same bundle (one that may have landed and lost its
+        count to a crash before its confirm) is settled first, counting the bundle if it is there. A bundle already
+        present was counted by the start that pulled it, so nothing is journaled or counted for it again.
+        """
+        source = self.source
+        durable = self.spec.tiers[1].name
+        bundle = source.bundle
+        detail = {'kind': 'bundle', 'bundle': str(bundle), 'source': source.name}
+        for earlier in self.journal.pending(durable):
+            if earlier.action == 'promote' and earlier.entry is None and earlier.detail == detail:
+                with self.db.transaction():
+                    if bundle.is_file():
+                        self.registry.adjust_usage(durable, bytes=bundle.stat().st_size, files=1)
+                        self.journal.confirm(earlier)
+                    else:
+                        self.journal.rollback(earlier)
+                log.info(f'Settled an interrupted bundle pull (bundle={bundle}, tier={durable})')
+        if bundle.is_file():
+            return
+        intent = self.journal.begin('promote', durable, now=self.clock(), detail=detail)
+        try:
+            created = source.stage()
+        except BaseException:
+            self.journal.rollback(intent)
+            raise
+        with self.db.transaction():
+            self.journal.confirm(intent)
+            if created:
+                self.registry.adjust_usage(durable, bytes=bundle.stat().st_size, files=1)
+        log.debug(f'Staged bundle (bundle={bundle}, tier={durable}, created={created})')
 
     def stop(self, state: str = 'clean') -> None:
         """Stop transfers and settle the lifecycle flag ('clean' or 'detached')."""

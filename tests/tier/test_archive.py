@@ -360,12 +360,12 @@ def test_tar_direct_update_round_trip(db: Database, tmp_path: Path) -> None:
 def staged(db: Database, source: Path, work: Path, *, max_frequency=None, name: str = 'arc') -> ArchiveTier:
     """A staged-resync (tar.gz) ArchiveTier over an S3-like inner source with a durable working `.tar`."""
     TierRegistry(db).register(name, position=0, type='tar.gz', role='source', scope='shared')
-    return ArchiveTier(name, PosixInnerLocation(source), db, 'tar.gz', staging=work, max_frequency=max_frequency)
+    return ArchiveTier(name, PosixInnerLocation(source), db, 'tar.gz', bundle=work, max_frequency=max_frequency)
 
 
 def test_staged_requires_staging(db: Database, tmp_path: Path) -> None:
-    """A tar.gz archive is staged re-sync and refuses construction without a working path."""
-    with raises(ValueError):
+    """A tar.gz archive is staged re-sync and refuses construction without a bundle path."""
+    with raises(ValueError, match='requires a `bundle` path'):
         ArchiveTier('arc', PosixInnerLocation(tmp_path / 'a.tar.gz'), db, 'tar.gz')
 
 
@@ -510,7 +510,7 @@ def test_staged_source_on_s3(db: Database, s3_spec: S3Spec, tmp_path: Path) -> N
         out.write(gzip_tar([('file', 'keep.txt', b'orig')]))
     work = tmp_path / 'work.tar'
     TierRegistry(db).register('arc', position=0, type='tar.gz', role='source', scope='shared')
-    arc = ArchiveTier('arc', source, db, 'tar.gz', staging=work)
+    arc = ArchiveTier('arc', source, db, 'tar.gz', bundle=work)
     assert arc.read(P('/keep.txt')) == b'orig'           # populate pulled + decompressed from S3
     assert work.exists()                                 # the working .tar materialized on the local durable tier
 

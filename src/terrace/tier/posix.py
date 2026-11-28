@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 # Internal libs
 from terrace.core.logging import Logger
-from terrace.state.journal import PARTIAL_DIR
+from terrace.state.journal import PARTIAL_DIR, BUNDLE_DIR
 from terrace.state.lifecycle import MARKER_DIR
 from terrace.tier.protocol import TierStat, TierEntry, TierUsage, FileMeta
 
@@ -209,7 +209,10 @@ class PosixTier:
         log.trace(f'Renamed {pure_old} -> {pure_new} (tier={self.name})')
 
     def usage(self) -> TierUsage:
-        """Walk the root summing regular files and symlinks, excluding managed internals."""
+        """
+        Walk the root summing regular files and symlinks, excluding managed internals but one: each staged
+        bundle (a regular `*.tar` directly in `.terrace/bundles/`, not dot-named) counts, as the engine counts it.
+        """
         total, count = 0, 0
         for dirpath, dirnames, filenames in os.walk(self.root):
             if Path(dirpath) == self.root and MARKER_DIR in dirnames:
@@ -219,4 +222,16 @@ class PosixTier:
                 if stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
                     total += st.st_size
                     count += 1
+        bundles = self.root / MARKER_DIR / BUNDLE_DIR
+        try:
+            names = os.listdir(bundles)
+        except (FileNotFoundError, NotADirectoryError):
+            names = []
+        for name in names:
+            if name.startswith('.') or not name.endswith('.tar'):
+                continue                                     # a pull's temp, or anything not a bundle
+            st = os.lstat(bundles / name)
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+                count += 1
         return TierUsage(bytes=total, files=count)

@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/archive-spec-plumbing
 base: main
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-28'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p1
 - id: P2
   name: A tar.gz bundle is pulled into the durable tier, journaled and counted
-  status: pending
+  status: done
   satisfies:
   - R6
   - R7
@@ -243,12 +243,12 @@ cleanly, and lists and reads every member through the engine API. Nothing parses
 one file at its uncompressed size, and `PosixTier.usage()` agrees. The bundle is never listed, and
 members read at their offsets.
 
-- [ ] `state/journal.py`: `BUNDLE_DIR = 'bundles'` beside `PARTIAL_DIR`. `tier/archive.py`:
+- [x] `state/journal.py`: `BUNDLE_DIR = 'bundles'` beside `PARTIAL_DIR`. `tier/archive.py`:
   `bundle_path(root, source) -> Path`, and the keyword `staging` renamed to `bundle` (tar.gz requires
   it).
-- [ ] `ArchiveTier.stage() -> bool`: runs `_populate` and returns whether it created the file.
+- [x] `ArchiveTier.stage() -> bool`: runs `_populate` and returns whether it created the file.
   `_populate`, `index` and `atomic_write` are unchanged.
-- [ ] `engine/overlay.py`:
+- [x] `engine/overlay.py`:
   - In `start`, build the tar.gz tier with `bundle=bundle_path(Path(spec.tiers[position + 1].path),
     name)`, with no disk access.
   - After the attach loop and before the root `stat`, `_stage_bundle()` runs when the source is
@@ -263,15 +263,22 @@ members read at their offsets.
     its count. It counts the bundle if the file is present, and resolves that intent in the same
     transaction. A crash between `_populate`'s rename and the confirm then cannot leave the bundle
     uncounted forever.
-- [ ] `tier/posix.py` `usage()` also counts regular files named `*.tar` (not dot-named) directly in
+  - *Amendment (build, 2026-11-28):* `_stage_bundle` begins its intent only when the bundle is
+    absent. A start that finds the bundle already in place journals and counts nothing, because the
+    start that pulled it counted it. Read literally, "begin, then `stage()`" on every start would let
+    a crash inside a non-pulling start's bracket leave a pending intent beside a bundle that is
+    already counted, and the recovery above would count it a second time. This is GOAL's R7
+    Clarification as written ("when the durable tier does not already hold it"). No gate check
+    changes.
+- [x] `tier/posix.py` `usage()` also counts regular files named `*.tar` (not dot-named) directly in
   `.terrace/bundles/`. In the same commit, narrow `AGENTS.md` § 4's `usage()` bullet, and § *Read before
   editing* if it restates it, to say the staged bundle is the one managed file the oracle counts,
   because Decision 1 counts it (PLAN D2).
-- [ ] `PLAN.md`'s ArchiveTier `staging` sentence (`:653-655`) may wait for P5, which owns R11's text.
+- [x] `PLAN.md`'s ArchiveTier `staging` sentence (`:653-655`) may wait for P5, which owns R11's text.
   Nothing in this phase may leave `AGENTS.md` asserting a `usage()` rule the code breaks.
-- [ ] `tests/tier/test_archive.py`: rename `staging=` to `bundle=` at `:362`, `:365-368` (message) and
+- [x] `tests/tier/test_archive.py`: rename `staging=` to `bundle=` at `:362`, `:365-368` (message) and
   `:512`.
-- [ ] `tests/engine/test_archive_source.py`:
+- [x] `tests/engine/test_archive_source.py`:
   - Add `tar.gz` to the three parametrized tests. The tar.gz is built from the same tar.
   - `test_staged_bundle_is_one_counted_file_in_the_durable_root`. Before any member read:
     - exactly one regular file is under the durable root's `.terrace/bundles/`;
@@ -289,7 +296,7 @@ members read at their offsets.
     2. Restart.
     3. `registry.usage(durable) == tiers[durable].usage()` and equals `(size, 1)`, and no intent is
        pending.
-- [ ] `tests/tier/test_posix.py`: `test_usage_counts_staged_bundles`. A bundle counts; a temp beside it,
+- [x] `tests/tier/test_posix.py`: `test_usage_counts_staged_bundles`. A bundle counts; a temp beside it,
   `partial/` and `marker` do not.
 - **Verify:** `tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p2`.
   - P1's and P2's rows all pass.

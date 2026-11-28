@@ -386,9 +386,13 @@ pragmas and this section. Until it lands, code is graded against this section as
 - **The `.terrace` marker tree reads as absent and refuses mutation on every tier.** A tier that lets
   `.terrace/marker` be written through the overlay lets a user forge the tier identity, after which a
   wiped tier reads OK and the evaporation path never fires.
-- **`usage()` is the rebuild oracle** for the quota counters and must exclude managed internals. If
-  it starts counting temps or sentinels, every audit "corrects" the counters to a wrong value and
-  eviction pressure is permanently biased.
+- **`usage()` is the rebuild oracle** for the quota counters and must exclude managed internals, but
+  one: the staged bundle of a `tar.gz` source, a regular `*.tar` directly in the durable tier's
+  `.terrace/bundles/` that is not dot-named, is the one managed file `PosixTier.usage()` counts,
+  because Decision 1 of `PLAN.md` counts the bundle in that tier's limits and the engine counts it
+  at the pull. If it starts counting temps or sentinels (the pull's dot-named temp beside the bundle
+  included), every audit "corrects" the counters to a wrong value and eviction pressure is
+  permanently biased.
 
 ### 5. Committed source path — deferred-op replay
 
