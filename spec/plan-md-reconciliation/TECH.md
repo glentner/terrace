@@ -3,15 +3,15 @@ slug: plan-md-reconciliation
 title: Drop the unused rich dependency, and hold PLAN.md to the redraw's reconciliation
 kind: docs
 appetite: small
-status: in_progress
+status: in_review
 branch: docs/plan-md-reconciliation
 base: main
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-27'
 phases:
 - id: P1
   name: rich leaves pyproject.toml and uv.lock; AGENTS.md's Code style says so in the same commit
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -75,13 +75,13 @@ R4 to R7 are guards: `PLAN.md` is not edited, and the gate re-checks each agains
 R3's `AGENTS.md` sentence is a **committed document**: the orchestrator and the blind reviewer can both
 grade it, since it lives outside `spec/`.
 
-- [ ] **Remove the dependency with a lock operation that only removes.** From the cycle worktree, with the
+- [x] **Remove the dependency with a lock operation that only removes.** From the cycle worktree, with the
       step's `UV_*` environment exported: `uv remove rich --no-sync`. It deletes the `"rich>=13.7",` line
       from `pyproject.toml` and re-locks keeping every existing pin. Never `--upgrade`, never
       `uv lock --upgrade-package`, and never a hand edit of `uv.lock`. Check that
       `git diff --numstat -- pyproject.toml uv.lock` reads `0 1` and `0 36`; the prototype's run did
       (PLAN § 4).
-- [ ] **`AGENTS.md` § *Code style*, same commit.** The bullet at `AGENTS.md:956-957` becomes exactly:
+- [x] **`AGENTS.md` § *Code style*, same commit.** The bullet at `AGENTS.md:956-957` becomes exactly:
       ```
       * Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail; formatting goes
         through `cmdkit.ansi`.
@@ -91,17 +91,17 @@ grade it, since it lives outside `spec/`.
       "formatting goes through `cmdkit.ansi`" (whitespace-normalized); `AGENTS.md` outside § *Code style*
       is byte-identical to the base; and every commit touching `pyproject.toml` or `uv.lock` also touches
       `AGENTS.md`. § *Verification*'s 851 stays: `build` checks the figure is still there and still true.
-- [ ] **Nothing else.** `PLAN.md`, `src/`, `tests/`, `.github/`, `README.md` and `CHANGELOG.md` are not
+- [x] **Nothing else.** `PLAN.md`, `src/`, `tests/`, `.github/`, `README.md` and `CHANGELOG.md` are not
       touched (GOAL Non-goals); the gate's `text` mode allows only `AGENTS.md`, `pyproject.toml`,
       `uv.lock`, `spec/plan-md-reconciliation/`, `issues/*.md` and `ROADMAP.md` in the diff from the base.
       The references to the seed in `AGENTS.md` § *Known open violations* stay for `code terrace roadmap`.
-- [ ] **Stage, then verify.** Stage the three files by path (code-build Step 6), then run the phase's
+- [x] **Stage, then verify.** Stage the three files by path (code-build Step 6), then run the phase's
       `verify:`. Export `GATE_SCRATCH` as the cycle's scratch directory
       first (the foreman's working rules name it), so the run log, the JUnit report and `uv build`'s `dist-<stamp>/` land in the cycle's scratch
       directory; unset, they land in the main checkout's git-ignored `.local/plan-md-reconciliation/`.
       Never in the worktree. The `build` mode takes about two minutes (`uv sync --locked`, `uv build`, a
       collection pass, `tools/lint.sh`, and the profile's verify under `-n auto`).
-- [ ] **Deferral ledger** (last phase). This plan files no new seed. Walk this phase's list items and
+- [x] **Deferral ledger** (last phase). This plan files no new seed. Walk this phase's list items and
       prose (not headings) for deferral phrasing and confirm each names an `issues/` file with a
       `ROADMAP.md` entry; the gate's `ledger` mode does the same mechanically.
 - **Verify:** `uv run --no-project --python 3.15 python -I spec/plan-md-reconciliation/verify/dependency_gate.py lock text guards ledger build`.

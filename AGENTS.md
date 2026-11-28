@@ -953,8 +953,8 @@ log = Logger.with_name(__name__)
   machine and the thread into one class, deliberately, unlike hypershell's split. A subclass declares
   a nested `states` enum with `START` and `FINAL` plus one `on_<state>` method each, wired at class
   definition; halting is an `Event`, not a state.
-* Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail. `rich` is a
-  declared dependency but is **not used** — formatting goes through `cmdkit.ansi`.
+* Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail; formatting goes
+  through `cmdkit.ansi`.
 * SQL is PEP 750 t-strings rendered by `terrace.state.sql.render` (interpolations bind as parameters;
   `{name:id}` splices whitelisted identifiers) — never hand-assemble SQL strings or placeholders.
   Static DDL lives in `schema.sql`.
