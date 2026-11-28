@@ -89,25 +89,6 @@ put back to its source on its own delay or under pressure on scratch. A signal c
 changed to the durable tier and releases the node; a commit from a login node then rebuilds the
 bundles that changed and leaves the staged ones in place for the next mount.
 
-### Reconcile `PLAN.md` against the implementation
-
-**Seed:** [`issues/plan-md-reconciliation.md`](issues/plan-md-reconciliation.md) · `docs` · appetite small
-
-Small and cheap. It was to follow the redraw of `PLAN.md`, which has landed and absorbed most of it. It matters because
-`code terrace review` grades a cycle against a contract shaped from `PLAN.md`, so every inaccuracy
-left standing is a chance to grade correct code as wrong. The audit
-found `PLAN.md` internally inconsistent in one place (its summary lists an `fsck` command its own CLI
-table calls `audit`) and behind the code in several others: `umount` takes a spec file rather than a
-mountpoint, and the implementation is the better design; `rich` and `frozendict` are named as
-technology decisions and used nowhere; four of the eight testing-strategy bullets describe coverage
-that does not exist. This cycle holds only the residue — the inaccuracies no other queued cycle will
-touch. Anything a later cycle changes by doing its own work is reconciled there, in that cycle's own
-diff, which is what the same-commit rule requires.
-
-2026-11-16 (`spec/plan-the-bundle-loop/`): the redraw resolved items 1 to 5 in `PLAN.md`. What is left
-is whether `rich` leaves `pyproject.toml`, the seed's R7, and the residue of its 2026-11-11 note if the
-namespace rebuild is declined; the seed's note of this date says which item went where.
-
 ### Make archive tiers reachable from a spec file
 
 **Seed:** [`issues/archive-spec-plumbing.md`](issues/archive-spec-plumbing.md) · `feature` · appetite big

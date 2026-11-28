@@ -147,8 +147,8 @@ Draft R-IDs, to be firmed at promotion — and likely redistributed if the seed 
   before those criteria can be written. `issues/offline-commit-command.md` needs the
   checksum for its match-and-skip step (`PLAN.md` line 322).
   `issues/archive-journaling-and-locking.md` touches `PosixInnerLocation.atomic_write` directly and
-  should either fix the temp naming in finding 3 or say why not. `issues/plan-md-reconciliation.md`
-  holds `PLAN.md` inaccuracies no other cycle corrects. `issues/ci-integration-lane.md` gates R2's
+  should either fix the temp naming in finding 3 or say why not. A `PLAN.md` inaccuracy this cycle's
+  findings touch is corrected in its own diff (the same-commit rule). `issues/ci-integration-lane.md` gates R2's
   mount-level half. `PLAN.md` § *State store*, § *FUSE adapter* (line 264), § *Audit* and
   § *Configuration* (line 389).
 - Open question — **whether this stays one cycle.** `code terrace feature` may well split it into three or

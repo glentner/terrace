@@ -163,10 +163,10 @@ Draft R-IDs, to be firmed up at promotion.
   case its own tests do not yet contain);
   `issues/archive-tier-test-coverage.md` and `issues/crash-fault-injection-suite.md` (both add tests
   that need a machine to run on); `issues/daemonized-mount-first-run.md` (the daemonized branch has no
-  test anywhere, and a test for it likely needs a real mount); `issues/plan-md-reconciliation.md`
-  (owns `PLAN.md`'s inaccuracies that no other cycle touches — this one's "Linux CI" claim is fixed
-  here instead, in this cycle's own diff, per the same-commit rule). `PLAN.md` § *Testing strategy*
-  (503–525); `AGENTS.md` § *Verification*; `AGENTS.md` § *Invariants* § *Conventions*.
+  test anywhere, and a test for it likely needs a real mount). `PLAN.md` § *Testing strategy*, whose
+  FUSE-integration bullet marks this lane unbuilt since the redraw (`spec/plan-the-bundle-loop/`); this
+  cycle updates that sentence in its own diff, per the same-commit rule. `AGENTS.md`
+  § *Verification*; `AGENTS.md` § *Invariants* § *Conventions*.
 - Open — **blocking or reporting.** A blocking lane is the only kind that prevents the regression it
   exists to catch, and it is also the one that stops all work when a MinIO image tag moves or a runner
   image drops `/dev/fuse`. A reporting lane never blocks a merge and is therefore ignorable, which is

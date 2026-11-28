@@ -231,5 +231,12 @@ before any code, under the plan-drift rule.
   2026-11-27): the cycle that builds this seed's model changes the tests that pin Ruling G's id reuse
   and, with `issues/archive-finalization-integration.md`, any that pin a re-pack per call or a rename
   as an operation for a bundle source. It finds them by running the suite; no list is kept here.
+- 2026-11-28 (`spec/plan-md-reconciliation/` landed, and its seed was retired): that seed held one
+  conditional residue, and it moves here. R8's shortening of the replay account (`PLAN.md` § *Risks
+  and mitigations*, a bullet narrating six cycles, and `AGENTS.md` § 5 and § 10, which restate the
+  mechanism at the grain of a docstring; each engine cycle paid a review round to keep the three in
+  step) was to fall to the retired seed if this one were declined. It does not lapse with a decline:
+  whoever declines this seed files R8 as a `docs` seed of its own, with its `ROADMAP.md` entry, in the
+  same commit.
 - Found by: an out-of-cycle review of the whole tree at `64faf27` (2026-11-11). The reproduction was
   run with Python 3.15.2 on macOS against tmpdir tiers through the engine API.

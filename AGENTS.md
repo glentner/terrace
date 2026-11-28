@@ -847,9 +847,11 @@ code and the section together.
 | 8 | **Scheduled to change (2026-11-16)**, Decision 5 and Ruling E: a mount that finds `mounted` stops, where the design recovers and serves; a soft unmount leaves copies recorded on node-scope tiers, where the design records every modified file on the durable tier and nothing below it. The row above for the same seed records the defect this ruling decides. | `issues/audit-command.md`, `issues/read-only-mount.md`; `issues/shutdown-rescue-gaps.md` |
 | 10 | **Scheduled to change (2026-11-16)**, Decision 6 and Ruling G: the purge-watch read is argued on a WAL reader not waiting, where in the assumed journal a commit waits on open reads; the purge watch exists because ids are reused. | `issues/state-store-journal-mode.md`; `issues/namespace-sync-redesign.md` |
 
-Several of these are also `PLAN.md` inaccuracies rather than pure code defects. Under the repository's
-plan-drift rule the reconciliation belongs in `PLAN.md` first, with the maintainer; that work is
-tracked in `issues/plan-md-reconciliation.md`.
+Several of these are also places where `PLAN.md` and the code disagree, not pure code defects. Under
+the repository's plan-drift rule the reconciliation belongs in `PLAN.md` first, with the maintainer,
+in the diff of the cycle that works the row's seed (the same-commit rule). The audit's `PLAN.md`
+inaccuracies that no seed's work touches were reconciled by `spec/plan-the-bundle-loop/` and
+`spec/plan-md-reconciliation/`.
 
 ## Verification
 

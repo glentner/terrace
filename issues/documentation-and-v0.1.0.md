@@ -124,10 +124,10 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   over generated pages that list signatures.
 - Open question — **who bumps the version.** This cycle, or `code terrace release` as part of the tag?
   Splitting it means the diff that says "0.1.0" and the diff that documents 0.1.0 are two commits.
-- Open question — **`PLAN.md` corrections.** The plan's § *Vision and scope* lists a `fsck` command
-  that its own § *CLI surface* table calls `audit`, and no such command exists. Under plan drift that
-  correction is formally a design change; [`issues/plan-md-reconciliation.md`](plan-md-reconciliation.md)
-  owns it, and this cycle must not propagate the inaccuracy into the docs if it has not yet landed.
+- **`PLAN.md` corrections**, no longer open. The `fsck` command the plan's § *Vision and scope* once
+  listed, where its own § *CLI surface* table said `audit`, was corrected by the redraw
+  (`spec/plan-the-bundle-loop/`), and `spec/plan-md-reconciliation/` (landed 2026-11-28) closed the
+  rest of the audit's `PLAN.md` inaccuracies. This cycle documents from the reconciled plan.
 - Found by: scheduled work carried forward from `PLAN.md` § *Phase outline*. The missing PyPI
   workflow and the unchecked sdist hygiene were found by the invariant audit run during the
   software-factory port (2026-08-22) — remaining-work review of `pyproject.toml` and

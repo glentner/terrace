@@ -143,9 +143,9 @@ Draft R-IDs, to be firmed up at promotion.
   land.
 - `PLAN.md` → ArchiveTier (:125-147), the archive spec examples (:421-447), Tier protocol
   (:109-121), Managed locations and markers (:250-256).
-  [`plan-md-reconciliation.md`](plan-md-reconciliation.md) holds only the `PLAN.md` inaccuracies no
-  other cycle repairs by doing its own work; the archive ones belong in this cycle's own diff, which
-  is what the same-commit rule requires.
+  The audit's `PLAN.md` inaccuracies that no cycle repairs by doing its own work were closed by
+  `spec/plan-the-bundle-loop/` and `spec/plan-md-reconciliation/`; the archive ones belong in this
+  cycle's own diff, which is what the same-commit rule requires.
 - [`invariant-audit-gaps.md`](invariant-audit-gaps.md) carries the `tier.generation` finding, which
   R4 touches, and the missing-symlink-resolution question overlaps R7. `_validate_stack` is
   high-blast-radius; changing it twice is the worse outcome, so promotion should decide which cycle

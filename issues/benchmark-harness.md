@@ -43,11 +43,10 @@ number that is wrong in the flattering direction.
   archives that is a promise about the signature, not about the cost. Do not write a criterion that
   assumes a ranged archive read is cheap.
 
-`PLAN.md` also attributes this work to the wrong phase twice — § *Risks and mitigations* says
-"benchmark harness (Phase 10)" in one bullet and "the Phase 10 stress suite" in another, where the
-checklist that drove the project put both in Phase 11. That is a documentation inaccuracy owned by
-[`issues/plan-md-reconciliation.md`](plan-md-reconciliation.md); this cycle should not propagate it
-into the docs it writes numbers for.
+`PLAN.md` once attributed this work to the wrong phase twice ("benchmark harness (Phase 10)" and
+"the Phase 10 stress suite", where the checklist that drove the project put both in Phase 11). The
+redraw (`spec/plan-the-bundle-loop/`) removed both: § *Risks and mitigations* now names this seed
+and no phase. The docs this cycle writes numbers for should not bring a phase number back.
 
 This is unbuilt work. Nothing regressed and nothing is broken.
 
@@ -93,8 +92,7 @@ Draft R-IDs, to be firmed up at promotion. See the KB's EARS notes.
   and is the only consumer; [`issues/ci-integration-lane.md`](ci-integration-lane.md) provides the
   only automated machine that could ever run a mounted benchmark;
   [`issues/freethreaded-concurrency-stress.md`](freethreaded-concurrency-stress.md) needs the same
-  mixed-workload driver and should share it; [`issues/plan-md-reconciliation.md`](plan-md-reconciliation.md)
-  owns the Phase-10-versus-11 mislabel; [`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md)
+  mixed-workload driver and should share it; [`issues/archive-spec-plumbing.md`](archive-spec-plumbing.md)
   and [`issues/archive-finalization-integration.md`](archive-finalization-integration.md) decide
   whether an archive stack is benchmarkable at all. Root `PLAN.md` → § *Risks and mitigations*,
   § *Technology decisions* → staging granularity (`bypass_size`, the other path worth measuring).

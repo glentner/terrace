@@ -161,8 +161,8 @@ below names one observable outcome so it is worth negotiating, not because that 
   needs. `issues/audit-command.md` is the other half of the recovery story — an unbounded window is
   survivable if something reconciles afterwards, and today nothing does.
   `issues/ci-integration-lane.md` gates whether R2's mount-level half runs anywhere automatically.
-  `issues/plan-md-reconciliation.md` holds the residue of `PLAN.md` inaccuracies this cycle does not
-  itself correct. `PLAN.md` § *Overlay engine* → *Eviction* (the 95%/85% claim), § *Overlay engine*
+  A `PLAN.md` inaccuracy this cycle's work touches is corrected in its own diff (the same-commit
+  rule). `PLAN.md` § *Overlay engine* → *Eviction* (the 95%/85% claim), § *Overlay engine*
   → *Write-back*, § *Lifecycle and recovery*, and § *Risks and mitigations* (the volatile-tier
   bullet, which is the paragraph that assumes a live pump).
 - Open question — **what a dead pump should do.** Restart with a bounded retry count keeps a long job
