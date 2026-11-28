@@ -31,7 +31,7 @@ from terrace.state.lifecycle import Lifecycle, MarkerStatus
 from terrace.state.registry import TierRegistry
 from terrace.tier.protocol import Tier, TierStat, FileMeta
 from terrace.tier.posix import PosixTier
-from terrace.tier.spec import OverlaySpec
+from terrace.tier.spec import OverlaySpec, ARCHIVE_TYPES
 from terrace.engine.locks import LockRegistry
 from terrace.engine.transfer import TransferPool, materialize_dirs
 
@@ -143,6 +143,17 @@ class OverlayEngine:
                 record, status = self.registry.attach_tier(
                     tier, position=position, type=tier_spec.type, role=tier_spec.role,
                     scope=tier_spec.scope, uuid=self.overlay.uuid, now=now)
+            elif tier_spec.type in ARCHIVE_TYPES:
+                from terrace.tier.archive import ArchiveTier, inner_location     # lazy, like the S3 branch
+                inner = inner_location(tier_spec.location)
+                signature = inner.signature()
+                if signature is None:
+                    raise EngineError(f'Source archive does not exist: {inner.identity}')
+                tier = ArchiveTier(tier_spec.name, inner, self.db, tier_spec.type,
+                                   max_frequency=tier_spec.max_frequency)
+                record, status = self.registry.enlist(
+                    tier_spec.name, position=position, type=tier_spec.type, role=tier_spec.role,
+                    scope=tier_spec.scope, meta={'location': inner.identity, 'signature': list(signature)})
             else:
                 root = Path(tier_spec.path)
                 if tier_spec.role == 'source':

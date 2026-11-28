@@ -157,3 +157,36 @@ def test_attach_detects_generation_mismatch(registry: TierRegistry, tmp_path: Pa
     record, status = registry.attach('scratch', position=1, type='posix', role='stage', scope='shared',
                                      root=root, uuid=UUID, now=200.0)
     assert status is MarkerStatus.GENERATION_MISMATCH
+
+
+ARCHIVE = {'location': '/data/space.zip', 'signature': [4096, 1700000000.25]}
+
+
+def test_enlist_reads_ok_with_no_marker(registry: TierRegistry, tmp_path: Path) -> None:
+    """A tier with no marker reads OK on its first and later registrations, records its identity, and writes nothing."""
+    record, status = registry.enlist('archive', position=0, type='zip', role='source', scope='shared',
+                                     meta=ARCHIVE)
+    assert status is MarkerStatus.OK
+    assert (record.name, record.type, record.meta) == ('archive', 'zip', ARCHIVE)
+    record, status = registry.enlist('archive', position=0, type='zip', role='source', scope='shared',
+                                     meta=dict(ARCHIVE))
+    assert status is MarkerStatus.OK
+    assert registry.get('archive').meta == ARCHIVE
+    assert registry.usage('archive') == TierUsage(bytes=0, files=0)
+    assert all(path.name.startswith('state.db') for path in tmp_path.iterdir())    # no marker written anywhere
+    with raises(SpecDrift):
+        registry.enlist('archive', position=0, type='tar', role='source', scope='shared', meta=ARCHIVE)
+
+
+def test_enlist_refuses_changed_meta(registry: TierRegistry) -> None:
+    """A later registration whose recorded location or signature differs is refused, naming the tier and archive."""
+    registry.enlist('archive', position=0, type='zip', role='source', scope='shared', meta=ARCHIVE)
+    moved = {**ARCHIVE, 'location': '/data/elsewhere.zip'}
+    rewritten = {**ARCHIVE, 'signature': [4097, 1700000099.5]}
+    for changed in (moved, rewritten):
+        with raises(SpecDrift) as caught:
+            registry.enlist('archive', position=0, type='zip', role='source', scope='shared', meta=changed)
+        message = str(caught.value)
+        assert "'archive'" in message and changed['location'] in message
+        assert 'changed since this state directory recorded it' in message
+    assert registry.get('archive').meta == ARCHIVE                # the refusal recorded nothing

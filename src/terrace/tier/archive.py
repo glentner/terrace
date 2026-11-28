@@ -48,6 +48,8 @@ STAGED: Final[frozenset] = frozenset({'tar.gz'})   # compressed/remote: staged r
 TAR_MODES: Final[dict] = {'tar': 'r:', 'tar.gz': 'r:gz'}
 SYNTHETIC: Final[int] = -1                       # offset sentinel: a directory the archive never stored a header for
 ZIP_EPOCH: Final[int] = 315532800                # 1980-01-01 UTC — ZIP cannot represent timestamps before this
+DIR_MODE: Final[int] = 0o755                     # a directory the archive gives no mode for: searchable, so its
+                                                 # members can be promoted below it
 
 
 @runtime_checkable
@@ -176,7 +178,7 @@ class ArchiveMember:
     size: int
     mtime: float
     mode: Optional[int]
-    extra: dict = field(default_factory=dict)    # format-specific: {'name': <archive member name>, 'target': <symlink>}
+    extra: dict = field(default_factory=dict)    # {'name': <member name>, 'target': <symlink>, 'sparse': <TAR sparse>}
 
 
 @dataclass(frozen=True)
@@ -341,8 +343,11 @@ class ArchiveTier:
         return self._with_ancestors(raw)
 
     def _scan_zip(self, handle: BinaryIO) -> list[ArchiveMember]:
-        """Index a ZIP from its central directory (offset is each member's local-header offset)."""
-        members: list[ArchiveMember] = []
+        """
+        Index a ZIP from its central directory (offset is each member's local-header offset). A later member
+        of a name supersedes an earlier one, as `zipfile` reads it by name.
+        """
+        members: dict[str, ArchiveMember] = {}
         with zipfile.ZipFile(handle) as archive:
             for info in archive.infolist():
                 pure = self._member_path(info.filename)
@@ -358,32 +363,52 @@ class ArchiveTier:
                 else:
                     kind, size = 'file', info.file_size
                     mode = stat.S_IMODE(unix_mode) if unix_mode else None
-                members.append(ArchiveMember(member=str(pure), kind=kind, offset=info.header_offset,
-                                             size=size, mtime=_zip_mtime(info.date_time), mode=mode, extra=extra))
-        return members
+                members.pop(str(pure), None)
+                members[str(pure)] = ArchiveMember(member=str(pure), kind=kind, offset=info.header_offset, size=size,
+                                                   mtime=_zip_mtime(info.date_time), mode=mode, extra=extra)
+        return list(members.values())
 
     def _scan_tar(self, handle: BinaryIO) -> list[ArchiveMember]:
-        """Index a TAR by one sequential scan (offset is each member's data-block offset, for in-place reads)."""
-        members: list[ArchiveMember] = []
+        """
+        Index a TAR by one sequential scan (offset is each member's data-block offset, for in-place reads).
+
+        A later member of a name supersedes an earlier one, as extraction does. A hard link is a regular file
+        over its target's data: the latest member of the target's name indexed before it. A sparse member is
+        marked, because its stored data is not its bytes; it is read through `tarfile`.
+        """
+        members: dict[str, ArchiveMember] = {}
         with tarfile.open(fileobj=handle, mode=TAR_MODES[self._loc_fmt]) as archive:
             for info in archive.getmembers():
                 pure = self._member_path(info.name)
                 if pure is None:
                     continue
                 extra = {'name': info.name}
+                offset = info.offset_data
                 if info.isdir():
                     kind, size = 'dir', 0
                 elif info.issym():
                     kind, size = 'symlink', 0
                     extra['target'] = info.linkname
+                elif info.islnk():
+                    target = self._member_path(info.linkname)
+                    found = None if target is None else members.get(str(target))
+                    if found is None or found.kind != 'file':
+                        continue                 # a link to nothing this index serves
+                    kind, size, offset = 'file', found.size, found.offset
+                    if found.extra.get('sparse'):
+                        extra['sparse'] = True
+                elif info.issparse():
+                    kind, size = 'file', info.size
+                    extra['sparse'] = True
                 elif info.isreg():
                     kind, size = 'file', info.size
                 else:
-                    continue                     # devices, fifos, hard links: out of scope for v1
-                members.append(ArchiveMember(member=str(pure), kind=kind, offset=info.offset_data,
-                                             size=size, mtime=float(info.mtime), mode=stat.S_IMODE(info.mode),
-                                             extra=extra))
-        return members
+                    continue                     # devices, fifos: special files are out of scope for v1
+                members.pop(str(pure), None)
+                members[str(pure)] = ArchiveMember(member=str(pure), kind=kind, offset=offset, size=size,
+                                                   mtime=float(info.mtime), mode=stat.S_IMODE(info.mode),
+                                                   extra=extra)
+        return list(members.values())
 
     @staticmethod
     def _with_ancestors(members: list[ArchiveMember]) -> list[ArchiveMember]:
@@ -400,11 +425,21 @@ class ArchiveTier:
         return members + synthetic
 
     def _extract(self, member: ArchiveMember) -> bytes:
-        """Read a file member's whole content: seek to the data offset for TAR, by name for ZIP."""
+        """
+        Read a file member's whole content: seek to the data offset for TAR, by name for ZIP. A sparse TAR
+        member is found by its data offset and read through `tarfile`, which fills its holes.
+        """
         if self._loc_fmt == 'zip':
             with self._loc.open_read() as handle:
                 with zipfile.ZipFile(handle) as archive:
                     return archive.read(member.extra['name'])
+        if member.extra.get('sparse'):
+            with self._loc.open_read() as handle:
+                with tarfile.open(fileobj=handle, mode=TAR_MODES[self._loc_fmt]) as archive:
+                    for info in archive:
+                        if info.isreg() and info.offset_data == member.offset:
+                            return archive.extractfile(info).read()
+            raise FileNotFoundError(errno.ENOENT, 'No such file or directory', member.member)
         with self._loc.open_read() as handle:                # uncompressed TAR: in-place offset read
             handle.seek(member.offset)
             return handle.read(member.size)
@@ -453,9 +488,10 @@ class ArchiveTier:
     # -- read-only Tier contract ------------------------------------------------------------------------------------
 
     def _stat_of(self, member: ArchiveMember) -> TierStat:
-        """Map an indexed member onto a TierStat."""
+        """Map an indexed member onto a TierStat; a directory with no mode (synthesized, or a ZIP entry) is 0o755."""
+        mode = DIR_MODE if member.kind == 'dir' and member.mode is None else member.mode
         return TierStat(kind=member.kind, size=member.size, mtime=member.mtime,
-                        mode=member.mode, target=member.extra.get('target'))
+                        mode=mode, target=member.extra.get('target'))
 
     def stat(self, path: PurePosixPath) -> Optional[TierStat]:
         """Metadata for `path`, or None when missing; the root is always a directory."""

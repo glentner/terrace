@@ -12,6 +12,7 @@ import io
 import stat
 import tarfile
 import zipfile
+import warnings
 from dataclasses import replace
 from pathlib import Path, PurePosixPath as P
 
@@ -542,3 +543,103 @@ def test_inner_location_factory_selects_backing(s3_spec: S3Spec, tmp_path: Path)
         out.write(b'hello from the factory')
     with cloud.open_read() as handle:
         assert handle.read() == b'hello from the factory'
+
+
+# -- member edge cases the engine serves: mode-less directories, duplicates, hard links, sparse members -----------
+
+@mark.parametrize('fmt', ['zip', 'tar'])
+def test_directory_without_mode_is_searchable(db: Database, tmp_path: Path, fmt: str) -> None:
+    """A directory the archive gives no mode (synthesized, or a ZIP entry without unix bits) reads 0o755."""
+    path = tmp_path / f'a.{fmt}'
+    if fmt == 'zip':
+        write_zip(path, [('headed/a.txt', b'alpha', 0o644), ('bare/deep/b.txt', b'beta', 0o644)])
+        with zipfile.ZipFile(path, mode='a') as archive:
+            info = zipfile.ZipInfo('headed/', date_time=ZIP_DATE)
+            info.external_attr = 0x10                                     # the MS-DOS directory bit, no unix mode
+            archive.writestr(info, b'')
+        with zipfile.ZipFile(path) as archive:
+            assert archive.getinfo('headed/').external_attr >> 16 == 0
+        modeless = ['/headed', '/bare', '/bare/deep']
+    else:
+        write_tar(path, [('file', 'bare/deep/b.txt', b'beta', 0o644)])
+        modeless = ['/bare', '/bare/deep']
+    arc = tier(db, path, fmt)
+    for directory in modeless:
+        found = arc.stat(P(directory))
+        assert (found.kind, found.mode) == ('dir', 0o755)
+    assert {entry.name: entry.stat.mode for entry in arc.list(P('/')) if entry.kind == 'dir'} \
+        == {P(directory).name: 0o755 for directory in modeless if P(directory).parent == P('/')}
+    assert arc.stat(P('/bare/deep/b.txt')).mode == 0o644              # a file keeps its own mode
+
+
+@mark.parametrize('fmt', ['zip', 'tar'])
+def test_duplicate_member_last_wins(db: Database, tmp_path: Path, fmt: str) -> None:
+    """A name stored twice indexes once, as its later member, which is what the stdlib reads by that name."""
+    path = tmp_path / f'a.{fmt}'
+    if fmt == 'zip':
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')                               # zipfile warns on a duplicate name
+            write_zip(path, [('dup.txt', b'first', 0o644), ('other', b'x', 0o644),
+                             ('dup.txt', b'second, longer', 0o600)])
+        with zipfile.ZipFile(path) as archive:
+            expected = archive.read('dup.txt')
+    else:
+        write_tar(path, [('file', 'dup.txt', b'first', 0o644), ('file', 'other', b'x', 0o644),
+                         ('file', 'dup.txt', b'second, longer', 0o600)])
+        with tarfile.open(path, mode='r:') as archive:
+            expected = archive.extractfile('dup.txt').read()
+    assert expected == b'second, longer'
+    arc = tier(db, path, fmt)
+    assert [entry.name for entry in arc.list(P('/'))] == ['dup.txt', 'other']
+    found = arc.stat(P('/dup.txt'))
+    assert (found.size, found.mode) == (len(expected), 0o600)
+    assert arc.read(P('/dup.txt')) == expected
+    assert [row['member'] for row in db.execute(t'SELECT member FROM archive_index WHERE tier = {"arc"}')] \
+        == ['/dup.txt', '/other']
+
+
+def test_hard_link_reads_its_target(db: Database, tmp_path: Path) -> None:
+    """A TAR hard link is a regular file carrying its target's bytes."""
+    path = tmp_path / 'a.tar'
+    with tarfile.open(path, mode='w') as archive:
+        info = tarfile.TarInfo('data/a.txt')
+        info.size, info.mode, info.mtime = 11, 0o640, 111.0
+        archive.addfile(info, io.BytesIO(b'alpha-bytes'))
+        link = tarfile.TarInfo('link.txt')
+        link.type, link.linkname, link.mode, link.mtime = tarfile.LNKTYPE, 'data/a.txt', 0o640, 111.0
+        archive.addfile(link)
+    with tarfile.open(path, mode='r:') as archive:
+        assert archive.getmember('link.txt').islnk()
+        expected = archive.extractfile('link.txt').read()
+    arc = tier(db, path, 'tar')
+    assert [(entry.name, entry.kind) for entry in arc.list(P('/'))] == [('data', 'dir'), ('link.txt', 'file')]
+    found = arc.stat(P('/link.txt'))
+    assert (found.kind, found.size, found.mode) == ('file', 11, 0o640)
+    assert arc.read(P('/link.txt')) == expected == b'alpha-bytes'
+    assert arc.read(P('/data/a.txt')) == b'alpha-bytes'
+    assert arc.usage() == TierUsage(bytes=22, files=2)
+
+
+def test_sparse_member_reads_its_bytes(db: Database, tmp_path: Path) -> None:
+    """A sparse TAR member reads as its whole content, holes filled, not as its stored data blocks."""
+    path = tmp_path / 'a.tar'
+    stored = b'hello' + b'world'
+    with tarfile.open(path, mode='w', format=tarfile.PAX_FORMAT) as archive:
+        info = tarfile.TarInfo('holes.bin')                               # GNU sparse 0.1, carried in PAX headers
+        info.size, info.mode, info.mtime = len(stored), 0o644, 111.0
+        info.pax_headers = {'GNU.sparse.map': '0,5,8192,5', 'GNU.sparse.size': '8197'}
+        archive.addfile(info, io.BytesIO(stored))
+        after = tarfile.TarInfo('after.txt')
+        after.size, after.mode, after.mtime = 3, 0o644, 111.0
+        archive.addfile(after, io.BytesIO(b'end'))
+    expected = b'hello' + bytes(8192 - 5) + b'world'
+    with tarfile.open(path, mode='r:') as archive:
+        assert archive.getmember('holes.bin').issparse()
+        assert archive.extractfile('holes.bin').read() == expected
+    arc = tier(db, path, 'tar')
+    found = arc.stat(P('/holes.bin'))
+    assert (found.kind, found.size) == ('file', len(expected))
+    assert arc.read(P('/holes.bin')) == expected
+    assert arc.read(P('/holes.bin'), offset=8190, size=4) == b'\x00\x00wo'
+    assert arc.read(P('/after.txt')) == b'end'
+    assert tier(db, path, 'tar', name='arc').read(P('/holes.bin')) == expected     # from the cached index too

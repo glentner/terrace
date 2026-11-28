@@ -6,12 +6,12 @@ appetite: big
 status: in_progress
 branch: feature/archive-spec-plumbing
 base: main
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-28'
 phases:
 - id: P1
   name: The engine serves a direct-update archive source, registered with no marker
-  status: pending
+  status: done
   satisfies:
   - R6
   - R8
@@ -181,30 +181,32 @@ accepted. D3, D4, D5, D6 and D7 are recorded as GOAL Clarifications. No deferral
 an `ArchiveTier` over the inner location. It registers the tier with no marker (status `OK`), restarts
 cleanly, and lists and reads every member through the engine API. Nothing parses such a spec yet.
 
-- [ ] `tier/spec.py`: add `ARCHIVE_TYPES`, and `TierSpec.location: Optional[LocationSpec] = None` and
+- [x] `tier/spec.py`: add `ARCHIVE_TYPES`, and `TierSpec.location: Optional[LocationSpec] = None` and
   `TierSpec.max_frequency: Optional[Rate] = None`. Fields only; the parser is unchanged in this phase.
-- [ ] `state/registry.py`: add `TierRegistry.enlist(name, *, position, type, role, scope, meta) ->
+- [x] `state/registry.py`: add `TierRegistry.enlist(name, *, position, type, role, scope, meta) ->
   (TierRecord, MarkerStatus)` beside `_attach`, with `_attach`, `attach` and `attach_tier` untouched.
   - It calls `register`. On a first registration it stores `meta` as JSON in `tier.meta`; on a later one
     it compares and raises `SpecDrift`. The message names the tier and the archive, and says the
     archive changed since this state directory recorded it.
   - It returns `MarkerStatus.OK` and does no marker I/O.
   - `meta = {'location': inner.identity, 'signature': list(inner.signature())}`.
-- [ ] `engine/overlay.py` `start`: add an archive branch ahead of the POSIX `else` (PLAN § 2.2).
+- [x] `engine/overlay.py` `start`: add an archive branch ahead of the POSIX `else` (PLAN § 2.2).
   - Function-local imports.
   - A missing archive raises `EngineError('Source archive does not exist: <identity>')`.
   - Build `ArchiveTier(name, inner, db, type, bundle=None, max_frequency=…)` and `enlist` it before
     any index.
+    *Amendment (build, 2026-11-28):* the keyword `bundle` exists only once P2 renames `staging`, so P1
+    passes no keyword, which is the same `None`.
   - A tar.gz source still needs P2's bundle; in this phase the adapter's own constructor refusal
     stands.
-- [ ] `tier/archive.py` (none of these are on the high-blast-radius list):
+- [x] `tier/archive.py` (none of these are on the high-blast-radius list):
   - `_stat_of` and synthesized ancestors report `0o755` for a directory whose mode is `None`.
   - `_scan_zip`/`_scan_tar` keep the last member of a duplicated name.
   - A tar hard link (`islnk()`) is indexed as a regular file with its target's data offset and size.
   - A sparse member (`issparse()`) is marked in `extra` and read through `tarfile`'s extraction in
     `_extract`, not by offset.
   - Device, FIFO and character members stay skipped (PLAN D4).
-- [ ] New module `tests/engine/test_archive_source.py` (`pytestmark = mark.unit`).
+- [x] New module `tests/engine/test_archive_source.py` (`pytestmark = mark.unit`).
   - The fixture archive holds: a top-level file, an empty file, depth-2 and depth-3 files, a member of
     at least 1 MiB, a directory with a header and one without, and a tar symlink. The ZIP has no
     directory entries and no unix mode on one directory.
@@ -222,9 +224,9 @@ cleanly, and lists and reads every member through the engine API. Nothing parses
   - `test_moved_location_is_refused_at_restart`
   - `test_rewritten_archive_is_refused_at_restart`: it also asserts that the message names the tier
     and the archive, and says the archive changed since this state directory recorded it.
-- [ ] `tests/state/test_registry.py`: `test_enlist_reads_ok_with_no_marker` and
+- [x] `tests/state/test_registry.py`: `test_enlist_reads_ok_with_no_marker` and
   `test_enlist_refuses_changed_meta`.
-- [ ] `tests/tier/test_archive.py`: `test_directory_without_mode_is_searchable[zip|tar]`,
+- [x] `tests/tier/test_archive.py`: `test_directory_without_mode_is_searchable[zip|tar]`,
   `test_duplicate_member_last_wins[zip|tar]`, `test_hard_link_reads_its_target` and
   `test_sparse_member_reads_its_bytes`.
 - **Verify:** `tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p1`.

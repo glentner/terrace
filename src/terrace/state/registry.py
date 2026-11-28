@@ -59,7 +59,8 @@ class TierRegistry:
 
     `register` records a tier on first attach and detects spec drift on every
     later one; `attach` composes registration with managed-location marker
-    initialization/verification (PLAN.md -> State store). Counter updates are
+    initialization/verification (PLAN.md -> State store), and `enlist` registers
+    a tier with no marker by its recorded identity instead. Counter updates are
     single UPDATE statements, so concurrent writers serialize in SQLite and no
     increment is ever lost. Counters are wired to put/delete by the engine:
     every acknowledged put or delete adjusts them in the same transaction as
@@ -137,6 +138,27 @@ class TierRegistry:
             write(Marker(uuid=uuid, tier=name, generation=record.generation, written=now))
             return record, MarkerStatus.OK
         return record, marker.status(uuid=uuid, tier=name, generation=record.generation)
+
+    def enlist(self, name: str, *, position: int, type: str, role: str, scope: str,
+               meta: dict) -> Tuple[TierRecord, MarkerStatus]:
+        """
+        Register a tier that carries no marker (an archive source) and read it OK by type.
+
+        No marker I/O happens. `meta` records the archive's identity in `tier.meta` on the first
+        registration; every later one compares it with the stored record and refuses a change, the
+        archive's stand-in for a marker's swap detection.
+        """
+        given = json.loads(json.dumps(meta))
+        with self._atomic():
+            record, new = self.register(name, position=position, type=type, role=role, scope=scope)
+            if new:
+                row = self.db.execute(
+                    t'UPDATE tier SET meta = {json.dumps(given)} WHERE name = {name} RETURNING *').fetchone()
+                return TierRecord.from_row(row), MarkerStatus.OK
+        if record.meta != given:
+            raise SpecDrift(f'Tier {name!r}: the archive {given.get("location")} changed since this state '
+                            f'directory recorded it (recorded {record.meta}, found {given})')
+        return record, MarkerStatus.OK
 
     def get(self, name: str) -> Optional[TierRecord]:
         """The registered tier, or None."""

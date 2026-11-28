@@ -15,14 +15,15 @@ from dataclasses import dataclass, field
 
 # Internal libs
 from terrace.core.exceptions import TerraceError
-from terrace.core.units import parse_bytes, parse_duration
+from terrace.core.units import Rate, parse_bytes, parse_duration
 
 # Public interface
 __all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'S3Spec', 'LocationSpec', 'SpecError',
-           'TIER_TYPES', 'SUPPORTED_TYPES']
+           'TIER_TYPES', 'SUPPORTED_TYPES', 'ARCHIVE_TYPES']
 
 TIER_TYPES: Final[frozenset] = frozenset({'posix', 's3', 'zip', 'tar', 'tar.gz'})
 SUPPORTED_TYPES: Final[frozenset] = frozenset({'posix', 's3'})
+ARCHIVE_TYPES: Final[frozenset] = frozenset({'zip', 'tar', 'tar.gz'})
 
 OVERLAY_KEYS: Final[frozenset] = frozenset({'name', 'state', 'drain_timeout', 'checksum', 'fsync_policy'})
 TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'url', 's3', 'role', 'scope', 'quota', 'writeback'})
@@ -186,13 +187,15 @@ class TierSpec:
 
     name: str
     type: str
-    path: str                                    # POSIX root, or the url string for an S3 tier (identity/overlap key)
+    path: str                                    # POSIX root, S3 url, or an archive's inner path/url (overlap key)
     url: Optional[str] = None                    # set for s3 tiers
     s3: Optional[S3Spec] = None                  # parsed connection settings for s3 tiers
     role: str = 'stage'
     scope: str = 'shared'
     quota: QuotaSpec = field(default_factory=QuotaSpec)
     writeback: Optional[WritebackSpec] = None    # None for the source (no upstream boundary)
+    location: Optional[LocationSpec] = None      # the inner location of an archive tier
+    max_frequency: Optional[Rate] = None         # the re-sync rate limit of a staged archive tier
 
     @classmethod
     def from_data(cls, data: dict) -> TierSpec:
