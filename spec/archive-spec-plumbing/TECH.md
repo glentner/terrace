@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/archive-spec-plumbing
 base: main
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-28'
 phases:
 - id: P1
@@ -35,7 +35,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p2
 - id: P3
   name: Every mutating engine call over an archive source fails EROFS
-  status: pending
+  status: done
   satisfies:
   - R9
   - R6
@@ -312,14 +312,14 @@ members read at their offsets.
 `EROFS`. A drain, a flush, the scheduler, a stop and a restart leave the archive's bytes, inode and
 siblings unchanged.
 
-- [ ] `engine/overlay.py`:
+- [x] `engine/overlay.py`:
   - `self.read_only = spec.source.type in ARCHIVE_TYPES`, set in `__init__`.
   - `_refuse(path)` raises `OSError(errno.EROFS, os.strerror(errno.EROFS), path)`.
   - Add `if self.read_only: self._refuse(path)` as the first statement of `mkdir`, `create`, `unlink`,
     `rmdir`, `rename` (before `getattr(old)`), `write`, `truncate` and `_set_meta`. For `write`, which
     takes a handle, use the handle's path. No existing statement moves (PLAN D1).
   - `open` refuses `flags & os.O_ACCMODE != os.O_RDONLY` or `flags & os.O_TRUNC` before `_ensure`.
-- [ ] New module `tests/engine/test_archive_readonly.py` (`unit`):
+- [x] New module `tests/engine/test_archive_readonly.py` (`unit`):
   - **`test_mutating_call_fails_erofs[{fmt}-{call}]`**, with ids exactly `fmt` in `zip`, `tar`, `tar.gz`
     and `call` in `mkdir`, `create`, `unlink`, `rmdir`, `rename`, `rename-over`, `chmod`, `chown`,
     `utimens`, `truncate`, `open-wronly`, `open-rdwr`, `open-rdonly-trunc`, `open-wronly-append`,

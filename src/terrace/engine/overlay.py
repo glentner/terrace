@@ -5,7 +5,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 # Standard libs
 import io
@@ -95,6 +95,10 @@ class OverlayEngine:
         self.locks = LockRegistry()
         self.tiers: Dict[str, Tier] = {}
         self.started = False
+        # An archive source is served read-only: every call that would change an entry's name, bytes or metadata
+        # raises EROFS before it takes a lock or admits anything, so nothing is queued or marked dirty and no replay
+        # ever re-packs the archive. Set once here and never changed.
+        self.read_only = spec.source.type in ARCHIVE_TYPES
         # `_handles_mutex` guards the open-handle table, each handle's `marked_dirty` and `changing`, and the hop
         # records in `_hops`. A hop has a record from the moment its copy first looks at the holder until the hop
         # decides, keyed by (entry id, holder tier); its value says a change to the holder's bytes met the hop.
@@ -245,6 +249,16 @@ class OverlayEngine:
         names = [tier.name for tier in self.spec.tiers]
         position = names.index(name)
         return None if position == 0 else self.tiers[names[position - 1]]
+
+    @staticmethod
+    def _refuse(path: Optional[str]) -> NoReturn:
+        """Refuse a change over a read-only source with EROFS, naming `path`."""
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS), path)
+
+    def _handle_path(self, handle: Handle) -> Optional[str]:
+        """The path of the entry `handle` serves, or None once its row is gone."""
+        entry = self.catalog.by_id(handle.entry_id)
+        return None if entry is None else entry.path
 
     @staticmethod
     def _passthrough(tier: Tier) -> bool:
@@ -417,6 +431,8 @@ class OverlayEngine:
 
     def mkdir(self, path: str, mode: int = 0o755, *, uid: Optional[int] = None, gid: Optional[int] = None) -> Entry:
         """Create a directory: durable in the catalog now, on the source via the queue."""
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path):
             parent = self._require_parent(path)
@@ -440,6 +456,8 @@ class OverlayEngine:
         Create an empty file on the fastest eligible tier, dirty against its
         upstream boundary (metadata commits before this returns).
         """
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path):
             parent = self._require_parent(path)
@@ -479,6 +497,8 @@ class OverlayEngine:
 
     def unlink(self, path: str) -> None:
         """Remove a file or symlink: staging copies drop now, the source copy by tombstone + queue."""
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path):
             entry = self._ensure(path)
@@ -491,6 +511,8 @@ class OverlayEngine:
 
     def rmdir(self, path: str) -> None:
         """Remove an empty directory (empty means: catalog and source agree it is)."""
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path):
             entry = self._ensure(path)
@@ -516,6 +538,8 @@ class OverlayEngine:
         lookup under that lock and its recording, for a file below `old`; the
         staging copies move after the lock is released.
         """
+        if self.read_only:
+            self._refuse(old)
         old, new = normalize(old), normalize(new)
         if old == '/' or new == '/':
             raise OSError(errno.EBUSY, 'Cannot rename the overlay root')
@@ -705,6 +729,8 @@ class OverlayEngine:
         the fastest resident copy so a later content commit carries it. A `meta` op
         changes no bytes, so it never touches the residency dirty state.
         """
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path):
             entry = self._ensure(path)
@@ -753,7 +779,12 @@ class OverlayEngine:
         serves can raise `EngineError` (no resident copy), and an ancestor's round trip can hand back another entry's
         stage bytes. Nothing holds those off: the path lock covers `path` alone, not an ancestor, and the source lock is
         taken only for the lookup under it.
+
+        Over a read-only source, a write access mode or O_TRUNC is refused with EROFS before the lookup, so a write open
+        promotes nothing and leaves no handle; a read-only open is served as above.
         """
+        if self.read_only and ((flags & os.O_ACCMODE) != os.O_RDONLY or flags & os.O_TRUNC):
+            self._refuse(path)
         path = normalize(path)
         with self.locks.hold(path), self._watch() as watch:
             entry = self._ensure(path)
@@ -869,6 +900,8 @@ class OverlayEngine:
         clean without it. Writes served directly by the source are write-through
         — nothing upstream to owe.
         """
+        if self.read_only:
+            self._refuse(self._handle_path(handle))
         with self._change(handle):
             count = os.pwrite(handle.fd, data, offset)
         handle.written = True
@@ -954,6 +987,8 @@ class OverlayEngine:
         stage copy the rename has already moved, goes on and records its cut. Neither lock holds that gap off: the
         path lock does not cover an ancestor, and the rename moves its stage copies without the source lock.
         """
+        if self.read_only:
+            self._refuse(path)
         path = normalize(path)
         if handle is not None:
             with self._change(handle):
