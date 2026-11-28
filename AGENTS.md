@@ -77,7 +77,9 @@ uv run terrace mount spec.toml /mnt/space -f     # foreground mount (debug: -d)
 **The bundle loop helper**, `uv run python tools/bundle_loop.py [options] [-- COMMAND ...]`, starts a
 moto store, fills a bucket with generated `tar.gz` bundles, writes an archive-tier spec over it with
 POSIX stage tiers in one temporary directory, and prints the spec's path as the first line of
-standard output. `-n N`/`--bundles N` sets the bundle count (one gives the single-archive form, more
+standard output. The spec names no path for the staged bundle: it has no `staging` key, and the
+engine pulls the bundle into `.terrace/bundles/` under the root of `scratch`, the shared stage tier
+below the source. `-n N`/`--bundles N` sets the bundle count (one gives the single-archive form, more
 the sharded form); `--fastest-size BYTES` sets the fastest tier's size limit; `--endpoint URL` uses
 that S3 endpoint instead of starting a store, with `--access-key`, `--secret-key` and `--region`
 (defaults `test`, `test`, `us-east-1`). Without a command it waits for SIGINT, SIGTERM or SIGHUP and
@@ -118,7 +120,7 @@ that way proves nothing; assert a pass count.
 | `src/terrace/tier/` | `protocol.py` (the `Tier` contract), `posix.py`, `s3.py` (obstore), `archive.py` (zipfile/tarfile over an inner location), `spec.py` (overlay-spec parsing and stack validation). |
 | `src/terrace/engine/` | `overlay.py` (the VFS-ops API — the product), `writeback.py`, `evict.py`, `drain.py`, `rescue.py`, `transfer.py`, `locks.py`. Mount-free. |
 | `src/terrace/fuse/` | `adapter.py` (mfusepy `Operations`), `mount.py` (lock, pidfile, pumps, daemonization, signal lifecycle). Thin. |
-| `tests/` | 54 files, 870 tests (851 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the one step a stage may stop at (`blocked`, `REFUSAL`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
+| `tests/` | 54 files, 870 tests (851 `unit`, 19 `integration`). `tests/` is a package; `tests/core`, `tests/state`, `tests/tier` are not. `tests/loop/` is the bundle loop: `stages.py` holds its nine ordered stages, each driving the engine over the spec `tools/bundle_loop.py` writes, with the seed that owns each (`STAGES`, `owned`) and the steps a stage may stop at, each pinned with its exact refusal (`blocked`; `SHARDED`, `READ_ONLY`, `PUSHED`): the loop's progress record (§ *Verification*); `test_scenario.py` only collects them under the `unit` marker, over the helper's own store, and `test_scenario_minio.py` collects the same nine under the `integration` marker against the endpoint the `TERRACE_TEST_MINIO_*` variables name, and has not run against MinIO on any machine; `conftest.py` builds each stage's scene and records what stopped it; `oracle.py` says what each bundle should hold with a directory tree and `tarfile` alone; `tap.py` counts the requests the source receives; `test_helper.py` tests the helper, `test_support.py` the oracle, the tap, `blocked` and the markers; `__init__.py` loads the helper by path. |
 | `tools/` | `lint.sh` (the static gate), `temp_site.sh` (the throwaway environment, § *Factory*) and `bundle_loop.py` (the bundle loop on one machine: a moto store with no container, a bucket of generated `tar.gz` bundles, an archive-tier spec over it and POSIX stage tiers in one temporary directory, all removed on every exit path; `-n N` for N bundles, and a trailing command runs with `BUNDLE_LOOP_SPEC` set; every option and variable under § *Commands*). It imports nothing of the package. |
 | `spec/{slug}/` | Committed, dated per-cycle design records. Retained on merge. |
 | `issues/{slug}.md`, `ROADMAP.md` | Deferred code work and its ordered index. |
@@ -882,11 +884,14 @@ name the post-condition it asserts:
 **The bundle loop is a progress record.** `tests/loop/stages.py` drives the loop end to end as nine
 stages: reach, read, pressure, change, re-aggregate, read back, release, offline commit and several
 bundles. `tests/loop/test_scenario.py` collects them in the unit lane and
-`tests/loop/test_scenario_minio.py` in the integration lane. Today they are 9 expected failures,
-each a strict `xfail` whose reason names the seed that owns the stage, and each stopped at the same
-step: the spec parser's refusal of the archive tier (`issues/archive-spec-plumbing.md`). The marker
-accepts one exception, `Blocked`, raised only by `blocked(...)` in `stages.py` around the one step
-the tree is known to stop at, with the exact error and text; a stage that fails anywhere else fails
+`tests/loop/test_scenario_minio.py` in the integration lane. Today stages 1 and 2 pass, and the
+other 7 are expected failures, each a strict `xfail` whose reason names the seed that owns the
+stage. Stage 3 stops at its check that the evictor pushed a copy out of the fastest tier
+(`issues/eviction-one-hop.md`); stages 4 to 8 stop at the first write of their change, which fails
+`EROFS` over an archive source (`issues/archive-journaling-and-locking.md`); stage 9 stops at the
+spec parser's refusal of a sharded source (`issues/sharded-archive-sources.md`). The marker
+accepts one exception, `Blocked`, raised only by `blocked(...)` in `stages.py` around a step the
+tree is known to stop at, with the exact error and text; a stage that fails anywhere else fails
 the run, and so does a stage that starts to pass. A cycle that moves the block runs every stage
 behind it to its next stop and must, in the same change, remove the marker of each stage that now
 passes and pin the new stop of each that does not with `blocked(...)`. `tests/loop/conftest.py`

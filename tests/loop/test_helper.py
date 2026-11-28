@@ -73,7 +73,7 @@ def test_single_bundle_spec_and_layout(store: str, tmp_path: Path) -> None:
         assert source['location']['url'] == f's3://{loop.bucket}/bundles/bundle-000.tar.gz'
         assert source['location']['s3']['endpoint'] == store
         assert source['sync'] == {'max_frequency': '24/day'} and loop.resync_interval == 3600
-        assert 'sharded' not in source and Path(source['staging']) == loop.staging
+        assert 'sharded' not in source and 'staging' not in source and not hasattr(loop, 'staging')
         assert [(tier['name'], tier['scope']) for tier in stages] == [('scratch', 'shared'), ('tmp', 'node'),
                                                                       ('shm', 'node')]
         for tier in stages:
@@ -83,19 +83,17 @@ def test_single_bundle_spec_and_layout(store: str, tmp_path: Path) -> None:
         assert roots == [loop.tiers[name] for name in ('scratch', 'tmp', 'shm')]
         state = Path(data['overlay']['state'])
         assert state == loop.state
-        for root in roots + [state, loop.staging]:
+        for root in roots + [state]:
             assert root.is_relative_to(loop.root)
         for i, root in enumerate(roots):
             assert not state.is_relative_to(root) and not root.is_relative_to(state)
             for other in roots[i + 1:]:
                 assert not root.is_relative_to(other) and not other.is_relative_to(root)
-        assert not any(loop.staging.is_relative_to(root) for root in roots)
-        assert not loop.staging.is_relative_to(state)
 
 
 def test_several_bundles_use_the_sharded_form(store: str, tmp_path: Path) -> None:
     with bundle_loop.Loop(store, bundles=3, parent=tmp_path) as loop:
-        assert loop.form == 'sharded' and loop.staging is None
+        assert loop.form == 'sharded' and not hasattr(loop, 'staging')
         source = tomllib.loads(loop.spec.read_text())['tier'][0]
         assert source['sharded'] is True and 'staging' not in source
         assert source['location']['url'] == f's3://{loop.bucket}/bundles/*.tar.gz'

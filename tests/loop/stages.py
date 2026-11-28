@@ -37,6 +37,7 @@ from pytest import mark
 # Internal libs
 from terrace.core.exceptions import TerraceError
 from terrace.tier.spec import OverlaySpec, SpecError
+from terrace.tier.archive import bundle_path
 from terrace.engine.overlay import OverlayEngine
 from terrace.engine.evict import EvictionManager
 from terrace.engine.rescue import rescue
@@ -46,7 +47,8 @@ from tests.loop import oracle
 from tests.loop.tap import Tap
 
 # Public interface
-__all__ = ['Blocked', 'blocked', 'Scene', 'STAGES', 'PARSER', 'REFUSAL',
+__all__ = ['Blocked', 'blocked', 'Scene', 'STAGES', 'SHARDED', 'SHARDED_REFUSAL', 'READ_ONLY', 'PUSHED',
+           'PUSHED_FAILURE',
            'test_stage_1_reach', 'test_stage_2_read', 'test_stage_3_pressure', 'test_stage_4_change',
            'test_stage_5_reaggregate', 'test_stage_6_read_back', 'test_stage_7_release',
            'test_stage_8_offline_commit', 'test_stage_9_several_bundles']
@@ -77,15 +79,22 @@ def blocked(seed: str, error: type, message: str) -> Iterator[None]:
         raise
 
 
-# Where this tree stops: the spec parser refuses the archive tier's keys before it reads the type.
-PARSER = 'issues/archive-spec-plumbing.md'
-REFUSAL = {'single': "Unknown key(s) in tier 'bundles': location, staging, sync",
-           'sharded': "Unknown key(s) in tier 'bundles': location, sharded, sync"}
+# Where this tree stops, each step with the seed whose work moves it and the exact refusal it gets there.
+# The spec parser refuses a source of several bundles as a known key whose feature does not exist yet.
+SHARDED = 'issues/sharded-archive-sources.md'
+SHARDED_REFUSAL = ("Sharded archive sources are not yet supported (tier 'bundles'); "
+                   'see issues/sharded-archive-sources.md')
+# Every write over an archive source fails EROFS until the adapter's re-pack is journaled and locked.
+READ_ONLY = 'issues/archive-journaling-and-locking.md'
+# The fastest tier fills below its high watermark, so the evictor pushes nothing out of it.
+PUSHED = 'issues/eviction-one-hop.md'
+PUSHED_FAILURE = 'nothing was pushed out of the fastest tier\nassert []'
 
-# Stage name -> the seed that owns it. The marker audit in the support tests reads this table.
+# Stage name -> the seed that owns it. The marker audit in the support tests reads this table. A stage that
+# passes names the record of the cycle that made it pass, which outlives that cycle's seed.
 STAGES: Dict[str, str] = {
-    'test_stage_1_reach': 'issues/archive-spec-plumbing.md',
-    'test_stage_2_read': 'issues/archive-spec-plumbing.md',
+    'test_stage_1_reach': 'spec/archive-spec-plumbing/GOAL.md',
+    'test_stage_2_read': 'spec/archive-spec-plumbing/GOAL.md',
     'test_stage_3_pressure': 'issues/eviction-one-hop.md',
     'test_stage_4_change': 'issues/namespace-sync-redesign.md',
     'test_stage_5_reaggregate': 'issues/archive-finalization-integration.md',
@@ -129,9 +138,11 @@ class Scene:
 # -- the steps stages share ------------------------------------------------------------------------------------------
 
 def reach(scene: Scene, clock: Clock, spec: Optional[Path] = None) -> OverlayEngine:
-    """Load the spec the helper wrote and start an engine over it."""
-    with blocked(PARSER, SpecError, REFUSAL[scene.loop.form]):
-        loaded = OverlaySpec.load(spec or scene.loop.spec)
+    """Load the spec the helper wrote and start an engine over it; the sharded form is refused at load."""
+    if scene.loop.form == 'sharded':
+        with blocked(SHARDED, SpecError, SHARDED_REFUSAL):
+            OverlaySpec.load(spec or scene.loop.spec)
+    loaded = OverlaySpec.load(spec or scene.loop.spec)
     engine = OverlayEngine(loaded, clock=clock)
     engine.start()
     return engine
@@ -172,7 +183,8 @@ def change(engine: OverlayEngine, scene: Scene, stem: str) -> None:
     def name(path: Path) -> str:
         return '/' + path.relative_to(scene.loop.content).as_posix()
 
-    handle = engine.open(name(modified), os.O_RDWR)
+    with blocked(READ_ONLY, OSError, f'[Errno 30] Read-only file system: {name(modified)!r}'):
+        handle = engine.open(name(modified), os.O_RDWR)
     try:
         engine.write(handle, b'modified in place\n', 0)
     finally:
@@ -274,7 +286,6 @@ def offline_commit(scene: Scene, site: Path) -> None:
 
 # -- the stages ------------------------------------------------------------------------------------------------------
 
-@owned('test_stage_1_reach', 'the spec loads and an engine starts over it')
 def test_stage_1_reach(scene: Callable[..., Scene], clock: Clock) -> None:
     """The spec loads through the spec parser and an engine starts over it."""
     stage = scene(bundles=1)
@@ -286,7 +297,6 @@ def test_stage_1_reach(scene: Callable[..., Scene], clock: Clock) -> None:
         engine.stop()
 
 
-@owned('test_stage_2_read', 'members list and read through the overlay')
 def test_stage_2_read(scene: Callable[..., Scene], clock: Clock) -> None:
     """A listing gives the oracle's names, and every member read matches the oracle's bytes."""
     stage = scene(bundles=1)
@@ -304,17 +314,21 @@ def test_stage_3_pressure(scene: Callable[..., Scene], clock: Clock) -> None:
     files = {name: data for name, data in stage.expected().items() if data is not None}
     assert max(map(len, files.values())) <= 2048 < sum(map(len, files.values()))
     engine = reach(stage, clock)
-    with stage.tap.window() as seen:
-        landed = []                                  # files a read left on the fastest tier
-        for name, data in files.items():
-            assert read(engine, name, len(data)) == data
-            if 'shm' in holders(engine, name):
-                landed.append(name)
-        EvictionManager(engine).poll()
-        pushed = [name for name in landed if 'shm' not in holders(engine, name)]
-        assert pushed, 'nothing was pushed out of the fastest tier'
-        assert [name for name in pushed if 'tmp' not in holders(engine, name)] == []
-        assert_tree(engine, stage)
+    try:
+        with stage.tap.window() as seen:
+            landed = []                                  # files a read left on the fastest tier
+            for name, data in files.items():
+                assert read(engine, name, len(data)) == data
+                if 'shm' in holders(engine, name):
+                    landed.append(name)
+            EvictionManager(engine).poll()
+            pushed = [name for name in landed if 'shm' not in holders(engine, name)]
+            with blocked(PUSHED, AssertionError, PUSHED_FAILURE):
+                assert pushed, 'nothing was pushed out of the fastest tier'
+            assert [name for name in pushed if 'tmp' not in holders(engine, name)] == []
+            assert_tree(engine, stage)
+            engine.stop()
+    finally:
         engine.stop()
     assert seen.of('write') == []
 
@@ -376,9 +390,12 @@ def test_stage_7_release(scene: Callable[..., Scene], clock: Clock) -> None:
     """After a detach every change is on the durable tier, no copy is recorded on a node-scope tier."""
     stage = scene(bundles=1)
     engine = reach(stage, clock)
-    with stage.tap.window() as seen:
-        change(engine, stage, 'bundle-000')
-        detach(engine)
+    try:
+        with stage.tap.window() as seen:
+            change(engine, stage, 'bundle-000')
+            detach(engine)
+    finally:
+        engine.stop()
     assert seen.of('write') == []
     release_node(stage)
     after = reach(stage, Clock())
@@ -394,12 +411,15 @@ def test_stage_8_offline_commit(scene: Callable[..., Scene], clock: Clock, temp_
     """A second process runs the full commit; the object matches the oracle and the staged bundle stays."""
     stage = scene(bundles=1)
     engine = reach(stage, clock)
-    change(engine, stage, 'bundle-000')
-    detach(engine)
+    try:
+        change(engine, stage, 'bundle-000')
+        detach(engine)
+    finally:
+        engine.stop()
     release_node(stage)
     offline_commit(stage, temp_site)
     stage.assert_object('bundle-000')
-    assert stage.loop.staging.is_file()
+    assert bundle_path(stage.loop.tiers['scratch'], 'bundles').is_file()
     bundles = set(stage.loop.keys.values())
     with stage.tap.window() as seen:
         after = reach(stage, Clock())

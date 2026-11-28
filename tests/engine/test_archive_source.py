@@ -366,3 +366,33 @@ def test_interrupted_bundle_count_is_recovered_at_restart(tmp_path: Path, stoppe
     assert bundle.stat().st_ino == inode
     assert second.registry.usage('scratch') == second.tiers['scratch'].usage() == TierUsage(bytes=size, files=1)
     assert second.journal.pending() == []
+
+
+def test_parsed_archive_spec_serves_a_read_past_a_full_stage(tmp_path: Path, stopped: list) -> None:
+    """
+    A ZIP spec loaded through the parser always has a POSIX stage to serve from: a member larger than the
+    stage's size limit still reads, staged on that tier, rather than failing for want of a passthrough tier.
+    """
+    archive = build_archive(tmp_path / 'data', 'zip')
+    spec = OverlaySpec.parse(f'''
+[overlay]
+name = "archived"
+state = "{tmp_path / 'state'}"
+
+[[tier]]
+name = "archive"
+type = "zip"
+role = "source"
+location = {{ type = "posix", path = "{archive}" }}
+
+[[tier]]
+name = "scratch"
+type = "posix"
+path = "{tmp_path / 'scratch'}"
+quota = {{ size = 1024, files = 100 }}
+''')
+    assert spec.tiers[1].quota.size < len(BIG)
+    engine = started(spec, stopped)
+    assert isinstance(engine.source, ArchiveTier)
+    assert read_all(engine, '/headed/big.bin') == BIG
+    assert (tmp_path / 'scratch' / 'headed' / 'big.bin').read_bytes() == BIG

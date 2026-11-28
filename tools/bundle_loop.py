@@ -135,7 +135,6 @@ class Loop:
     spec: Path
     state: Path
     tiers: Dict[str, Path]
-    staging: Path | None
     form: str
 
     def __init__(self, endpoint: str, *, bundles: int = 1, members: int = 6, fastest_size: int | None = None,
@@ -152,7 +151,6 @@ class Loop:
                                    aws_access_key_id=access_key, aws_secret_access_key=secret_key)
         self.fastest_size = fastest_size
         self.resync_interval, self.delay = RESYNC[1], DELAY[1]
-        self.staging = None
         self.root = Path(tempfile.mkdtemp(prefix='bundle-loop.', dir=parent))
         self._made_bucket = False
         try:
@@ -198,10 +196,7 @@ class Loop:
                  '[[tier]]', 'name = "bundles"', 'type = "tar.gz"', 'role = "source"']
         if self.form == 'single':
             stem = self.stems[0]
-            # Beside the durable tier's root, as PLAN.md's example puts /scratch/space.tar.gz beside /scratch/space.
-            self.staging = base / 'scratch' / f'{stem}.tar'
-            lines += [f'location = {{ type = "s3", url = "s3://{self.bucket}/{self.keys[stem]}", s3 = {connection} }}',
-                      f'staging = "{self.staging}"']
+            lines += [f'location = {{ type = "s3", url = "s3://{self.bucket}/{self.keys[stem]}", s3 = {connection} }}']
         else:
             lines += ['sharded = true',
                       f'location = {{ type = "s3", url = "s3://{self.bucket}/{PREFIX}/*.tar.gz", s3 = {connection} }}']

@@ -15,23 +15,29 @@ from dataclasses import dataclass, field
 
 # Internal libs
 from terrace.core.exceptions import TerraceError
-from terrace.core.units import Rate, parse_bytes, parse_duration
+from terrace.core.units import Rate, parse_bytes, parse_duration, parse_rate
 
 # Public interface
 __all__ = ['OverlaySpec', 'TierSpec', 'QuotaSpec', 'WritebackSpec', 'S3Spec', 'LocationSpec', 'SpecError',
            'TIER_TYPES', 'SUPPORTED_TYPES', 'ARCHIVE_TYPES']
 
 TIER_TYPES: Final[frozenset] = frozenset({'posix', 's3', 'zip', 'tar', 'tar.gz'})
-SUPPORTED_TYPES: Final[frozenset] = frozenset({'posix', 's3'})
+SUPPORTED_TYPES: Final[frozenset] = TIER_TYPES
 ARCHIVE_TYPES: Final[frozenset] = frozenset({'zip', 'tar', 'tar.gz'})
 
 OVERLAY_KEYS: Final[frozenset] = frozenset({'name', 'state', 'drain_timeout', 'checksum', 'fsync_policy'})
-TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'url', 's3', 'role', 'scope', 'quota', 'writeback'})
+TIER_KEYS: Final[frozenset] = frozenset({'name', 'type', 'path', 'url', 's3', 'role', 'scope', 'quota', 'writeback',
+                                         'location', 'sync', 'sharded'})
 QUOTA_KEYS: Final[frozenset] = frozenset({'size', 'files', 'bypass_size'})
 WRITEBACK_KEYS: Final[frozenset] = frozenset({'mode', 'delay', 'max_interval'})
 S3_KEYS: Final[frozenset] = frozenset({'region', 'endpoint', 'access_key_id', 'secret_access_key',
                                        'session_token', 'allow_http', 'anonymous', 'virtual_hosted'})
 LOCATION_KEYS: Final[frozenset] = frozenset({'type', 'path', 'url', 's3'})
+SYNC_KEYS: Final[frozenset] = frozenset({'max_frequency'})
+
+# The retired key a staged bundle's working path was once given by. It is not a tier key, so a tier
+# built alone refuses it as unknown; a whole spec refuses it by name (`OverlaySpec._refuse_staging`).
+RETIRED_STAGING: Final[str] = 'staging'
 
 DEFAULT_DRAIN_TIMEOUT: Final[str] = '5m'
 DEFAULT_DELAY: Final[str] = '60s'
@@ -59,6 +65,16 @@ def _duration(value, where: str) -> float:
         return parse_duration(value)
     except (TypeError, ValueError):
         raise SpecError(f'Invalid duration for {where}: {value!r}') from None
+
+
+def _rate(value, where: str) -> Rate:
+    # parse_rate calls str methods first, so a number or a table would escape as AttributeError.
+    if not isinstance(value, str):
+        raise SpecError(f'Invalid rate for {where}: {value!r}')
+    try:
+        return parse_rate(value)
+    except ValueError:
+        raise SpecError(f'Invalid rate for {where}: {value!r}') from None
 
 
 @dataclass(frozen=True)
@@ -206,15 +222,24 @@ class TierSpec:
         where = f'tier {name!r}'
         _reject_unknown(data, TIER_KEYS, where)
         kind = data.get('type')
-        if kind not in TIER_TYPES:
-            raise SpecError(f'Invalid type for {where}: {kind!r} '
-                            f'(expected one of {", ".join(sorted(TIER_TYPES))})')
         if kind not in SUPPORTED_TYPES:
-            raise SpecError(f'Tier type {kind!r} is not yet supported ({where})')
-        path, url, s3 = cls._location(kind, data, where)
+            raise SpecError(f'Invalid type for {where}: {kind!r} '
+                            f'(expected one of {", ".join(sorted(SUPPORTED_TYPES))})')
+        cls._refuse_sharded(kind, data, where)
         role = data.get('role', 'stage')
         if role not in ('source', 'stage'):
             raise SpecError(f'Invalid role for {where}: {role!r}')
+        if kind in ARCHIVE_TYPES and role != 'source':
+            raise SpecError(f'Archive {where} can only be the source: type {kind!r} is not valid at a stage position')
+        location = None
+        if kind in ARCHIVE_TYPES:
+            location = cls._archive_location(data, where)
+            path, url, s3 = (location.path if location.type == 'posix' else location.url), None, None
+        elif 'location' in data:
+            raise SpecError(f'The location setting is only valid for archive tiers ({where})')
+        else:
+            path, url, s3 = cls._location(kind, data, where)
+        max_frequency = cls._sync(kind, data, where)
         scope = data.get('scope', 'shared')
         if scope not in ('shared', 'node'):
             raise SpecError(f'Invalid scope for {where}: {scope!r}')
@@ -223,8 +248,53 @@ class TierSpec:
         quota = QuotaSpec.from_data(data.get('quota', {}), where)
         writeback = None if role == 'source' \
             else WritebackSpec.from_data(data.get('writeback', {}), where)
-        return cls(name=name, type=kind, path=path, url=url, s3=s3,
-                   role=role, scope=scope, quota=quota, writeback=writeback)
+        return cls(name=name, type=kind, path=path, url=url, s3=s3, role=role, scope=scope, quota=quota,
+                   writeback=writeback, location=location, max_frequency=max_frequency)
+
+    @staticmethod
+    def _refuse_sharded(kind: str, data: dict, where: str) -> None:
+        """
+        `sharded` is a known key whose feature does not exist yet. It is read before the location,
+        whose url names many objects (`*`) only in the sharded form.
+        """
+        if 'sharded' not in data:
+            return
+        sharded = data['sharded']
+        if not isinstance(sharded, bool):
+            raise SpecError(f'Invalid boolean for {where}.sharded: {sharded!r}')
+        if sharded:
+            raise SpecError(f'Sharded archive sources are not yet supported ({where}); '
+                            f'see issues/sharded-archive-sources.md')
+        if kind not in ARCHIVE_TYPES:
+            raise SpecError(f'The sharded setting is only valid for archive tiers ({where})')
+
+    @staticmethod
+    def _archive_location(data: dict, where: str) -> LocationSpec:
+        """An archive names its one file through `location`, never through a tier's own path or url."""
+        for key in ('path', 'url', 's3'):
+            if key in data:
+                raise SpecError(f'Archive {where} names its file with location = {{...}}, not {key}')
+        if 'location' not in data:
+            raise SpecError(f'Archive {where} requires a location = {{...}} table')
+        return LocationSpec.from_data(data['location'], where)
+
+    @staticmethod
+    def _sync(kind: str, data: dict, where: str) -> Optional[Rate]:
+        """The re-sync rate limit; only a staged (tar.gz) archive is re-synced, so only it takes `sync`."""
+        if 'sync' not in data:
+            return None
+        if kind in ('zip', 'tar'):
+            raise SpecError(f'A {kind} archive is updated in place and has no re-sync to rate-limit; '
+                            f'sync is only valid for tar.gz tiers ({where})')
+        if kind != 'tar.gz':
+            raise SpecError(f'The sync setting is only valid for tar.gz tiers ({where})')
+        sync = data['sync']
+        if not isinstance(sync, dict):
+            raise SpecError(f'{where}.sync must be a table')
+        _reject_unknown(sync, SYNC_KEYS, f'{where}.sync')
+        if 'max_frequency' not in sync:
+            return None
+        return _rate(sync['max_frequency'], f'{where}.sync.max_frequency')
 
     @staticmethod
     def _location(kind: str, data: dict, where: str) -> Tuple[str, Optional[str], Optional[S3Spec]]:
@@ -298,6 +368,7 @@ class OverlaySpec:
         tables = data.get('tier')
         if not isinstance(tables, list) or not tables:
             raise SpecError('Spec requires at least one [[tier]]')
+        cls._refuse_staging(tables)
         tiers = tuple(TierSpec.from_data(table) for table in tables)
         state_dir = Path(os.path.abspath(os.path.expanduser(state)))
         cls._validate_stack(tiers, state_dir=state_dir)
@@ -305,8 +376,34 @@ class OverlaySpec:
                    drain_timeout=drain_timeout, checksum=checksum, fsync_policy=fsync_policy)
 
     @staticmethod
+    def _refuse_staging(tables: list) -> None:
+        """
+        Refuse the retired `staging` key by name, before any tier is built and before the stack rule,
+        so a spec written for the old working path is told where the staged bundle lives now: in the
+        root of the shared POSIX stage tier directly below the source, counted by its limits.
+        """
+        for table in tables:
+            if not isinstance(table, dict) or RETIRED_STAGING not in table:
+                continue
+            below = tables[1] if len(tables) > 1 and isinstance(tables[1], dict) else None
+            holds = (below is not None and below.get('role', 'stage') == 'stage'
+                     and below.get('scope', 'shared') == 'shared' and below.get('type') == 'posix')
+            holder = (f'the root of {below.get("name")!r}, the shared POSIX stage tier directly below the source'
+                      if holds else 'the root of the shared POSIX stage tier directly below the source, '
+                                    'which this spec does not have')
+            raise SpecError(f'The {RETIRED_STAGING} key is retired (tier {table.get("name")!r}): '
+                            f'a staged bundle lives in {holder}, and counts against its limits')
+
+    @staticmethod
     def _validate_stack(tiers: Tuple[TierSpec, ...], *, state_dir: Path) -> None:
-        """Stack-level invariants: one source, source first, distinct roots, durable state dir."""
+        """
+        Stack-level invariants: one source, source first, an archive source's one durable tier, distinct
+        roots, durable state dir.
+
+        Roots and the state directory are compared with symlinks resolved (an archive's root is its file),
+        so the check reads the filesystem and its result can differ between hosts. S3 urls are never
+        resolved. The stored paths stay as written.
+        """
         names = [tier.name for tier in tiers]
         if duplicates := sorted({name for name in names if names.count(name) > 1}):
             raise SpecError(f'Duplicate tier names: {", ".join(duplicates)}')
@@ -317,11 +414,28 @@ class OverlaySpec:
             raise SpecError('The source tier must be first — order in the spec is stack order')
         if tiers[0].scope != 'shared':
             raise SpecError('The source tier cannot be node-scoped')
-        roots = [(tier.name, PurePath(tier.path)) for tier in tiers]
+        if tiers[0].type in ARCHIVE_TYPES:
+            # An archive source is served only through a POSIX copy, and its staged bundle lives in the one
+            # shared tier directly below it.
+            rule = f'Archive source {tiers[0].name!r} needs exactly one shared POSIX stage tier, directly below it'
+            if len(tiers) < 2:
+                raise SpecError(f'{rule}; the spec has no stage tier')
+            below = tiers[1]
+            if below.scope != 'shared' or below.type != 'posix':
+                raise SpecError(f'{rule}; the tier below it, {below.name!r}, is a {below.scope} {below.type} tier')
+            for tier in tiers[2:]:
+                if tier.scope == 'shared':
+                    raise SpecError(f'{rule}; {tier.name!r} is a second shared stage tier')
+        # A POSIX root (an archive's root is its file) is compared with symlinks resolved; an S3 url as written.
+        roots = []
+        for tier in tiers:
+            remote = tier.type == 's3' or (tier.location is not None and tier.location.type == 's3')
+            roots.append((tier.name, PurePath(tier.path if remote else os.path.realpath(tier.path))))
+        state_key = PurePath(os.path.realpath(state_dir))
         for i, (name, root) in enumerate(roots):
             for other_name, other_root in roots[i + 1:]:
                 if root == other_root or root.is_relative_to(other_root) or other_root.is_relative_to(root):
-                    raise SpecError(f'Tier roots overlap: {name!r} and {other_name!r}')
-            if PurePath(state_dir).is_relative_to(root):
+                    raise SpecError(f'Tier roots overlap: {name!r} and {other_name!r} ({root} and {other_root})')
+            if state_key.is_relative_to(root):
                 raise SpecError(f'The state directory cannot live inside a managed tier ({name!r}); '
-                                f'it must be on durable storage outside the stack')
+                                f'it must be on durable storage outside the stack ({state_key} is in {root})')

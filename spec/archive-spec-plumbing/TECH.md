@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/archive-spec-plumbing
 base: main
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-28'
 phases:
 - id: P1
@@ -47,7 +47,7 @@ phases:
   verify: tools/lint.sh && uv run python -I spec/archive-spec-plumbing/verify/check_outcomes.py p3
 - id: P4
   name: The parser opens the archive types and refuses what the engine cannot serve; the loop moves
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -349,7 +349,7 @@ engine cannot serve is refused at load, naming the tier at fault. Overlap is jud
 Loop stages 1 and 2 pass unmarked over the helper's spec, which carries no `staging`, and stages 3–9 are
 pinned at their new stops in the same commit.
 
-- [ ] `tier/spec.py`, PLAN § 2.1:
+- [x] `tier/spec.py`, PLAN § 2.1:
   - Add the keys `location`, `sync` and `sharded` to `TIER_KEYS`. `staging` stays out of `TIER_KEYS`,
     so `TierSpec.from_data` called directly still refuses it as unknown. `OverlaySpec.from_data` scans
     the raw `[[tier]]` tables for `staging` before any tier is built.
@@ -359,9 +359,9 @@ pinned at their new stops in the same commit.
   - `staging` checked first at stack level, then R4 in `_validate_stack`.
   - realpath comparison keys for POSIX roots, POSIX archive files and the state directory; S3 never
     resolved.
-- [ ] **The sharded refusal's exact text**, which the gate and stage 9 pin:
+- [x] **The sharded refusal's exact text**, which the gate and stage 9 pin:
   `Sharded archive sources are not yet supported (tier '<name>'); see issues/sharded-archive-sources.md`.
-- [ ] `tests/tier/test_spec.py`: change the `tar`-at-stage assertion in `test_tier_type_validation` to the
+- [x] `tests/tier/test_spec.py`: change the `tar`-at-stage assertion in `test_tier_type_validation` to the
   R3 refusal, and add these rows:
   - `test_archive_examples_load[direct-update-zip|staged-tar-gz]`: each example's `[[tier]]` tables
     are kept verbatim inside an `[overlay]` table, the ZIP above one POSIX shared stage tier.
@@ -384,13 +384,13 @@ pinned at their new stops in the same commit.
   - `test_state_dir_under_a_symlinked_tier_is_refused`: a tier root is a symlink, and the state
     directory is a real path inside its target.
   - `test_stage_root_containing_the_archive_overlaps`
-- [ ] `tests/engine/test_archive_source.py`: `test_parsed_archive_spec_serves_a_read_past_a_full_stage`.
+- [x] `tests/engine/test_archive_source.py`: `test_parsed_archive_spec_serves_a_read_past_a_full_stage`.
   A ZIP spec loaded through `OverlaySpec.parse`, whose one stage has `quota.size` smaller than the
   member, still serves the read, with no `EngineError` (R4's second sentence).
-- [ ] `tools/bundle_loop.py`: drop the `staging` attribute and line. `tests/loop/test_helper.py`: replace
+- [x] `tools/bundle_loop.py`: drop the `staging` attribute and line. `tests/loop/test_helper.py`: replace
   the `staging` assertions (`:76`, `:86`, `:92-93`, `:98`) with `'staging' not in source` and no
   `staging` attribute, in both forms.
-- [ ] `tests/loop/stages.py` (PLAN § 2.6):
+- [x] `tests/loop/stages.py` (PLAN § 2.6):
   - Stages 1 and 2 lose `@owned`, and their `STAGES` entries become `spec/archive-spec-plumbing/GOAL.md`.
   - `reach` pins only the sharded form: `blocked('issues/sharded-archive-sources.md', SpecError, <text>)`.
   - `change()` pins its first mutating call: `blocked('issues/archive-journaling-and-locking.md',
@@ -401,7 +401,7 @@ pinned at their new stops in the same commit.
   - Stages 3, 7 and 8 call `engine.stop()` in a `finally`.
   - Stage 8's bundle check uses `bundle_path`.
   - Replace `PARSER`/`REFUSAL` and update `__all__`.
-- [ ] `AGENTS.md`, in this commit:
+- [x] `AGENTS.md`, in this commit:
   - § Verification's loop paragraph ("Today they are 9 expected failures … each stopped at the same
     step") states the new record: 2 passing and 7 expected failures, with their stops.
   - The `tests/` row's `(blocked, REFUSAL)` wording follows the code.

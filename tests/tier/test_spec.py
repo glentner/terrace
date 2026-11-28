@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 # Standard libs
+import os
 from pathlib import Path
 
 # External libs
 from pytest import mark, raises
 
 # Internal libs
-from terrace.tier.spec import OverlaySpec, QuotaSpec, WritebackSpec, S3Spec, LocationSpec, SpecError
+from terrace.core.units import Rate
+from terrace.tier.spec import OverlaySpec, TierSpec, QuotaSpec, WritebackSpec, S3Spec, LocationSpec, SpecError
 
 
 pytestmark = mark.unit
@@ -140,11 +142,11 @@ def test_unknown_keys_rejected() -> None:
 
 
 def test_tier_type_validation() -> None:
-    """Unknown types are invalid; known-but-unimplemented types say so."""
+    """Unknown types are invalid; an archive type at a stage position is refused, naming the tier."""
     with raises(SpecError, match='Invalid type'):
         OverlaySpec.parse(spec_text(**{'type = "posix"\npath = "/fast/space"':
                                        'type = "nfs"\npath = "/fast/space"'}))
-    with raises(SpecError, match='not yet supported'):
+    with raises(SpecError, match="Archive tier 'fast' can only be the source"):
         OverlaySpec.parse(spec_text(**{'type = "posix"\npath = "/fast/space"':
                                        'type = "tar"\npath = "/fast/space"'}))
 
@@ -355,3 +357,246 @@ def test_location_rejects_crossed_settings() -> None:
         LocationSpec.from_data({'type': 'posix', 'path': '/x.zip', 'url': 's3://b/k'}, 'tier "arc"')
     with raises(SpecError, match='Unknown key'):
         LocationSpec.from_data({'type': 'posix', 'path': '/x.zip', 'staging': '/w'}, 'tier "arc"')
+
+
+# -- archive sources: the types, their keys, and the stacks the engine can serve ---------------------------------
+
+# The two single-bundle archive examples of PLAN.md § Configuration, their [[tier]] tables as written there.
+ARCHIVE_EXAMPLES = {
+    'direct-update-zip': '''
+[[tier]]                                  # direct-update ZIP as source
+name = "archive"
+type = "zip"
+role = "source"
+location = { type = "posix", path = "/project/some.zip" }
+''',
+    'staged-tar-gz': '''
+[[tier]]                                  # staged re-sync tar.gz on S3 as source
+name = "cold"
+type = "tar.gz"
+role = "source"
+location = { type = "s3", url = "s3://bucket/space.tar.gz" }
+sync     = { max_frequency = "4/day" }
+
+[[tier]]                                  # the durable tier: the one shared stage tier, below the source
+name  = "scratch"
+type  = "posix"
+path  = "/scratch/space"
+quota = { size = "10TB", files = 1_000_000 }    # counts the staged bundle at its uncompressed size
+writeback = { delay = "60s", max_interval = "15m" }
+''',
+}
+
+OVERLAY = '[overlay]\nname = "archived"\nstate = "{state}"\n'
+
+
+def stack(*tiers: str, state: str = '/data/state') -> str:
+    """A spec of the given [[tier]] bodies, in order, under one [overlay] table."""
+    return OVERLAY.format(state=state) + ''.join(f'\n[[tier]]\n{body.strip()}\n' for body in tiers)
+
+
+def archive(kind: str = 'zip', name: str = 'archive', role: str = 'source', extra: str = '',
+            location: str = '{ type = "posix", path = "/data/some.zip" }') -> str:
+    """An archive tier's body."""
+    return f'name = "{name}"\ntype = "{kind}"\nrole = "{role}"\nlocation = {location}\n{extra}'
+
+
+def posix(name: str, path: str | Path, *, role: str = 'stage', scope: str = 'shared', extra: str = '') -> str:
+    """A POSIX tier's body."""
+    return f'name = "{name}"\ntype = "posix"\npath = "{path}"\nrole = "{role}"\nscope = "{scope}"\n{extra}'
+
+
+@mark.parametrize('example', list(ARCHIVE_EXAMPLES))
+def test_archive_examples_load(example: str) -> None:
+    """Each example loads inside an [overlay] table; the ZIP, which shows no stage tier, above one shared POSIX one."""
+    text = OVERLAY.format(state='/project/state') + ARCHIVE_EXAMPLES[example]
+    if example == 'direct-update-zip':
+        text += '\n[[tier]]\nname = "stage"\ntype = "posix"\npath = "/scratch/space"\n'
+    spec = OverlaySpec.parse(text)
+    source, durable = spec.tiers
+    assert (durable.type, durable.role, durable.scope) == ('posix', 'stage', 'shared')
+    if example == 'direct-update-zip':
+        assert (source.type, source.role) == ('zip', 'source')
+        assert source.location == LocationSpec(type='posix', path='/project/some.zip')
+        assert source.path == '/project/some.zip' and source.max_frequency is None
+    else:
+        assert (source.type, source.role) == ('tar.gz', 'source')
+        assert source.location == LocationSpec(type='s3', url='s3://bucket/space.tar.gz',
+                                               s3=S3Spec(bucket='bucket', prefix='space.tar.gz'))
+        assert source.path == 's3://bucket/space.tar.gz' and source.max_frequency == Rate(4, 86400.0)
+    assert (source.url, source.s3, source.writeback) == (None, None, None)
+
+
+def test_archive_tier_carries_location_and_rate() -> None:
+    """A tar.gz source carries its parsed location and re-sync rate; a malformed rate is refused by name."""
+    sync = 'sync = { max_frequency = "2/hour" }'
+    spec = OverlaySpec.parse(stack(archive('tar.gz', extra=sync,
+                                           location='{ type = "posix", path = "/data/space.tar.gz" }'),
+                                   posix('scratch', '/scratch/space')))
+    assert spec.source.location == LocationSpec(type='posix', path='/data/space.tar.gz')
+    assert spec.source.path == '/data/space.tar.gz'
+    assert spec.source.max_frequency == Rate(2, 3600.0)
+    unlimited = OverlaySpec.parse(stack(archive('tar.gz', extra='sync = {}'), posix('scratch', '/scratch/space')))
+    assert unlimited.source.max_frequency is None
+    for rate in ('4', '0/day', '4/fortnight'):
+        with raises(SpecError, match=r"Invalid rate for tier 'archive'\.sync\.max_frequency"):
+            OverlaySpec.parse(stack(archive('tar.gz', extra=f'sync = {{ max_frequency = "{rate}" }}'),
+                                    posix('scratch', '/scratch/space')))
+    with raises(SpecError, match='Invalid rate'):
+        OverlaySpec.parse(stack(archive('tar.gz', extra='sync = { max_frequency = 4 }'),
+                                posix('scratch', '/scratch/space')))
+    with raises(SpecError, match='Unknown key'):
+        OverlaySpec.parse(stack(archive('tar.gz', extra='sync = { max_frequncy = "4/day" }'),
+                                posix('scratch', '/scratch/space')))
+    with raises(SpecError, match="requires a location"):
+        OverlaySpec.parse(stack('name = "archive"\ntype = "zip"\nrole = "source"', posix('scratch', '/scratch')))
+    with raises(SpecError, match="names its file with location"):
+        OverlaySpec.parse(stack(archive(extra='path = "/data/some.zip"'), posix('scratch', '/scratch/space')))
+    with raises(SpecError, match="location setting is only valid for archive tiers"):
+        OverlaySpec.parse(stack(posix('src', '/data/space', role='source',
+                                      extra='location = { type = "posix", path = "/data/some.zip" }'),
+                                posix('scratch', '/scratch/space')))
+
+
+@mark.parametrize('kind', ['zip', 'tar'])
+def test_sync_refused_on_direct_update(kind: str) -> None:
+    """A direct-update archive has no re-sync to rate-limit, so `sync` on it is refused, naming the tier."""
+    with raises(SpecError, match=r"sync is only valid for tar\.gz tiers \(tier 'archive'\)") as caught:
+        OverlaySpec.parse(stack(archive(kind, extra='sync = { max_frequency = "4/day" }'),
+                                posix('scratch', '/scratch/space')))
+    assert f'A {kind} archive is updated in place' in str(caught.value)
+
+
+def test_staging_refused_naming_the_durable_tier() -> None:
+    """The retired key is refused by name, naming the tier that carries it and the tier that now holds the bundle."""
+    with raises(SpecError) as caught:
+        OverlaySpec.parse(stack(archive('tar.gz', name='cold', extra='staging = "/scratch/space.tar"'),
+                                posix('scratch', '/scratch/space'), posix('shm', '/dev/shm/space', scope='node')))
+    message = str(caught.value)
+    assert message.startswith("The staging key is retired (tier 'cold')")
+    assert "'scratch', the shared POSIX stage tier directly below the source" in message
+    with raises(SpecError, match='Unknown key'):
+        TierSpec.from_data({'name': 'cold', 'type': 'tar.gz', 'role': 'source', 'staging': '/w',
+                            'location': {'type': 'posix', 'path': '/data/space.tar.gz'}})
+
+
+def test_staging_refused_without_a_durable_tier() -> None:
+    """With no shared POSIX stage tier below the source, the refusal still names the key and says the spec has none."""
+    for below in ([], [posix('shm', '/dev/shm/space', scope='node')]):
+        with raises(SpecError) as caught:
+            OverlaySpec.parse(stack(archive('tar.gz', name='cold', extra='staging = "/scratch/space.tar"'), *below))
+        message = str(caught.value)
+        assert message.startswith("The staging key is retired (tier 'cold')")
+        assert 'shared POSIX stage tier directly below the source, which this spec does not have' in message
+
+
+def test_sharded_refused_naming_its_seed() -> None:
+    """`sharded = true` is a known key refused as not yet supported, with one fixed text, never as unknown."""
+    sharded = archive('tar.gz', name='imagenet', extra='sharded = true\nsync = { max_frequency = "4/day" }',
+                      location='{ type = "s3", url = "s3://bucket/imagenet/*.tar.gz" }')
+    with raises(SpecError) as caught:
+        OverlaySpec.parse(stack(sharded, posix('scratch', '/scratch/space')))
+    assert str(caught.value) == ("Sharded archive sources are not yet supported (tier 'imagenet'); "
+                                 'see issues/sharded-archive-sources.md')
+    assert OverlaySpec.parse(stack(archive(extra='sharded = false'), posix('scratch', '/scratch/space')))
+    with raises(SpecError, match=r"Invalid boolean for tier 'archive'\.sharded"):
+        OverlaySpec.parse(stack(archive(extra='sharded = "yes"'), posix('scratch', '/scratch/space')))
+
+
+@mark.parametrize('kind', ['zip', 'tar', 'tar.gz'])
+def test_archive_refused_at_stage_position(kind: str) -> None:
+    """Archive tiers are source-only: one at a stage position is refused, naming it."""
+    with raises(SpecError, match=f"Archive tier 'packed' can only be the source: type '{kind}'"):
+        OverlaySpec.parse(stack(posix('src', '/data/space', role='source'), posix('scratch', '/scratch/space'),
+                                archive(kind, name='packed', role='stage')))
+
+
+STACK_RULE = {
+    'no-stage': ([], 'the spec has no stage tier'),
+    'node-stage': ([posix('shm', '/dev/shm/space', scope='node')], "the tier below it, 'shm', is a node posix tier"),
+    's3-stage': (['name = "bucket"\ntype = "s3"\nurl = "s3://bucket/stage"'],
+                 "the tier below it, 'bucket', is a shared s3 tier"),
+    'second-shared': ([posix('scratch', '/scratch/space'), posix('shm', '/dev/shm/space', scope='node'),
+                       posix('project', '/project/space')], "'project' is a second shared stage tier"),
+}
+
+
+@mark.parametrize('case', list(STACK_RULE))
+def test_archive_stack_rule(case: str) -> None:
+    """Over an archive source, exactly one shared POSIX stage tier sits directly below it; else the fault is named."""
+    below, fault = STACK_RULE[case]
+    with raises(SpecError) as caught:
+        OverlaySpec.parse(stack(archive(), *below))
+    message = str(caught.value)
+    assert message.startswith("Archive source 'archive' needs exactly one shared POSIX stage tier, directly below it")
+    assert message.endswith(fault)
+
+
+def test_archive_stack_rule_binds_every_archive_type() -> None:
+    """The rule is one rule for zip, tar and tar.gz, and a conforming stack with node tiers below it loads."""
+    for kind in ('zip', 'tar', 'tar.gz'):
+        with raises(SpecError, match='needs exactly one shared POSIX stage tier'):
+            OverlaySpec.parse(stack(archive(kind)))
+        spec = OverlaySpec.parse(stack(archive(kind), posix('scratch', '/scratch/space'),
+                                       posix('shm', '/dev/shm/space', scope='node')))
+        assert spec.source.type == kind
+
+
+@mark.parametrize('side', ['source', 'stage', 'both'])
+def test_symlinked_root_overlap_is_refused(tmp_path: Path, side: str) -> None:
+    """Two roots that overlap once symlinks are resolved are refused, naming both tiers, wherever the symlink is."""
+    real = tmp_path / 'real'
+    (real / 'sub').mkdir(parents=True)
+    if side == 'source':
+        (tmp_path / 'link').symlink_to(real)
+        source, stage = tmp_path / 'link', real / 'sub'
+    elif side == 'stage':
+        (tmp_path / 'link').symlink_to(real / 'sub')
+        source, stage = real, tmp_path / 'link'
+    else:
+        (tmp_path / 'source-link').symlink_to(real)
+        (tmp_path / 'stage-link').symlink_to(real / 'sub')
+        source, stage = tmp_path / 'source-link', tmp_path / 'stage-link'
+    assert not stage.is_relative_to(source) and not source.is_relative_to(stage)
+    with raises(SpecError, match="Tier roots overlap: 'src' and 'stage'"):
+        OverlaySpec.parse(stack(posix('src', source, role='source'), posix('stage', stage),
+                                state=str(tmp_path / 'state')))
+
+
+def test_archive_under_a_symlinked_directory_overlaps_its_stage(tmp_path: Path) -> None:
+    """An archive reached through a symlinked directory overlaps a stage rooted at that directory's real path."""
+    real = tmp_path / 'real'
+    real.mkdir()
+    (tmp_path / 'link').symlink_to(real)
+    location = f'{{ type = "posix", path = "{tmp_path / "link" / "space.zip"}" }}'
+    with raises(SpecError, match="Tier roots overlap: 'archive' and 'scratch'"):
+        OverlaySpec.parse(stack(archive(location=location), posix('scratch', real), state=str(tmp_path / 'state')))
+
+
+def test_symlinked_state_dir_inside_a_tier_is_refused(tmp_path: Path) -> None:
+    """A state directory that is a symlink into a tier root is refused, naming the tier."""
+    (tmp_path / 'src' / 'state').mkdir(parents=True)
+    os.symlink(tmp_path / 'src' / 'state', tmp_path / 'state')
+    with raises(SpecError, match=r"state directory cannot live inside a managed tier \('src'\)"):
+        OverlaySpec.parse(stack(posix('src', tmp_path / 'src', role='source'), posix('stage', tmp_path / 'stage'),
+                                state=str(tmp_path / 'state')))
+
+
+def test_state_dir_under_a_symlinked_tier_is_refused(tmp_path: Path) -> None:
+    """A state directory inside the real target of a symlinked tier root is refused, naming the tier."""
+    (tmp_path / 'real').mkdir()
+    (tmp_path / 'link').symlink_to(tmp_path / 'real')
+    with raises(SpecError, match=r"state directory cannot live inside a managed tier \('src'\)"):
+        OverlaySpec.parse(stack(posix('src', tmp_path / 'link', role='source'), posix('stage', tmp_path / 'stage'),
+                                state=str(tmp_path / 'real' / 'state')))
+
+
+def test_stage_root_containing_the_archive_overlaps(tmp_path: Path) -> None:
+    """An archive's root is its file: a stage rooted at its directory overlaps it, a sibling directory does not."""
+    location = f'{{ type = "posix", path = "{tmp_path / "data" / "space.zip"}" }}'
+    with raises(SpecError, match="Tier roots overlap: 'archive' and 'scratch'"):
+        OverlaySpec.parse(stack(archive(location=location), posix('scratch', tmp_path / 'data'),
+                                state=str(tmp_path / 'state')))
+    spec = OverlaySpec.parse(stack(archive(location=location), posix('scratch', tmp_path / 'data' / 'stage'),
+                                   state=str(tmp_path / 'state')))
+    assert spec.source.path == str(tmp_path / 'data' / 'space.zip')
