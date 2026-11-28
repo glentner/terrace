@@ -3,7 +3,7 @@ slug: plan-md-reconciliation
 title: Drop the unused rich dependency, and hold PLAN.md to the redraw's reconciliation
 kind: docs
 appetite: small
-status: in_review
+status: done
 branch: docs/plan-md-reconciliation
 base: main
 current_phase: done
