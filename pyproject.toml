@@ -27,7 +27,6 @@ dependencies = [
     "cmdkit[toml]>=2.7.7",
     "mfusepy>=3.0",
     "obstore>=0.6",
-    "rich>=13.7",
     "tomlkit>=0.13",
 ]
 

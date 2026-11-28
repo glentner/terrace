@@ -1,0 +1,18 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: plan-md-reconciliation
+escaped_from: null
+planned: {date: '2026-11-27', phases: 1}
+landed: {date: '2026-11-27', phases: 1, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-11-27T23:27:54-05:00', stop: '2026-11-27T23:31:00-05:00', seconds: 186, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-27T23:31:07-05:00', stop: '2026-11-27T23:43:14-05:00', seconds: 727, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-27T23:43:22-05:00', stop: '2026-11-27T23:46:11-05:00', seconds: 169, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-27T23:46:21-05:00', stop: '2026-11-27T23:53:03-05:00', seconds: 402, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-27T23:53:16-05:00', stop: '2026-11-27T23:56:29-05:00', seconds: 193, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-27'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

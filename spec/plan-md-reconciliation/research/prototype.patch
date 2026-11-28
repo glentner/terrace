@@ -1,0 +1,102 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 7f5d550..46ccf05 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -953,8 +953,8 @@ log = Logger.with_name(__name__)
+   machine and the thread into one class, deliberately, unlike hypershell's split. A subclass declares
+   a nested `states` enum with `START` and `FINAL` plus one `on_<state>` method each, wired at class
+   definition; halting is an `Event`, not a state.
+-* Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail. `rich` is a
+-  declared dependency but is **not used** — formatting goes through `cmdkit.ansi`.
++* Logging through `Logger.with_name(__name__)`; TRACE for per-operation detail; formatting goes
++  through `cmdkit.ansi`.
+ * SQL is PEP 750 t-strings rendered by `terrace.state.sql.render` (interpolations bind as parameters;
+   `{name:id}` splices whitelisted identifiers) — never hand-assemble SQL strings or placeholders.
+   Static DDL lives in `schema.sql`.
+diff --git a/pyproject.toml b/pyproject.toml
+index 28da432..e3d2a25 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -27,7 +27,6 @@ dependencies = [
+     "cmdkit[toml]>=2.7.7",
+     "mfusepy>=3.0",
+     "obstore>=0.6",
+-    "rich>=13.7",
+     "tomlkit>=0.13",
+ ]
+ 
+diff --git a/uv.lock b/uv.lock
+index 8f87a4e..e738201 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -341,18 +341,6 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64", size = 20419, upload-time = "2026-01-22T16:35:24.919Z" },
+ ]
+ 
+-[[package]]
+-name = "markdown-it-py"
+-version = "4.2.0"
+-source = { registry = "https://pypi.org/simple" }
+-dependencies = [
+-    { name = "mdurl" },
+-]
+-sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
+-]
+-
+ [[package]]
+ name = "markupsafe"
+ version = "3.0.4"
+@@ -396,15 +384,6 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/92/f9/ecbde7149e95b8a0f18e16d5d747f7dc06049d5da2e4f77f6f5e4a1f46a8/markupsafe-3.0.4-cp315-cp315t-win_arm64.whl", hash = "sha256:39dbacefc411633db5b4378b066a9aca70a3d7e2922c9e578d825f844026eeba", size = 14417, upload-time = "2026-10-02T23:06:56.246Z" },
+ ]
+ 
+-[[package]]
+-name = "mdurl"
+-version = "0.1.2"
+-source = { registry = "https://pypi.org/simple" }
+-sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
+-]
+-
+ [[package]]
+ name = "mfusepy"
+ version = "3.1.1"
+@@ -580,19 +559,6 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/3a/31/6a620b4427d546b9e7cca8b3b8c5f0559d9cef2bb9eedcda7f73c1473c19/responses-0.26.1-py3-none-any.whl", hash = "sha256:8aacc4586eb08fb2208ef64a9eb4258d9b0c6e6f4260845f2f018ab847495345", size = 35502, upload-time = "2026-05-21T19:56:38.046Z" },
+ ]
+ 
+-[[package]]
+-name = "rich"
+-version = "15.0.0"
+-source = { registry = "https://pypi.org/simple" }
+-dependencies = [
+-    { name = "markdown-it-py" },
+-    { name = "pygments" },
+-]
+-sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
+-wheels = [
+-    { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
+-]
+-
+ [[package]]
+ name = "roman-numerals"
+ version = "4.1.0"
+@@ -752,7 +718,6 @@ dependencies = [
+     { name = "cmdkit", extra = ["toml"] },
+     { name = "mfusepy" },
+     { name = "obstore" },
+-    { name = "rich" },
+     { name = "tomlkit" },
+ ]
+ 
+@@ -776,7 +741,6 @@ requires-dist = [
+     { name = "cmdkit", extras = ["toml"], specifier = ">=2.7.7" },
+     { name = "mfusepy", specifier = ">=3.0" },
+     { name = "obstore", specifier = ">=0.6" },
+-    { name = "rich", specifier = ">=13.7" },
+     { name = "tomlkit", specifier = ">=0.13" },
+ ]
+ 

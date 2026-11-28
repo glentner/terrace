@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:plan-md-reconciliation
 kind: docs
 appetite: small
 lane: public
